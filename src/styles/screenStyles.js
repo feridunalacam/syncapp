@@ -41,15 +41,18 @@ export const createScreenStyles = (theme) => {
     justifyContent: 'space-between',
   },
   addButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-      backgroundColor: theme.card,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-      borderColor: theme.borderDark,
-      ...theme.shadow.md,
+  },
+  addButtonText: {
+    fontSize: theme.fontSize['3xl'],
+    fontWeight: theme.fontWeight.semibold,
+    fontFamily: Platform.select({
+      ios: '.AppleSystemUIFontRounded',
+      android: 'sans-serif-medium',
+      default: 'System',
+    }),
+    color: theme.text,
   },
   button: {
     borderRadius: 12,
@@ -104,24 +107,93 @@ export const createScreenStyles = (theme) => {
       color: theme.textSecondary,
       marginBottom: theme.spacing.xs,
   },
+  // ScrollView styles for form screens
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: theme.spacing.xl,
+    paddingBottom: theme.spacing['3xl'],
+  },
+  formSection: {
+    paddingTop: theme.spacing.lg,
+  },
+  // Card styles for form sections
+  card: {
+    backgroundColor: theme.card,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: theme.borderLight,
+    overflow: 'hidden',
+    marginBottom: theme.spacing.xl,
+  },
+  // Section header inside cards (Playlist, Rounds, Advanced Settings, etc.)
+  cardSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    minHeight: 44,
+  },
+  cardSectionHeaderWithBorder: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: theme.spacing.lg,
+    paddingVertical: theme.spacing.md,
+    minHeight: 44,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.border,
+  },
+  cardSectionTitle: {
+    fontSize: theme.fontSize.base,
+    fontWeight: theme.fontWeight.semibold,
+    color: theme.text,
+  },
+  cardContent: {
+    padding: theme.spacing.lg,
+  },
   //#endregion
 
   //#region HOME SCREEN - Styles specific to HomeScreen.js
+  flexContainer: {
+    flex: 1,
+  },
   topBar: {
-      paddingHorizontal: theme.spacing.xl,
-      paddingTop: theme.spacing.lg,
-      paddingBottom: theme.spacing.md,
+    paddingHorizontal: theme.spacing.xl,
+    paddingTop: theme.spacing.lg,
+    paddingBottom: theme.spacing.md,
+  },
+  divider: {
+    width: '100%',
+    height: 1,
+    backgroundColor: theme.divider,
+    marginTop: theme.spacing['2xl'],
+    marginBottom: theme.spacing.sm,
   },
   routineSelectorBar: {
     flex: 1,
-    marginTop: 6,
+    position: 'relative',
+  },
+  routineSelectorEditIcon: {
+    marginLeft: theme.spacing.sm,
+    marginRight: theme.spacing.xs,
+  },
+  dropdownOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 999,
   },
   routineDropdownButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-      gap: theme.spacing.md,
-      paddingVertical: theme.spacing.sm,
+    gap: theme.spacing.md,
+    paddingVertical: theme.spacing.sm,
   },
   routineSelectorTextContainer: {
     flex: 1,
@@ -129,12 +201,13 @@ export const createScreenStyles = (theme) => {
     alignItems: 'center',
       gap: theme.spacing.sm,
       marginRight: theme.spacing.sm,
-      paddingVertical: theme.spacing.md,
+      paddingVertical: theme.spacing['lg'],
     paddingHorizontal: 15,
     borderRadius: 20,
       backgroundColor: theme.routineSelector,
     borderWidth: 0,
       ...theme.shadow.md,
+    minHeight: 50,
   },
   routineSelectorActions: {
     flexDirection: 'row',

@@ -5,7 +5,7 @@ import { createScreenStyles } from '../../../styles/screenStyles';
 import { useTheme } from '../../../context/ThemeContext';
 
 const STROKE_WIDTH = 33.9026688; // Base stroke width
-const WORK_STROKE_WIDTH = STROKE_WIDTH * 1.2; // 40.683 (20% increase)
+const WORK_STROKE_WIDTH = STROKE_WIDTH * 0.96; // 32.546 (20% decrease from 1.2)
 const REST_STROKE_WIDTH = STROKE_WIDTH * 0.9; // 30.512 (10% decrease)
 const STROKE_WIDTH_OLD = 21.84;
 const STROKE_WIDTH_INCREASE = (STROKE_WIDTH - STROKE_WIDTH_OLD) / 2; // Half increase on each side
@@ -26,30 +26,43 @@ export const TimerDesign = ({
   const screenStyles = useMemo(() => createScreenStyles({ ...theme, isDark }), [theme, isDark]);
   const timerScaleAnim = useRef(new Animated.Value(1)).current;
   const previousPhaseRef = useRef(null);
-  const smoothProgressRef = useRef(0);
 
+  // Pulse animation - only on phase change or last 5 seconds
+  const lastPulseTimeRef = useRef(null);
+  
   useEffect(() => {
-    if (isWorkoutRunning && !isPaused && timeRemaining > 0) {
+    if (!isWorkoutRunning || isPaused) return;
+    
+    // Get total duration for current phase
+    const totalTime = currentPhase === 'work' 
+      ? (selectedRoutine?.workSec || 60) 
+      : (selectedRoutine?.restSec || 30);
+    
+    // Only pulse on phase start or last 5 seconds
+    const isPhaseStart = timeRemaining === totalTime;
+    const isLastSeconds = timeRemaining <= 5 && timeRemaining > 0;
+    
+    // Prevent double pulse in same second
+    const now = Date.now();
+    if (lastPulseTimeRef.current && now - lastPulseTimeRef.current < 900) return;
+    
+    if (isPhaseStart || isLastSeconds) {
+      lastPulseTimeRef.current = now;
       timerScaleAnim.setValue(1);
       Animated.sequence([
         Animated.timing(timerScaleAnim, { 
           toValue: 1.03, 
-          duration: 200, 
-          useNativeDriver: true,
-        }),
-        Animated.timing(timerScaleAnim, { 
-          toValue: 0.98, 
-          duration: 300, 
+          duration: 150, 
           useNativeDriver: true,
         }),
         Animated.timing(timerScaleAnim, { 
           toValue: 1, 
-          duration: 200, 
+          duration: 150, 
           useNativeDriver: true,
         }),
       ]).start();
     }
-  }, [isWorkoutRunning, isPaused, timeRemaining, timerScaleAnim]);
+  }, [isWorkoutRunning, isPaused, timeRemaining, currentPhase, selectedRoutine, timerScaleAnim]);
 
   const formattedTime = useMemo(() => {
     if (isCountdownActive && countdownTime !== null) return String(countdownTime);
@@ -62,15 +75,16 @@ export const TimerDesign = ({
 
   // Smooth progress animation using requestAnimationFrame
   const [smoothProgress, setSmoothProgress] = useState(0);
-  const [workProgress, setWorkProgress] = useState(1.0); // Track work progress separately - start at 1.0 (full)
-  const [restProgress, setRestProgress] = useState(1.0); // Track rest progress separately - start at 1.0 (full)
-  const [smoothWorkProgressOpacity, setSmoothWorkProgressOpacity] = useState(1); // Visible in idle state
-  const [smoothRestProgressOpacity, setSmoothRestProgressOpacity] = useState(1); // Visible in idle state
-  const [completionFadeStartTime, setCompletionFadeStartTime] = useState(null); // Track when routine completes for fade out
+  const [workProgress, setWorkProgress] = useState(1.0);
+  const [restProgress, setRestProgress] = useState(1.0);
+  const [smoothWorkProgressOpacity, setSmoothWorkProgressOpacity] = useState(1);
+  const [smoothRestProgressOpacity, setSmoothRestProgressOpacity] = useState(1);
+  const [completionFadeStartTime, setCompletionFadeStartTime] = useState(null);
   const phaseStartTimeRef = useRef(null);
   const lastSyncTimeRemainingRef = useRef(null);
   const lastPausedStateRef = useRef(false);
   const completionStartStateRef = useRef(null);
+  const smoothProgressRef = useRef(0);
 
   // When idle (no workout running), both rings should appear full
   useEffect(() => {
@@ -85,7 +99,6 @@ export const TimerDesign = ({
   useEffect(() => {
     if (!isWorkoutRunning || !selectedRoutine) {
       // If workout was running and now stopped, start completion fade
-      // Check if there's any progress to fade out
       if (workProgress > 0 || restProgress > 0 || smoothProgress > 0 || smoothProgressRef.current > 0) {
         completionStartStateRef.current = {
           workProgress,
@@ -96,8 +109,8 @@ export const TimerDesign = ({
         setCompletionFadeStartTime(Date.now());
       } else {
         setSmoothProgress(0);
-        setWorkProgress(1.0); // Reset to full
-        setRestProgress(1.0); // Reset to full
+        setWorkProgress(1.0);
+        setRestProgress(1.0);
         setSmoothWorkProgressOpacity(1);
         setSmoothRestProgressOpacity(1);
         setCompletionFadeStartTime(null);
@@ -128,7 +141,6 @@ export const TimerDesign = ({
     const isResuming = wasPaused && !isNowPaused;
 
     // Drift check: if our local smooth time is too far from the prop timeRemaining
-    // We allow 1.5s tolerance to avoid snapping on every integer second update
     const isDrifting = currentSmoothTimeRemaining !== null && 
                        Math.abs(currentSmoothTimeRemaining - timeRemaining) > 1.5;
 
@@ -137,19 +149,17 @@ export const TimerDesign = ({
     
     const shouldReset = isPhaseChanged || isDrifting || isResuming || isFirstStart;
     
-    // Handle phase transitions - ensure both rings start full for new phase
+    // Handle phase transitions
     if (previousPhaseRef.current !== currentPhase) {
       const isInitialPhase = previousPhaseRef.current === null;
       if (currentPhase === 'work') {
         setWorkProgress(1.0);
         setSmoothWorkProgressOpacity(1);
-        // Round 1: Rest stays full visible, Round 2+: Rest starts empty (will fill up at end)
         setRestProgress(isInitialPhase ? 1.0 : 0);
         setSmoothRestProgressOpacity(isInitialPhase ? 1 : 0);
       } else {
         setRestProgress(1.0);
         setSmoothRestProgressOpacity(1);
-        // Work starts empty (will fill up at end)
         setWorkProgress(0);
         setSmoothWorkProgressOpacity(0);
       }
@@ -167,7 +177,6 @@ export const TimerDesign = ({
       previousPhaseRef.current = currentPhase;
     }
     
-    // Update last paused state
     lastPausedStateRef.current = isNowPaused;
 
     let rafId;
@@ -176,7 +185,6 @@ export const TimerDesign = ({
         return;
       }
 
-      // If paused, don't update progress but keep the loop running to resume smoothly
       if (isPaused) {
         rafId = requestAnimationFrame(animate);
         return;
@@ -186,87 +194,67 @@ export const TimerDesign = ({
       const elapsedMs = now - phaseStartTimeRef.current;
       const elapsedSeconds = elapsedMs / 1000;
       
-      // Calculate progress based on actual elapsed time (linear)
-      // Reverse progress: start at 1.0 (full) and go to 0.0 (empty)
       const newProgress = Math.max(0, Math.min(1, elapsedSeconds / totalTime));
-      const reversedProgress = 1 - newProgress; // Reverse: 1.0 -> 0.0
+      const reversedProgress = 1 - newProgress;
       
       smoothProgressRef.current = newProgress;
       setSmoothProgress(newProgress);
 
-      // Update work progress if in work phase
       if (currentPhase === 'work') {
-        setWorkProgress(reversedProgress); // Work stroke decreases from 1.0 to 0.0
-        setSmoothWorkProgressOpacity(1); // Full opacity during work phase
+        setWorkProgress(reversedProgress);
+        setSmoothWorkProgressOpacity(1);
         
         const workTimeRemaining = totalTime - elapsedSeconds;
         
-        // Special case: Round 1 (Work Phase) - Rest Ring stays FULL visible
         if (currentRound === 1) {
           setRestProgress(1.0);
           setSmoothRestProgressOpacity(1);
         } else {
-          // Fill-up logic for subsequent rounds: Rest fills up earlier (last 5 seconds)
-          // Fill-up takes 3 seconds, then waits 2 seconds before phase change
-          const fillStartTime = 5; // Start filling 5 seconds before end
-          const fillDuration = 3; // Fill takes 3 seconds
-          const waitTime = 2; // Wait 2 seconds after fill completes
+          const fillStartTime = 5;
+          const fillDuration = 3;
+          const waitTime = 2;
           
           if (workTimeRemaining <= fillStartTime && workTimeRemaining > waitTime) {
-            // Fill-up phase: 5s -> 2s (3 seconds)
-            const fillProgress = (fillStartTime - workTimeRemaining) / fillDuration; // 0 to 1
+            const fillProgress = (fillStartTime - workTimeRemaining) / fillDuration;
             setRestProgress(Math.min(1, fillProgress));
             setSmoothRestProgressOpacity(1);
           } else if (workTimeRemaining <= waitTime && workTimeRemaining >= 0) {
-            // Wait phase: Keep full (2s -> 0s)
             setRestProgress(1.0);
             setSmoothRestProgressOpacity(1);
           } else {
-            // Before fill-up: Hidden
             setRestProgress(0);
             setSmoothRestProgressOpacity(0);
           }
         }
       }
 
-      // Update rest progress if in rest phase
       if (currentPhase === 'rest') {
-        setRestProgress(reversedProgress); // Rest stroke decreases from 1.0 to 0.0
-        setSmoothRestProgressOpacity(1); // Full opacity during rest phase
+        setRestProgress(reversedProgress);
+        setSmoothRestProgressOpacity(1);
         
-        // Fill-up logic: Work fills up earlier (last 5 seconds)
-        // Fill-up takes 3 seconds, then waits 2 seconds before phase change
         const restTimeRemaining = totalTime - elapsedSeconds;
-        const fillStartTime = 5; // Start filling 5 seconds before end
-        const fillDuration = 3; // Fill takes 3 seconds
-        const waitTime = 2; // Wait 2 seconds after fill completes
+        const fillStartTime = 5;
+        const fillDuration = 3;
+        const waitTime = 2;
         
         if (restTimeRemaining <= fillStartTime && restTimeRemaining > waitTime) {
-          // Fill-up phase: 5s -> 2s (3 seconds)
-          const fillProgress = (fillStartTime - restTimeRemaining) / fillDuration; // 0 to 1
+          const fillProgress = (fillStartTime - restTimeRemaining) / fillDuration;
           setWorkProgress(Math.min(1, fillProgress));
           setSmoothWorkProgressOpacity(1);
         } else if (restTimeRemaining <= waitTime && restTimeRemaining >= 0) {
-          // Wait phase: Keep full (2s -> 0s)
           setWorkProgress(1.0);
           setSmoothWorkProgressOpacity(1);
         } else {
-          // Before fill-up: Hidden
           setWorkProgress(0);
           setSmoothWorkProgressOpacity(0);
         }
       }
 
-      // Continue animation while workout is running and not paused
-      if (isWorkoutRunning && !isPaused && newProgress < 1) {
-        rafId = requestAnimationFrame(animate);
-      } else if (isWorkoutRunning && (currentPhase === 'rest' || currentPhase === 'work')) {
-        // Continue animation during rest and work phases to update fade opacity smoothly
+      if (isWorkoutRunning && !isPaused) {
         rafId = requestAnimationFrame(animate);
       }
     };
 
-    // Start animation
     rafId = requestAnimationFrame(animate);
 
     return () => {
@@ -274,7 +262,7 @@ export const TimerDesign = ({
         cancelAnimationFrame(rafId);
       }
     };
-  }, [isWorkoutRunning, isPaused, selectedRoutine, currentPhase, timeRemaining]);
+  }, [isWorkoutRunning, isPaused, selectedRoutine, currentPhase, timeRemaining, currentRound]);
 
   // Handle completion fade back to full circles when workout stops
   useEffect(() => {

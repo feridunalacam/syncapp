@@ -88,7 +88,9 @@ function CategoryButton({ category, isSelected, onPress }) {
   const padding = theme.spacing.xl;
   const gap = theme.spacing.sm;
   const availableWidth = SCREEN_WIDTH - (padding * 2);
-  const buttonWidth = (availableWidth - gap) / 2; // Two buttons per row with gap between them
+  // Calculate for 4-5 items per row (to fit in 2 rows)
+  const itemsPerRow = 5;
+  const buttonWidth = (availableWidth - (gap * (itemsPerRow - 1))) / itemsPerRow;
 
   return (
     <TouchableOpacity
@@ -97,14 +99,14 @@ function CategoryButton({ category, isSelected, onPress }) {
       style={{
         width: buttonWidth,
         height: buttonWidth,
-        borderRadius: 24,
+        borderRadius: 16,
         overflow: 'hidden',
         shadowColor: category.gradient[0],
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 12,
-        elevation: 4,
-        borderWidth: isSelected ? 3 : 0,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 8,
+        elevation: 3,
+        borderWidth: isSelected ? 2 : 0,
         borderColor: '#ffffff',
       }}
     >
@@ -129,14 +131,14 @@ function CategoryButton({ category, isSelected, onPress }) {
         >
           <Ionicons 
             name={category.icon} 
-            size={38} 
+            size={24} 
             color={category.iconColor} 
           />
           <Text style={{ 
             color: category.iconColor, 
             fontWeight: '700', 
-            fontSize: 14,
-            marginTop: 6,
+            fontSize: 11,
+            marginTop: 4,
             textShadowColor: 'rgba(0,0,0,0.2)',
             textShadowOffset: { width: 0, height: 1 },
             textShadowRadius: 2,
@@ -644,7 +646,7 @@ export default function ExploreScreen({ navigation }) {
           paddingHorizontal: theme.spacing.xl,
           marginTop: 0,
         }}>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'space-between' }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.sm }}>
             <CategoryButton
               category={{ id: 'all', name: 'All', icon: 'apps-outline', gradient: ['#667eea', '#764ba2', '#f093fb'], iconColor: '#ffffff' }}
               isSelected={selectedCategory === null}

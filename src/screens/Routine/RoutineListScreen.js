@@ -201,7 +201,7 @@ export default function RoutineListScreen({ navigation }) {
             style={screenStyles.addButton}
             onPress={() => navigateToCreateRoutine(navigation)}
           >
-            <Ionicons name="add" size={20} color={theme.text} />
+            <Text style={screenStyles.addButtonText}>+</Text>
           </TouchableOpacity>
         </View>
       </View>

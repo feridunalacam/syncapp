@@ -1,5 +1,8 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 
+// Note: Device volume control requires a development build with react-native-volume-manager
+// For now, volume control is disabled in Expo Go
+
 /**
  * Audio Controller Hook - Platform Agnostic Music Controller
  * 
@@ -21,6 +24,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
  * @param {Function} params.refreshToken - Generic token refresh function (platformId) => Promise<string>
  * @param {Object} params.selectedRoutine - Currently selected workout routine
  * @param {Object} params.services - All available platform services (spotify, device, etc.)
+ * @param {Object} params.countdownSoundPlayer - Optional player for countdown sounds
  */
 export const useAudioController = ({
   musicPlayer,
@@ -29,6 +33,7 @@ export const useAudioController = ({
   refreshToken,
   selectedRoutine,
   services,
+  countdownSoundPlayer = null, // Optional countdown sound player
 }) => {
   // Platform-agnostic music state
   const [accessToken, setAccessToken] = useState(null);
@@ -42,6 +47,7 @@ export const useAudioController = ({
   
   const playlistStartedRef = useRef(false);
   const progressTimerRef = useRef(null);
+  const originalVolumeRef = useRef(null); // Store original device volume for rest phase
 
   // Initialize Token
   useEffect(() => {
@@ -61,91 +67,75 @@ export const useAudioController = ({
   }, [connectedPlatforms, selectedPlatform]);
 
   // Fetch Playback Status (Platform Agnostic)
-  // This function normalizes platform-specific playback responses to a common format
   const fetchPlayback = useCallback(async () => {
-    if (!musicPlayer || !selectedPlatform) return;
+    const platformToUse = currentPlayingPlatform || selectedPlatform;
+    const playerToUse = services?.[platformToUse] || musicPlayer;
+    const tokenToUse = platformToUse === 'device' 
+      ? 'device' 
+      : connectedPlatforms?.[platformToUse]?.accessToken || accessToken;
     
-    // Device platform doesn't need accessToken check
-    if (selectedPlatform !== 'device' && !accessToken) return;
+    if (!playerToUse || !platformToUse) return;
+    if (platformToUse !== 'device' && !tokenToUse) return;
     
-    const refreshCallback = refreshToken && selectedPlatform !== 'device' 
-      ? () => refreshToken(selectedPlatform) 
+    const refreshCallback = refreshToken && platformToUse !== 'device' 
+      ? () => refreshToken(platformToUse) 
       : null;
-    const playback = await musicPlayer.getCurrentPlayback(accessToken || 'device', refreshCallback);
+    const playback = await playerToUse.getCurrentPlayback(tokenToUse, refreshCallback);
     
-    // Normalize platform-specific response to common format
-    // Platform services should return: { item: { name, artists, album, duration_ms }, progress_ms, is_playing }
     if (playback && playback.item) {
-        // Handle different platform response formats
         const progressMs = playback.progress_ms || playback.progressMs || 0;
-        const progressSeconds = Math.floor(progressMs / 1000);
-        
         const item = playback.item;
-        const trackName = item.name || item.title || 'Unknown Track';
-        const artistName = item.artists?.[0]?.name || item.artist || 'Unknown Artist';
-        const albumName = item.album?.name || item.album || 'Unknown Album';
         const durationMs = item.duration_ms || item.durationMs || 0;
-        const coverUrl = item.album?.images?.[0]?.url || item.image || item.coverUrl || null;
         
-        // Only update if track actually changed to avoid progress jumps
         const currentTrackId = track?.title + track?.artist;
-        const newTrackId = trackName + artistName;
+        const newTrackId = (item.name || item.title) + (item.artists?.[0]?.name || item.artist);
         
         setTrack({
-            title: trackName,
-            artist: artistName,
-            album: albumName,
+            title: item.name || item.title || 'Unknown Track',
+            artist: item.artists?.[0]?.name || item.artist || 'Unknown Artist',
+            album: item.album?.name || item.album || 'Unknown Album',
             duration: Math.floor(durationMs / 1000),
-            coverUrl: coverUrl,
+            coverUrl: item.album?.images?.[0]?.url || item.image || item.coverUrl || null,
         });
         
-        // Reset progress if track changed, otherwise use current playback position
         if (currentTrackId !== newTrackId) {
           setMusicProgress(0);
         } else {
-          setMusicProgress(progressSeconds);
+          setMusicProgress(Math.floor(progressMs / 1000));
         }
         
-        // ✅ FIX: Sync isMusicPlaying state with actual playback
-        const actualPlayingState = playback.is_playing !== undefined ? playback.is_playing : playback.isPlaying;
-        setIsMusicPlaying(actualPlayingState);
-    } else if (!playback) {
-      // No playback - reset state
-      setTrack(null);
+        setIsMusicPlaying(playback.is_playing ?? playback.isPlaying ?? false);
+    } else if (!playback && !track) {
       setMusicProgress(0);
       setIsMusicPlaying(false);
     }
-  }, [accessToken, musicPlayer, refreshToken, selectedPlatform, track]);
+  }, [accessToken, musicPlayer, refreshToken, selectedPlatform, track, currentPlayingPlatform, services, connectedPlatforms]);
+
+  // Store track duration in a ref to avoid stale closure issues
+  const trackDurationRef = useRef(0);
+  
+  // Update duration ref when track changes
+  useEffect(() => {
+    if (track?.duration) {
+      trackDurationRef.current = track.duration;
+    }
+  }, [track?.duration]);
 
   // Smooth progress timer - updates every second when music is playing
   useEffect(() => {
-    // Clear any existing timer
     if (progressTimerRef.current) {
       clearInterval(progressTimerRef.current);
       progressTimerRef.current = null;
     }
 
-    // Only start timer if music is playing and we have a track
-    if (isMusicPlaying && track && track.duration) {
+    if (isMusicPlaying) {
       progressTimerRef.current = setInterval(() => {
         setMusicProgress((prev) => {
-          // Increment by 1 second, but don't exceed track duration
-          const maxDuration = track.duration || 0;
+          const maxDuration = trackDurationRef.current;
           const newProgress = prev + 1;
-          if (newProgress >= maxDuration) {
-            // Track finished, stop incrementing
-            if (progressTimerRef.current) {
-              clearInterval(progressTimerRef.current);
-              progressTimerRef.current = null;
-            }
-            return maxDuration;
-          }
-          return newProgress;
+          return (maxDuration > 0 && newProgress >= maxDuration) ? maxDuration : newProgress;
         });
-      }, 1000); // Update every second for smooth progress
-    } else if (!isMusicPlaying) {
-      // Music paused, stop the timer
-      setMusicProgress((prev) => prev); // Keep current progress when paused
+      }, 1000);
     }
 
     return () => {
@@ -154,7 +144,7 @@ export const useAudioController = ({
         progressTimerRef.current = null;
       }
     };
-  }, [isMusicPlaying, track]);
+  }, [isMusicPlaying]);
 
   // Helper function to detect platform from music source
   const detectPlatformFromSource = useCallback((source, routine) => {
@@ -171,18 +161,19 @@ export const useAudioController = ({
 
   // Helper function to check if platform is connected and ready
   const isPlatformReady = useCallback((platformId) => {
-    if (!platformId || platformId === 'device') return true; // Device is always available
+    // Device and voices are always available (local/built-in)
+    if (!platformId || platformId === 'device' || platformId === 'voices') return true;
     const platformData = connectedPlatforms?.[platformId];
     return platformData?.connected && platformData?.accessToken;
   }, [connectedPlatforms]);
 
   // Main Phase Change Logic - Platform Agnostic
   // 
-  // IMPORTANT: Each music source (work/rest, song/playlist) can come from ANY platform
+  // IMPORTANT: Each music source (work/rest/beforeStart, song/playlist) can come from ANY platform
   // Examples:
+  //   - beforeStart = Spotify track (countdown sound)
   //   - Round 1: work = Spotify playlist, rest = Device file
   //   - Round 2: work = Device file, rest = Spotify track
-  //   - Round 3: work = YouTube playlist, rest = SoundCloud track
   // 
   // Platform detection priority for each source:
   //   1. source.platform (explicitly saved)
@@ -200,16 +191,33 @@ export const useAudioController = ({
       let sourceType = null;
       let detectedPlatform = null;
 
-      // Check for round-level song
-      const roundSong = phase === 'work' ? roundData?.workSong : roundData?.restSong;
-      if (roundSong) {
-        musicSource = roundSong;
-        sourceType = 'roundSong';
-        detectedPlatform = detectPlatformFromSource(roundSong, routine) || selectedPlatform || 'device';
+      // Special handling for beforeStart phase - uses countdown sound
+      if (phase === 'beforeStart') {
+        const countdownSound = routine.countdownBeforeStartSound;
+        console.log('🔊 beforeStart phase - countdownSound object:', JSON.stringify(countdownSound, null, 2));
+        if (countdownSound && countdownSound.uri) {
+          musicSource = countdownSound;
+          sourceType = 'countdownSound';
+          detectedPlatform = countdownSound.platform || detectPlatformFromSource(countdownSound, routine) || selectedPlatform || 'device';
+          console.log('🔊 beforeStart phase - using countdown sound:', countdownSound.name, 'platform:', detectedPlatform);
+        } else {
+          console.log('🔊 beforeStart phase - no countdown sound configured');
+          return false;
+        }
+      }
+
+      // Check for round-level song (work/rest only)
+      if (!musicSource && (phase === 'work' || phase === 'rest')) {
+        const roundSong = phase === 'work' ? roundData?.workSong : roundData?.restSong;
+        if (roundSong) {
+          musicSource = roundSong;
+          sourceType = 'roundSong';
+          detectedPlatform = detectPlatformFromSource(roundSong, routine) || selectedPlatform || 'device';
+        }
       }
       
-      // Check for round-level playlist
-      if (!musicSource) {
+      // Check for round-level playlist (work/rest only)
+      if (!musicSource && (phase === 'work' || phase === 'rest')) {
         const roundPlaylistId = phase === 'work' ? roundData?.workPlaylistId : roundData?.restPlaylistId;
         const roundPlaylist = phase === 'work' ? roundData?.workPlaylist : roundData?.restPlaylist;
         const roundPlaylistPlatform = phase === 'work' ? roundData?.workPlaylistPlatform : roundData?.restPlaylistPlatform;
@@ -227,8 +235,8 @@ export const useAudioController = ({
         }
       }
       
-      // Check for routine-level playlist
-      if (!musicSource) {
+      // Check for routine-level playlist (work/rest only)
+      if (!musicSource && (phase === 'work' || phase === 'rest')) {
         if (phase === 'work' && routine.workoutPlaylistId) {
           musicSource = { id: routine.workoutPlaylistId };
           sourceType = 'routinePlaylist';
@@ -242,6 +250,47 @@ export const useAudioController = ({
 
       // If no music source found, return false (workout continues without music)
       if (!musicSource) return false;
+
+      // *** ALWAYS stop currently playing music before starting new music ***
+      if (isMusicPlaying && currentPlayingPlatform) {
+        console.log(`🔄 Stopping current music on ${currentPlayingPlatform} before starting new music`);
+        try {
+          if (currentPlayingPlatform === 'voices') {
+            await countdownSoundPlayer?.stop();
+          } else if (currentPlayingPlatform === 'device') {
+            await services?.device?.pause('device');
+          } else {
+            const token = connectedPlatforms?.[currentPlayingPlatform]?.accessToken;
+            await services?.[currentPlayingPlatform]?.pause(token);
+          }
+        } catch (e) {
+          console.log('⚠️ Error stopping current music:', e);
+        }
+      }
+
+      // Special handling for "voices" platform - uses built-in countdown sound player
+      if (detectedPlatform === 'voices' || musicSource.uri?.startsWith('voices://')) {
+        console.log('🔊 Playing built-in voice sound:', musicSource.name);
+        
+        if (countdownSoundPlayer) {
+          await countdownSoundPlayer.play(musicSource.uri);
+        }
+        
+        // Set track for display
+        const voiceName = musicSource.name || 'Countdown';
+        setTrack({
+          name: voiceName,
+          title: voiceName,
+          artist: 'Countdown Sound',
+          image: musicSource.image || null,
+          coverUrl: musicSource.image || null,
+          uri: musicSource.uri,
+          duration: musicSource.duration || 0,
+        });
+        setIsMusicPlaying(true);
+        setCurrentPlayingPlatform('voices');
+        return true;
+      }
 
       // Check if platform is connected and ready
       if (!isPlatformReady(detectedPlatform)) {
@@ -259,7 +308,6 @@ export const useAudioController = ({
       }
 
       // Get access token for detected platform
-      // Device platform doesn't need accessToken
       const platformAccessToken = detectedPlatform === 'device' 
         ? 'device' 
         : connectedPlatforms?.[detectedPlatform]?.accessToken;
@@ -269,13 +317,12 @@ export const useAudioController = ({
         return false;
       }
 
-      // Create refresh callback for this platform (device doesn't need refresh)
+      // Create refresh callback for this platform
       const refreshCallback = refreshToken && detectedPlatform !== 'device' 
         ? () => refreshToken(detectedPlatform) 
         : null;
 
       try {
-        // Device platform doesn't need deviceId lookup
         const deviceId = detectedPlatform === 'device' 
           ? 'device' 
           : await platformMusicPlayer.getActiveDevice(platformAccessToken, refreshCallback);
@@ -287,7 +334,48 @@ export const useAudioController = ({
 
         let playbackTriggered = false;
 
-        if (sourceType === 'roundPlaylist' && musicSource.id) {
+        // Handle countdown sound (beforeStart phase) for streaming platforms
+        if (sourceType === 'countdownSound' && musicSource.uri) {
+          console.log('🔊 Playing countdown sound from platform:', musicSource.name);
+          
+            // For platform tracks (Spotify, etc.), play normally
+            if (detectedPlatform === 'device' && platformMusicPlayer.setTrackMetadata && musicSource) {
+              platformMusicPlayer.setTrackMetadata({
+                name: musicSource.name || musicSource.title,
+                artist: musicSource.artist || 'Countdown',
+                album: musicSource.album,
+                image: musicSource.image || musicSource.coverUrl,
+              });
+            }
+            
+            // Set track for display (important for preview!)
+            // Use both name/title and image/coverUrl for compatibility
+            const trackName = musicSource.name || musicSource.title || 'Countdown';
+            const trackImage = musicSource.image || musicSource.coverUrl || null;
+            // Check multiple duration formats
+            const trackDuration = musicSource.duration_ms 
+              ? Math.floor(musicSource.duration_ms / 1000) 
+              : (musicSource.durationMs ? Math.floor(musicSource.durationMs / 1000) : (musicSource.duration || 0));
+            const trackInfo = {
+              name: trackName,
+              title: trackName, // MusicPlayerPreview uses title
+              artist: musicSource.artist || 'Countdown Sound',
+              image: trackImage,
+              coverUrl: trackImage, // MusicPlayerPreview uses coverUrl
+              uri: musicSource.uri,
+              duration: trackDuration,
+            };
+            console.log('🎵 Setting track for beforeStart:', JSON.stringify(trackInfo));
+            setTrack(trackInfo);
+            
+            const result = await platformMusicPlayer.playTrack(platformAccessToken, musicSource.uri, deviceId);
+            playbackTriggered = result?.success !== false;
+            
+            if (playbackTriggered) {
+              setIsMusicPlaying(true);
+              setCurrentPlayingPlatform(detectedPlatform);
+            }
+        } else if (sourceType === 'roundPlaylist' && musicSource.id) {
           const shuffleState = phase === 'work' ? isShuffled : isRestShuffled;
           const response = await platformMusicPlayer.playPlaylist(
             platformAccessToken,
@@ -339,15 +427,19 @@ export const useAudioController = ({
         }
 
         // Reset progress when new music starts
-        if (playbackTriggered) {
+        // But NOT for beforeStart - we already set the track above
+        if (playbackTriggered && phase !== 'beforeStart') {
           setMusicProgress(0);
-          setTrack(null);
+          // Don't reset track - let fetchPlayback update it naturally
+          // setTrack(null) was causing track to disappear before fetchPlayback could update
+          setIsMusicPlaying(true); // Start timer immediately
           setCurrentPlayingPlatform(detectedPlatform);
         }
 
         // Update accessToken state if platform changed
-        if (detectedPlatform === selectedPlatform && playbackTriggered) {
-          setTimeout(() => fetchPlayback(), 500);
+        // But NOT for beforeStart - don't fetch playback during countdown
+        if (detectedPlatform === selectedPlatform && playbackTriggered && phase !== 'beforeStart') {
+          fetchPlayback(); // No delay - immediate fetch
         }
         
         return playbackTriggered;
@@ -426,7 +518,7 @@ export const useAudioController = ({
       // Reset progress when skipping
       setMusicProgress(0);
       await musicPlayer.next(accessToken, refreshCallback);
-      setTimeout(() => fetchPlayback(), 500);
+      fetchPlayback(); // No delay - immediate fetch
   }, [accessToken, musicPlayer, refreshToken, selectedPlatform, fetchPlayback]);
 
   const skipPrevious = useCallback(async () => {
@@ -443,7 +535,7 @@ export const useAudioController = ({
       // Reset progress when skipping
       setMusicProgress(0);
       await musicPlayer.previous(accessToken, refreshCallback);
-      setTimeout(() => fetchPlayback(), 500);
+      fetchPlayback(); // No delay - immediate fetch
   }, [accessToken, musicPlayer, refreshToken, selectedPlatform, fetchPlayback]);
 
   const toggleShuffle = useCallback(async () => {
@@ -470,25 +562,78 @@ export const useAudioController = ({
       }
   }, [accessToken, musicPlayer, isRepeating, selectedPlatform]);
 
-  // Stop and cleanup music completely
+  // Stop and cleanup music completely - stops ALL platforms (platform agnostic)
   const stopMusic = useCallback(async () => {
-      const platform = currentPlayingPlatform || selectedPlatform;
-      const service = services?.[platform];
-      const token = platform === 'device' ? 'device' : connectedPlatforms?.[platform]?.accessToken;
+      console.log('🛑 stopMusic called');
       
-      if (!service) return;
+      // Get all available platform IDs from services
+      const platformsToStop = Object.keys(services || {});
       
-      const refreshCb = refreshToken && platform !== 'device' ? () => refreshToken(platform) : null;
+      for (const platform of platformsToStop) {
+        const service = services?.[platform];
+        if (!service || !service.pause) continue;
+        
+        // Get token - 'device' platform uses 'device' as token, others use accessToken
+        const isLocalPlatform = platform === 'device';
+        const token = isLocalPlatform ? 'device' : connectedPlatforms?.[platform]?.accessToken;
+        
+        if (!token && !isLocalPlatform) {
+          console.log(`🛑 Skipping ${platform} - no token`);
+          continue;
+        }
+        
+        // Refresh callback only for remote platforms
+        const refreshCb = !isLocalPlatform && refreshToken ? () => refreshToken(platform) : null;
+        
+        try {
+          console.log(`🛑 Stopping ${platform}...`);
+          
+          // If platform supports device targeting, get active device first
+          if (service.getActiveDevice) {
+            const deviceId = await service.getActiveDevice(token, refreshCb);
+            if (deviceId) {
+              const result = await service.pause(token, refreshCb, deviceId);
+              console.log(`🛑 ${platform} pause result:`, result);
+            } else {
+              // No specific device, try regular pause
+              const result = await service.pause(token, refreshCb);
+              console.log(`🛑 ${platform} pause result:`, result);
+            }
+          } else {
+            // Platform doesn't support device targeting
+            const result = await service.pause(token, refreshCb);
+            console.log(`🛑 ${platform} pause result:`, result);
+          }
+          
+          // If platform has cleanup method, call it
+          if (service.cleanup) {
+            await service.cleanup();
+          }
+        } catch (error) {
+          console.error(`🛑 Error stopping ${platform}:`, error);
+        }
+      }
       
-      if (isMusicPlaying) await service.pause(token, refreshCb);
-      if (platform === 'device' && service.cleanup) await service.cleanup();
+      // Also stop countdown sound player if it's playing
+      if (countdownSoundPlayer) {
+        try {
+          await countdownSoundPlayer.stop();
+          console.log('🛑 Countdown sound player stopped');
+        } catch (error) {
+          console.error('🛑 Error stopping countdown player:', error);
+        }
+      }
       
+      // Reset all state
       setIsMusicPlaying(false);
       setTrack(null);
       setMusicProgress(0);
       setCurrentPlayingPlatform(null);
       playlistStartedRef.current = false;
-  }, [currentPlayingPlatform, selectedPlatform, services, connectedPlatforms, isMusicPlaying, refreshToken]);
+      originalVolumeRef.current = null;
+      
+      console.log('🛑 stopMusic completed');
+  }, [services, connectedPlatforms, refreshToken, countdownSoundPlayer]);
 
   // Set volume (0-100)
   const setVolume = useCallback(async (volumePercent) => {
@@ -500,6 +645,114 @@ export const useAudioController = ({
         await musicPlayer.setVolume(accessToken || 'device', volumePercent);
       }
   }, [musicPlayer, selectedPlatform, accessToken]);
+
+  // Apply rest volume when entering rest phase
+  // TODO: Implement device volume control when using development build
+  const applyRestVolume = useCallback(async (restVolumePercent) => {
+    console.log('🔈 applyRestVolume called:', restVolumePercent);
+    
+    if (restVolumePercent === undefined || restVolumePercent === 100) {
+      console.log('🔈 Volume is 100 or undefined, skipping');
+      return;
+    }
+    
+    // Store the target volume for when we implement device volume control
+    originalVolumeRef.current = { targetRestVolume: restVolumePercent };
+    console.log('🔈 Rest volume target set to:', restVolumePercent, '% (device volume control requires dev build)');
+  }, []);
+
+  // Reset volume to original when entering work phase
+  const resetVolume = useCallback(async () => {
+    console.log('🔈 resetVolume called');
+    
+    if (originalVolumeRef.current !== null) {
+      console.log('🔈 Volume would be restored (device volume control requires dev build)');
+      originalVolumeRef.current = null;
+    }
+  }, []);
+
+  // Play sound alert - supports built-in voices and Spotify for beforeStart
+  const playCountdownSound = useCallback(async (soundType) => {
+    console.log('🔊 playCountdownSound called:', soundType);
+    
+    if (!selectedRoutine) {
+      console.log('🔊 No selectedRoutine, skipping');
+      return;
+    }
+    
+    // Get the sound for this type from routine settings
+    // Note: beforeStart is now handled by handlePhaseChange, not here
+    let sound = null;
+    switch (soundType) {
+      case 'beforeStart':
+        // beforeStart is handled by handlePhaseChange as a "round"
+        // This is kept for backward compatibility
+        sound = selectedRoutine.countdownBeforeStartSound;
+        break;
+      case 'endWork':
+        sound = selectedRoutine.endWorkSound;
+        break;
+      case 'endRest':
+        sound = selectedRoutine.endRestSound;
+        break;
+      default:
+        console.log('🔊 Unknown soundType:', soundType);
+        return;
+    }
+    
+    if (!sound || !sound.uri) {
+      console.log('🔊 No sound or uri for', soundType);
+      return;
+    }
+    
+    console.log('🔊 Playing sound:', sound.name, 'platform:', sound.platform, 'uri:', sound.uri);
+    
+    try {
+      const platform = sound.platform;
+      
+      // Built-in voices - use countdown sound player
+      if (platform === 'voices' || sound.uri.startsWith('voices://')) {
+        if (countdownSoundPlayer) {
+          await countdownSoundPlayer.play(sound.uri);
+        }
+        return;
+      }
+      
+      // Device/local files - use countdown sound player
+      if (platform === 'device' || sound.uri.startsWith('file://')) {
+        if (countdownSoundPlayer) {
+          await countdownSoundPlayer.play(sound.uri);
+        }
+        return;
+      }
+      
+      // Streaming platforms (Spotify, Apple Music, etc.) - only for beforeStart
+      // (other sound types would interrupt current playback)
+      if (soundType === 'beforeStart' && platform && services?.[platform]) {
+        const platformService = services[platform];
+        const token = connectedPlatforms?.[platform]?.accessToken;
+        
+        if (platformService && token) {
+          try {
+            const deviceId = await platformService.getActiveDevice?.(token, () => refreshToken?.(platform));
+            if (deviceId && platformService.playTrack) {
+              await platformService.playTrack(token, sound.uri, deviceId);
+            }
+          } catch (err) {
+            console.error(`🔊 ${platform} playback failed:`, err);
+          }
+        }
+        return;
+      }
+      
+      // Fallback for unknown platforms during workout
+      if (countdownSoundPlayer) {
+        await countdownSoundPlayer.play('voices://beep_short');
+      }
+    } catch (error) {
+      console.error('🔊 Error playing sound:', error);
+    }
+  }, [selectedRoutine, countdownSoundPlayer, services, connectedPlatforms, refreshToken]);
 
   return {
       accessToken,
@@ -513,14 +766,17 @@ export const useAudioController = ({
       fetchPlayback,
       handlePhaseChange,
       togglePlayPause,
-      pauseMusic, // ✅ NEW: Explicit pause (no state checking)
-      resumeMusic, // ✅ NEW: Explicit resume (no state checking)
+      pauseMusic, // ✅ Explicit pause (no state checking)
+      resumeMusic, // ✅ Explicit resume (no state checking)
       skipNext,
       skipPrevious,
       toggleShuffle,
       toggleRepeat,
-      stopMusic, // ✅ NEW: Complete music stop with cleanup
-      setVolume, // ✅ NEW: Volume control
+      stopMusic, // ✅ Complete music stop with cleanup
+      setVolume, // ✅ Volume control
+      applyRestVolume, // ✅ Apply rest volume (for rest phases)
+      resetVolume, // ✅ Reset volume to 100% (for work phases)
+      playCountdownSound, // ✅ Play countdown sound
       setRestShuffled: setIsRestShuffled,
       setIsMusicPlaying // manual override if needed
   };

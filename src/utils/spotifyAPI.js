@@ -344,8 +344,11 @@ export const spotifyAPI = {
     }
   },
 
-  async pause(accessToken, refreshCallback = null) {
-    const result = await this.makeRequest('/me/player/pause', 'PUT', accessToken, null, refreshCallback);
+  async pause(accessToken, refreshCallback = null, deviceId = null) {
+    const endpoint = deviceId 
+      ? `/me/player/pause?device_id=${deviceId}` 
+      : '/me/player/pause';
+    const result = await this.makeRequest(endpoint, 'PUT', accessToken, null, refreshCallback);
     if (result && result.success === false && result.code === 403) {
       return { success: false, error: 'No active device or Premium required' };
     }

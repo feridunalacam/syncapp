@@ -62,7 +62,7 @@ export const darkTheme = {
     md: 10,
     lg: 14,
     xl: 20,
-    '2xl': 16,
+    '2xl': 28,
     '3xl': 32,
     '4xl': 40,
   },

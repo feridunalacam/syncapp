@@ -5,13 +5,16 @@ import { useTheme } from '../../../context/ThemeContext';
 import { usePlatformContext } from '../../../context/PlatformContext';
 import { useMusicSearch } from '../../../hooks/useMusicSearch';
 import { PlatformSelector } from '../../../components/common/PlatformSelector';
+import { createScreenStyles } from '../../../styles/screenStyles';
 
 export const PlaylistCard = ({ 
   roundsOrder,
   onShuffleForWork,
   onShuffleForRest,
+  embedded = false, // When true, renders without container (for embedding in another card)
 }) => {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
+  const screenStyles = createScreenStyles({ ...theme, isDark });
   const { connectedPlatforms, services, refreshToken } = usePlatformContext();
   const [selectedPlaylistId, setSelectedPlaylistId] = useState(null);
   const [selectedPlatform, setSelectedPlatform] = useState(() => {
@@ -125,78 +128,83 @@ export const PlaylistCard = ({
     }
   };
 
-  return (
-    <View>
-      {/* Header with Search and Platform Dropdown */}
-      <View style={{ 
-        flexDirection: 'row', 
-        alignItems: 'center',
-        gap: 8,
-        marginBottom: 8 
-      }}>
-        {/* Search Input */}
+  // Content to render (used in both embedded and standalone modes)
+  const content = (
+    <>
+      {/* Content */}
+      <View style={screenStyles.cardContent}>
+        {/* Search Input with Platform Selector */}
         <View style={{ 
-          flex: 1,
           flexDirection: 'row', 
           alignItems: 'center',
-          position: 'relative',
+          gap: theme.spacing.sm,
+          marginBottom: theme.spacing.md,
         }}>
-          <Ionicons 
-            name="search-outline" 
-            size={16} 
-            color={theme.iconTertiary} 
-            style={{ position: 'absolute', left: 10, zIndex: 1 }}
-          />
-          <TextInput
-            style={{
-              flex: 1,
-              borderWidth: 1,
-              borderColor: theme.inputBorder,
-              borderRadius: 8,
-              paddingLeft: theme.spacing['3xl'],
-              paddingRight: (searchQuery && searchQuery.length > 0) ? theme.spacing['3xl'] : theme.spacing.md,
+          {/* Search Input */}
+          <View style={{ 
+            flex: 1,
+            flexDirection: 'row', 
+            alignItems: 'center',
+            position: 'relative',
+          }}>
+            <Ionicons 
+              name="search-outline" 
+              size={16} 
+              color={theme.iconTertiary} 
+              style={{ position: 'absolute', left: 10, zIndex: 1 }}
+            />
+            <TextInput
+              style={{
+                flex: 1,
+                borderWidth: 1,
+                borderColor: theme.inputBorder,
+                borderRadius: 8,
+                paddingLeft: theme.spacing['3xl'],
+                paddingRight: (searchQuery && searchQuery.length > 0) ? theme.spacing['3xl'] : theme.spacing.md,
+                paddingVertical: theme.spacing.sm,
+                height: 36,
+                fontSize: theme.fontSize.sm,
+                color: theme.inputText,
+                backgroundColor: theme.inputBackground,
+              }}
+              placeholder="Search any playlist..."
+              placeholderTextColor={theme.inputPlaceholder}
+              value={searchQuery || ''}
+              onChangeText={setSearchQuery}
+              returnKeyType="search"
+            />
+            {searchQuery && searchQuery.length > 0 && (
+              <TouchableOpacity
+                onPress={() => {
+                  setSearchQuery('');
+                }}
+                style={{ position: 'absolute', right: theme.spacing.sm, padding: theme.spacing.xs }}
+              >
+                <Ionicons name="close-circle" size={16} color={theme.iconTertiary} />
+              </TouchableOpacity>
+            )}
+          </View>
+          
+          {/* Platform Selector */}
+          <PlatformSelector
+            selectedPlatform={selectedPlatform}
+            onPlatformChange={handlePlatformSelect}
+            connectedPlatforms={connectedPlatforms}
+            includeDevice={false}
+            includeBrowser={false}
+            buttonStyle={{
+              height: 36,
+              minWidth: 90,
+              paddingHorizontal: theme.spacing.md,
               paddingVertical: theme.spacing.xs,
-              height: 32,
-              fontSize: theme.fontSize.sm,
-              color: theme.inputText,
-              backgroundColor: theme.inputBackground,
+              backgroundColor: theme.cardSecondary,
+              borderRadius: 8,
             }}
-            placeholder="Search any playlist..."
-            placeholderTextColor={theme.inputPlaceholder}
-            value={searchQuery || ''}
-            onChangeText={setSearchQuery}
-            returnKeyType="search"
           />
-          {searchQuery && searchQuery.length > 0 && (
-            <TouchableOpacity
-              onPress={() => {
-                setSearchQuery('');
-              }}
-              style={{ position: 'absolute', right: theme.spacing.sm, padding: theme.spacing.xs }}
-            >
-              <Ionicons name="close-circle" size={16} color={theme.iconTertiary} />
-            </TouchableOpacity>
-          )}
         </View>
-        
-        {/* Platform Selector */}
-        <PlatformSelector
-          selectedPlatform={selectedPlatform}
-          onPlatformChange={handlePlatformSelect}
-          connectedPlatforms={connectedPlatforms}
-          includeDevice={false}
-          includeBrowser={false}
-          buttonStyle={{
-            height: 32,
-            minWidth: 100,
-            paddingHorizontal: theme.spacing.md,
-                paddingVertical: theme.spacing.xs,
-                backgroundColor: theme.cardSecondary,
-              }}
-        />
-      </View>
 
-      <View style={{ minHeight: 80 }}>
+        {/* Playlists */}
+        <View style={{ minHeight: 80 }}>
         {displayLoading ? (
           <View style={{ 
             height: 80,
@@ -247,46 +255,59 @@ export const PlaylistCard = ({
         )}
       </View>
 
-      {/* Shuffle Buttons - Show when playlist is selected, below playlists */}
-      {selectedPlaylist && (
-        <View style={{ 
-          flexDirection: 'row', 
-          gap: 6, 
-          marginTop: 8,
-        }}>
-          <TouchableOpacity
-            onPress={handleShuffleWork}
-            style={{
-              flex: 1,
-              paddingVertical: theme.spacing.sm,
-              paddingHorizontal: theme.spacing.md,
-              backgroundColor: theme.cardSecondary,
-              borderRadius: 6,
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ fontSize: theme.fontSize.xs, color: theme.textSecondary }}>
-              Shuffle for Work
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            onPress={handleShuffleRest}
-            style={{
-              flex: 1,
-              paddingVertical: theme.spacing.sm,
-              paddingHorizontal: theme.spacing.md,
-              backgroundColor: theme.cardSecondary,
-              borderRadius: 6,
-              alignItems: 'center',
-            }}
-          >
-            <Text style={{ fontSize: theme.fontSize.xs, color: theme.textSecondary }}>
-              Shuffle for Rest
-            </Text>
-          </TouchableOpacity>
-        </View>
-      )}
+        {/* Shuffle Buttons - Show when playlist is selected */}
+        {selectedPlaylist && (
+          <View style={{ 
+            flexDirection: 'row', 
+            gap: theme.spacing.sm, 
+            marginTop: theme.spacing.md,
+          }}>
+            <TouchableOpacity
+              onPress={handleShuffleWork}
+              style={{
+                flex: 1,
+                paddingVertical: theme.spacing.sm,
+                paddingHorizontal: theme.spacing.md,
+                backgroundColor: theme.cardSecondary,
+                borderRadius: 8,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ fontSize: theme.fontSize.xs, color: theme.textSecondary }}>
+                Shuffle for Work
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              onPress={handleShuffleRest}
+              style={{
+                flex: 1,
+                paddingVertical: theme.spacing.sm,
+                paddingHorizontal: theme.spacing.md,
+                backgroundColor: theme.cardSecondary,
+                borderRadius: 8,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ fontSize: theme.fontSize.xs, color: theme.textSecondary }}>
+                Shuffle for Rest
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    </>
+  );
+
+  // If embedded, return content without container
+  if (embedded) {
+    return content;
+  }
+
+  // Standalone mode with container
+  return (
+    <View style={screenStyles.card}>
+      {content}
     </View>
   );
 };

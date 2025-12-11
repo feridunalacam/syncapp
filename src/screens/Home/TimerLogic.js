@@ -1,17 +1,30 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
+/**
+ * Timer Logic Hook - Manages workout timer
+ * 
+ * Phases: 'beforeStart' -> 'work' -> 'rest' -> 'work' -> 'rest' -> ... -> complete
+ * 
+ * Only 'beforeStart' has a countdown. Other phase transitions are instant.
+ * Sound alerts at transitions are handled by the audio controller.
+ */
 export const useTimerLogic = ({
   workSec = 60,
   restSec = 30,
   rounds = 5,
-  onPhaseChange,
+  // Before Start countdown (in seconds, 0 = disabled)
+  countdownBeforeStartSec = 0,
+  // Callbacks
+  onPhaseChange, // Called when phase changes (phase, round)
+  onCountdownStart, // Called when beforeStart countdown starts
   onComplete,
 }) => {
   const [timeRemaining, setTimeRemaining] = useState(workSec);
-  const [currentPhase, setCurrentPhase] = useState('work');
+  const [currentPhase, setCurrentPhase] = useState('work'); // 'beforeStart', 'work', 'rest'
   const [currentRound, setCurrentRound] = useState(1);
   const [isActive, setIsActive] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
+  const [isCountdownPhase, setIsCountdownPhase] = useState(false);
 
   // Refs to avoid closure staleness in the RAF loop
   const stateRef = useRef({
@@ -24,6 +37,7 @@ export const useTimerLogic = ({
     workSec,
     restSec,
     rounds,
+    countdownBeforeStartSec,
   });
 
   // Update refs when props/state change
@@ -31,19 +45,34 @@ export const useTimerLogic = ({
     stateRef.current.workSec = workSec;
     stateRef.current.restSec = restSec;
     stateRef.current.rounds = rounds;
+    stateRef.current.countdownBeforeStartSec = countdownBeforeStartSec;
     stateRef.current.phase = currentPhase;
     stateRef.current.round = currentRound;
     stateRef.current.isActive = isActive;
     stateRef.current.isPaused = isPaused;
-  }, [workSec, restSec, rounds, currentPhase, currentRound, isActive, isPaused]);
+  }, [workSec, restSec, rounds, countdownBeforeStartSec, currentPhase, currentRound, isActive, isPaused]);
 
   const getDuration = useCallback((phase) => {
-    return phase === 'work' ? stateRef.current.workSec : stateRef.current.restSec;
+    switch (phase) {
+      case 'beforeStart':
+        return stateRef.current.countdownBeforeStartSec;
+      case 'work':
+        return stateRef.current.workSec;
+      case 'rest':
+        return stateRef.current.restSec;
+      default:
+        return stateRef.current.workSec;
+    }
+  }, []);
+
+  const isCountdown = useCallback((phase) => {
+    return phase === 'beforeStart';
   }, []);
 
   const stop = useCallback(() => {
     setIsActive(false);
     setIsPaused(false);
+    setIsCountdownPhase(false);
     const initialDuration = getDuration('work');
     setTimeRemaining(initialDuration);
     setCurrentPhase('work');
@@ -63,20 +92,42 @@ export const useTimerLogic = ({
     
     if (stateRef.current.isPaused && stateRef.current.endTime > 0) {
       // Resume: recalculate endTime based on stored remaining time
-      // We don't store "pausedAt", we store "remaining" when pausing.
       stateRef.current.endTime = now + (stateRef.current.remaining * 1000);
     } else {
-      // Start fresh
-      const duration = getDuration(stateRef.current.phase);
+      // Start fresh - check if we should start with beforeStart countdown
+      let startPhase = stateRef.current.phase;
+      
+      // Use prop value directly to avoid race condition with useEffect
+      const beforeStartDuration = countdownBeforeStartSec || stateRef.current.countdownBeforeStartSec || 0;
+      
+      console.log('⏱️ start() called, beforeStartDuration:', beforeStartDuration);
+      
+      // If starting from work phase and beforeStart countdown is enabled, start with countdown
+      if (startPhase === 'work' && stateRef.current.round === 1 && beforeStartDuration > 0) {
+        console.log('⏱️ Starting with beforeStart countdown');
+        startPhase = 'beforeStart';
+        stateRef.current.phase = 'beforeStart';
+        stateRef.current.countdownBeforeStartSec = beforeStartDuration;
+        setCurrentPhase('beforeStart');
+        setIsCountdownPhase(true);
+        
+        // Notify about countdown start
+        if (onCountdownStart) {
+          onCountdownStart('beforeStart', beforeStartDuration);
+        }
+      }
+      
+      const duration = getDuration(startPhase);
+      console.log('⏱️ Starting phase:', startPhase, 'duration:', duration);
       stateRef.current.endTime = now + (duration * 1000);
-      // Update state if needed (e.g. if we were reset)
+      setTimeRemaining(duration);
     }
 
     setIsActive(true);
     setIsPaused(false);
     stateRef.current.isActive = true;
     stateRef.current.isPaused = false;
-  }, [getDuration]);
+  }, [getDuration, onCountdownStart, countdownBeforeStartSec]);
 
   const pause = useCallback(() => {
     if (!stateRef.current.isActive || stateRef.current.isPaused) return;
@@ -89,7 +140,7 @@ export const useTimerLogic = ({
     const diff = Math.max(0, stateRef.current.endTime - now);
     const remainingSeconds = Math.max(0, diff / 1000);
     stateRef.current.remaining = remainingSeconds;
-    setTimeRemaining(Math.ceil(remainingSeconds)); // Sync UI
+    setTimeRemaining(Math.ceil(remainingSeconds));
   }, []);
 
   const resume = useCallback(() => {
@@ -99,27 +150,48 @@ export const useTimerLogic = ({
   const handlePhaseComplete = useCallback(() => {
     const { phase, round, rounds: totalRounds } = stateRef.current;
     
+    console.log('⏱️ handlePhaseComplete:', { phase, round, totalRounds });
+    
     let nextPhase = phase;
     let nextRound = round;
     let shouldStop = false;
 
-    if (phase === 'work') {
-      if (round >= totalRounds) {
-        shouldStop = true;
-      } else {
-        nextPhase = 'rest';
-      }
-    } else {
-      nextPhase = 'work';
-      nextRound = round + 1;
+    // Simple phase transition: beforeStart -> work -> rest -> work -> rest -> ...
+    switch (phase) {
+      case 'beforeStart':
+        // After beforeStart countdown, go to work
+        nextPhase = 'work';
+        break;
+        
+      case 'work':
+        // After work, check if this is the last round
+        if (round >= totalRounds) {
+          shouldStop = true;
+        } else {
+          nextPhase = 'rest';
+        }
+        break;
+        
+      case 'rest':
+        // After rest, go to next round's work
+        nextPhase = 'work';
+        nextRound = round + 1;
+        break;
+        
+      default:
+        nextPhase = 'work';
     }
 
     if (shouldStop) {
+      console.log('⏰ Timer: Routine completed!');
       stop();
-      if (onComplete) onComplete();
+      if (onComplete) {
+        onComplete();
+      }
     } else {
       setCurrentPhase(nextPhase);
       setCurrentRound(nextRound);
+      setIsCountdownPhase(false); // Only beforeStart is a countdown
       
       const nextDuration = getDuration(nextPhase);
       setTimeRemaining(nextDuration);
@@ -129,6 +201,7 @@ export const useTimerLogic = ({
       stateRef.current.round = nextRound;
       stateRef.current.endTime = Date.now() + (nextDuration * 1000);
       
+      // Notify about phase change (work or rest)
       if (onPhaseChange) {
         onPhaseChange(nextPhase, nextRound);
       }
@@ -136,7 +209,6 @@ export const useTimerLogic = ({
   }, [getDuration, onComplete, onPhaseChange, stop]);
 
   const skipPhase = useCallback(() => {
-    // Manually force phase switch
     handlePhaseComplete();
   }, [handlePhaseComplete]);
 
@@ -153,12 +225,9 @@ export const useTimerLogic = ({
         const secondsRemaining = Math.ceil(diff / 1000);
 
         if (diff <= 0) {
-           // Phase complete
-           handlePhaseComplete();
-           // Loop continues in next frame (handlePhaseComplete updates endTime)
+          handlePhaseComplete();
         } else {
-           // Only update state if changed to avoid re-renders
-           setTimeRemaining((prev) => (prev !== secondsRemaining ? secondsRemaining : prev));
+          setTimeRemaining((prev) => (prev !== secondsRemaining ? secondsRemaining : prev));
         }
       }
 
@@ -167,7 +236,7 @@ export const useTimerLogic = ({
 
     rafId = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(rafId);
-  }, [handlePhaseComplete]); // Loop depends on handlePhaseComplete which is stable-ish
+  }, [handlePhaseComplete]);
 
   return {
     timeRemaining,
@@ -175,23 +244,23 @@ export const useTimerLogic = ({
     currentRound,
     isActive,
     isPaused,
+    isCountdownPhase,
     start,
     pause,
     resume,
     stop,
     skipPhase,
     setPhase: (phase, round) => {
-        setCurrentPhase(phase);
-        setCurrentRound(round);
-        const duration = getDuration(phase);
-        setTimeRemaining(duration);
-        stateRef.current.phase = phase;
-        stateRef.current.round = round;
-        // If active, reset end time?
-        if (stateRef.current.isActive) {
-            stateRef.current.endTime = Date.now() + (duration * 1000);
-        }
+      setCurrentPhase(phase);
+      setCurrentRound(round);
+      setIsCountdownPhase(isCountdown(phase));
+      const duration = getDuration(phase);
+      setTimeRemaining(duration);
+      stateRef.current.phase = phase;
+      stateRef.current.round = round;
+      if (stateRef.current.isActive) {
+        stateRef.current.endTime = Date.now() + (duration * 1000);
+      }
     }
   };
 };
-

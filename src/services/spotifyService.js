@@ -12,7 +12,7 @@ const spotifyService = {
     return spotifyAPI.play(accessToken, deviceId);
   },
   playTrack: (accessToken, trackUri, deviceId, options) => spotifyAPI.playTrack(accessToken, trackUri, deviceId, options),
-  pause: (accessToken, refreshCallback) => spotifyAPI.pause(accessToken, refreshCallback),
+  pause: (accessToken, refreshCallback, deviceId = null) => spotifyAPI.pause(accessToken, refreshCallback, deviceId),
   next: (accessToken, refreshCallback) => spotifyAPI.next(accessToken, refreshCallback),
   previous: (accessToken, refreshCallback) => spotifyAPI.previous(accessToken, refreshCallback),
   setShuffle: (accessToken, shuffle, deviceId) => spotifyAPI.setShuffle(accessToken, shuffle, deviceId),

@@ -11,6 +11,7 @@ export const PlatformSelector = ({
   connectedPlatforms = {},
   includeDevice = true,
   includeBrowser = false,
+  includeVoices = false, // New prop for countdown sounds
   style,
   buttonStyle,
 }) => {
@@ -20,6 +21,10 @@ export const PlatformSelector = ({
 
   // Build available platforms list
   const availablePlatforms = [
+    ...(includeVoices 
+      ? [{ id: 'voices', name: 'Default Voices', icon: 'megaphone-outline', color: theme.accent }]
+      : []
+    ),
     ...(includeDevice 
       ? [{ id: 'device', name: 'Device', icon: 'phone-portrait-outline', color: theme.textSecondary }]
       : []
@@ -38,6 +43,8 @@ export const PlatformSelector = ({
     ? { id: 'device', name: 'Device', icon: 'phone-portrait-outline', color: theme.textSecondary }
     : selectedPlatform === 'browser'
     ? { id: 'browser', name: 'Browser', icon: 'globe-outline', color: theme.textSecondary }
+    : selectedPlatform === 'voices'
+    ? { id: 'voices', name: 'Default Voices', icon: 'megaphone-outline', color: theme.accent }
     : PLATFORMS[selectedPlatform];
 
   const handlePlatformSelect = (platformId) => {

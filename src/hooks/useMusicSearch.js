@@ -26,7 +26,7 @@ export const useMusicSearch = ({ services, connectedPlatforms, refreshToken }) =
    * Search for music (tracks, playlists, artists, etc.) on any platform
    */
   const searchMusic = useCallback(async (query, platform, searchTypes = ['track']) => {
-    if (!query || query.trim().length < 3) {
+    if (!query || query.trim().length < 1) {
       setSearchResults([]);
       return [];
     }
@@ -313,13 +313,72 @@ export const useMusicSearch = ({ services, connectedPlatforms, refreshToken }) =
   }, [loadPlaylistTracks]);
 
   /**
+   * Load device music library (all audio files)
+   */
+  const loadDeviceMusic = async () => {
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.warn('Media library permission not granted');
+        return [];
+      }
+
+      // Get all audio files from device
+      const audioAssets = await MediaLibrary.getAssetsAsync({
+        mediaType: MediaLibrary.MediaType.audio,
+        first: 50, // Limit to 50 for suggestions
+        sortBy: MediaLibrary.SortBy.modificationTime, // Most recent first
+      });
+
+      // Get album info
+      const albumIds = [...new Set(audioAssets.assets.map(asset => asset.albumId).filter(Boolean))];
+      const albumMap = {};
+      
+      for (const albumId of albumIds) {
+        try {
+          const album = await MediaLibrary.getAlbumAsync(albumId);
+          if (album) albumMap[albumId] = album.title;
+        } catch (error) {
+          // Ignore album fetch errors
+        }
+      }
+
+      // Map to track format
+      const tracks = audioAssets.assets.map(asset => ({
+        id: asset.id,
+        name: asset.filename.replace(/\.[^/.]+$/, ''), // Remove file extension
+        artist: asset.albumId ? (albumMap[asset.albumId] || 'Unknown Artist') : 'Unknown Artist',
+        album: asset.albumId ? (albumMap[asset.albumId] || null) : null,
+        image: null,
+        duration: asset.duration,
+        uri: asset.uri,
+        type: 'track',
+        source: 'device',
+        platform: 'device',
+      }));
+
+      return tracks;
+    } catch (error) {
+      console.error('Error loading device music:', error);
+      return [];
+    }
+  };
+
+  /**
    * Load suggested/popular songs for a platform
    */
   const loadSuggestedSongs = useCallback(async (platform) => {
-    // Device doesn't have suggestions
+    // Device: Load music library as suggestions
     if (platform === 'device') {
-      setPopularSongs([]);
-      return [];
+      try {
+        const deviceTracks = await loadDeviceMusic();
+        setPopularSongs(deviceTracks);
+        return deviceTracks;
+      } catch (error) {
+        console.error('Error loading device music:', error);
+        setPopularSongs([]);
+        return [];
+      }
     }
 
     const platformData = connectedPlatforms?.[platform];
@@ -382,6 +441,7 @@ export const useMusicSearch = ({ services, connectedPlatforms, refreshToken }) =
     setPlaylists,
     setPlaylistTracks,
     setSelectedPlaylistId,
+    setPopularSongs,
   };
 };
 

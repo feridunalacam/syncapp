@@ -1,9 +1,8 @@
-import React, { useMemo } from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import React, { useMemo, useRef, useEffect, useState } from 'react';
+import { View, Text, Image, StyleSheet, Animated } from 'react-native';
 import { useTheme } from '../../../context/ThemeContext';
 import { formatTime } from '../../../utils/timeFormatters';
 
-// Fallback track data when no music is selected
 const FALLBACK_TRACK = {
   title: 'Ready to play',
   artist: 'No music selected',
@@ -14,28 +13,29 @@ const FALLBACK_TRACK = {
 
 export const MusicPlayerPreview = ({ 
   track, 
-  musicProgress, 
+  musicProgress = 0, 
   selectedRoutine, 
   currentRound, 
-  currentPhase
+  currentPhase,
+  isWorkoutRunning = false,
+  isPaused = false,
 }) => {
   const { theme } = useTheme();
   const styles = createStyles(theme);
-  // Determine what should be displayed based on current round and phase
-  const displayTrack = useMemo(() => {
-    // Priority 1: If there's an actual track playing from the platform, use that
-    if (track) {
-      return track;
-    }
+  
+  // Smooth progress animation
+  const [smoothProgress, setSmoothProgress] = useState(0);
+  const lastProgressRef = useRef(0);
+  const progressStartTimeRef = useRef(null);
+  const rafIdRef = useRef(null);
 
-    // Priority 2: If no track is playing, show what should be playing from the round configuration
+  const displayTrack = useMemo(() => {
+    if (track) return track;
+
     if (selectedRoutine && currentRound && currentPhase) {
       const roundData = selectedRoutine.roundsData?.[currentRound - 1];
-      if (!roundData) {
-        return FALLBACK_TRACK;
-      }
+      if (!roundData) return FALLBACK_TRACK;
 
-      // Check for song in current phase
       const phaseSong = currentPhase === 'work' ? roundData.workSong : roundData.restSong;
       if (phaseSong) {
         return {
@@ -46,119 +46,107 @@ export const MusicPlayerPreview = ({
           coverUrl: phaseSong.image || phaseSong.coverUrl || null,
         };
       }
-
-      // Check for playlist in current phase
-      const phasePlaylist = currentPhase === 'work' 
-        ? (roundData.workPlaylistName ? { 
-            name: roundData.workPlaylistName, 
-            tracksCount: roundData.workPlaylistTracksCount || 0,
-            image: roundData.workPlaylistImage || null,
-          } : null)
-        : (roundData.restPlaylistName ? { 
-            name: roundData.restPlaylistName, 
-            tracksCount: roundData.restPlaylistTracksCount || 0,
-            image: roundData.restPlaylistImage || null,
-          } : null);
-      
-      if (phasePlaylist) {
-        return {
-          title: phasePlaylist.name,
-          artist: 'Playlist',
-          album: `${phasePlaylist.tracksCount || 0} tracks`,
-          duration: 0,
-          coverUrl: phasePlaylist.image || null,
-        };
-      }
-
-      // Check for global playlists
-      if (currentPhase === 'work' && selectedRoutine.workoutPlaylistName) {
-        return {
-          title: selectedRoutine.workoutPlaylistName,
-          artist: 'Work Playlist',
-          album: 'Global',
-          duration: 0,
-          coverUrl: null,
-        };
-      }
-
-      if (currentPhase === 'rest' && selectedRoutine.restPlaylistName) {
-        return {
-          title: selectedRoutine.restPlaylistName,
-          artist: 'Rest Playlist',
-          album: 'Global',
-          duration: 0,
-          coverUrl: null,
-        };
-      }
     }
 
-    // Fallback
     return FALLBACK_TRACK;
   }, [track, selectedRoutine, currentRound, currentPhase]);
 
-  const displayDuration = displayTrack.duration || 0;
-  const displayCoverUrl = displayTrack.coverUrl || 'https://via.placeholder.com/85/1f2937/ffffff?text=Music';
+  const duration = displayTrack.duration || 0;
+  const coverUrl = displayTrack.coverUrl || 'https://via.placeholder.com/85/1f2937/ffffff?text=Music';
 
-  // Calculate progress percentage for the progress bar
-  const progressPercentage = displayDuration > 0 
-    ? Math.min(100, Math.max(0, (musicProgress / displayDuration) * 100))
-    : 0;
+  // Smooth progress animation using requestAnimationFrame
+  useEffect(() => {
+    // When musicProgress changes (from API), sync and start smooth animation
+    const now = Date.now();
+    
+    // If progress jumped backward or to a very different value, reset immediately
+    if (Math.abs(musicProgress - lastProgressRef.current) > 2) {
+      setSmoothProgress(musicProgress);
+      lastProgressRef.current = musicProgress;
+      progressStartTimeRef.current = now;
+    } else if (musicProgress !== lastProgressRef.current) {
+      // Normal progress update - sync to API value
+      lastProgressRef.current = musicProgress;
+      progressStartTimeRef.current = now;
+    }
 
-  // Format time helper - handles edge cases
+    // Cancel any existing animation
+    if (rafIdRef.current) {
+      cancelAnimationFrame(rafIdRef.current);
+    }
+
+    // Don't animate if paused or not running
+    if (isPaused || !isWorkoutRunning || duration <= 0) {
+      setSmoothProgress(musicProgress);
+      return;
+    }
+
+    const animate = () => {
+      if (!progressStartTimeRef.current) {
+        progressStartTimeRef.current = Date.now();
+      }
+
+      const elapsed = (Date.now() - progressStartTimeRef.current) / 1000;
+      const newProgress = lastProgressRef.current + elapsed;
+      
+      // Don't exceed duration
+      if (newProgress <= duration) {
+        setSmoothProgress(newProgress);
+        rafIdRef.current = requestAnimationFrame(animate);
+      } else {
+        setSmoothProgress(duration);
+      }
+    };
+
+    rafIdRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current);
+      }
+    };
+  }, [musicProgress, isPaused, isWorkoutRunning, duration]);
+
+  // Progress bar percentage using smooth progress
+  const percentage = duration > 0 ? Math.min(100, (smoothProgress / duration) * 100) : 0;
+
   const formatTimeDisplay = (seconds) => {
     if (!seconds || seconds < 0) return '0:00';
-    return formatTime(seconds);
+    return formatTime(Math.floor(seconds));
   };
 
   return (
-    <View style={[styles.musicPlayer, { marginTop: 12, position: 'relative' }]}>
+    <View style={styles.musicPlayer}>
       <View style={styles.musicAlbumArt}>
         <Image
-          source={{ uri: displayCoverUrl }}
+          source={{ uri: coverUrl }}
           style={{ width: '100%', height: '100%', borderRadius: 14 }}
           resizeMode="cover"
-          onError={() => {}}
         />
       </View>
       <View style={styles.musicTrackInfo}>
-        <Text 
-          style={[
-            styles.musicTrackTitle,
-            displayTrack.title === 'Ready to play' && styles.musicTrackTitleFallback
-          ]}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >{displayTrack.title}</Text>
-        <Text 
-          style={styles.musicTrackArtist}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >{displayTrack.artist}</Text>
-        <Text 
-          style={styles.musicTrackAlbum}
-          numberOfLines={1}
-          ellipsizeMode="tail"
-        >{displayTrack.album}</Text>
+        <Text style={styles.musicTrackTitle} numberOfLines={1}>{displayTrack.title}</Text>
+        <Text style={styles.musicTrackArtist} numberOfLines={1}>{displayTrack.artist}</Text>
+        <Text style={styles.musicTrackAlbum} numberOfLines={1}>{displayTrack.album}</Text>
         <View style={styles.musicProgressBar}>
-          <View style={[styles.musicProgressFill, { width: `${progressPercentage}%` }]} />
+          <View style={[styles.musicProgressFill, { width: `${percentage}%` }]} />
         </View>
         <View style={styles.musicTimeInfo}>
-          <Text style={styles.musicTimeText}>{formatTimeDisplay(musicProgress)}</Text>
-          <Text style={styles.musicTimeText}>{formatTimeDisplay(displayDuration)}</Text>
+          <Text style={styles.musicTimeText}>{formatTimeDisplay(smoothProgress)}</Text>
+          <Text style={styles.musicTimeText}>{formatTimeDisplay(duration)}</Text>
         </View>
       </View>
     </View>
   );
 };
 
-// Component-specific styles
 const createStyles = (theme) => StyleSheet.create({
   musicPlayer: {
     width: '100%',
     backgroundColor: 'transparent',
     borderRadius: 12,
     padding: theme.spacing.lg,
-    marginTop: theme.spacing.lg,
+    marginTop: 12,
     marginBottom: theme.spacing['2xl'],
     flexDirection: 'row',
     alignItems: 'center',
@@ -181,9 +169,6 @@ const createStyles = (theme) => StyleSheet.create({
     color: theme.text,
     marginBottom: theme.spacing.xs,
   },
-  musicTrackTitleFallback: {
-    color: theme.text,
-  },
   musicTrackArtist: {
     fontSize: 17,
     color: theme.text,
@@ -200,12 +185,12 @@ const createStyles = (theme) => StyleSheet.create({
     marginTop: theme.spacing.sm,
     marginBottom: theme.spacing.xs,
     width: '100%',
+    overflow: 'hidden',
   },
   musicProgressFill: {
     height: '100%',
     backgroundColor: theme.success,
-    borderRadius: 1.75,
-    width: '0%',
+    borderRadius: 2,
   },
   musicTimeInfo: {
     flexDirection: 'row',

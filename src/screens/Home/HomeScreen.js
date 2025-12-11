@@ -8,6 +8,7 @@ import { createScreenStyles } from '../../styles/screenStyles';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
 import { useTimerLogic } from './TimerLogic';
 import { useAudioController } from '../../hooks/useAudioController';
+import { useCountdownSoundPlayer } from '../../utils/countdownSoundPlayer';
 import { navigateToCreateRoutine } from '../../navigation/navigationHelpers';
 import { MusicPlayerPreview } from './components/MusicPlayerPreview';
 import { AudioControllerUI } from './components/AudioControllerUI';
@@ -37,6 +38,9 @@ function HomeScreen({ navigation }) {
     [routines, selectedRoutineId],
   );
 
+  // Countdown sound player
+  const countdownSoundPlayer = useCountdownSoundPlayer();
+
   // Audio Controller Hook - Manages all music playback
   // All music controls (play, pause, shuffle, next, previous, repeat) are handled here
   // Phase changes automatically trigger music changes
@@ -49,14 +53,17 @@ function HomeScreen({ navigation }) {
       isRepeating,
       handlePhaseChange,
       togglePlayPause,
-      pauseMusic, // ✅ NEW: Explicit pause
-      resumeMusic, // ✅ NEW: Explicit resume
+      pauseMusic,
+      resumeMusic,
       skipNext,
       skipPrevious,
       toggleShuffle,
       toggleRepeat,
-      stopMusic, // ✅ NEW: Complete music stop
-      setVolume, // ✅ NEW: Volume control
+      stopMusic,
+      setVolume,
+      applyRestVolume,
+      resetVolume,
+      playCountdownSound,
       fetchPlayback,
   } = useAudioController({
       musicPlayer,
@@ -64,18 +71,71 @@ function HomeScreen({ navigation }) {
       connectedPlatforms,
       refreshToken,
       selectedRoutine,
-      services
+      services,
+      countdownSoundPlayer,
   });
 
   // Handler for workout completion
   const handleWorkoutComplete = useCallback(async () => {
+      console.log('🏁 handleWorkoutComplete called - routine finished!');
       setIsWorkoutRunning(false);
+      console.log('🏁 Calling stopMusic...');
       await stopMusic();
+      console.log('🏁 stopMusic completed, adding completed routine...');
       addCompletedRoutine({
         ...selectedRoutine,
         completedAt: new Date().toISOString(),
       });
+      console.log('🏁 handleWorkoutComplete done');
   }, [selectedRoutine, addCompletedRoutine, stopMusic]);
+
+  // Handle countdown start - play music for beforeStart phase (like a round)
+  const handleCountdownStart = useCallback(async (countdownType, duration) => {
+    console.log(`Countdown started: ${countdownType}, duration: ${duration}s`);
+    
+    if (countdownType === 'beforeStart' && duration > 0) {
+      // Treat beforeStart like a round - use handlePhaseChange to play music
+      console.log('🎵 Starting beforeStart music via handlePhaseChange');
+      await handlePhaseChange('beforeStart', 0);
+    }
+  }, [handlePhaseChange]);
+
+  // Track which sounds have been played this phase (to avoid replaying)
+  const [playedSoundsThisPhase, setPlayedSoundsThisPhase] = useState({
+    beforeStart: false,
+    endWork: false,
+    endRest: false,
+  });
+
+  // Handle phase change with volume control (sounds are now triggered by time-based useEffect)
+  const handlePhaseChangeWithVolume = useCallback(async (phase, round) => {
+    console.log('📍 handlePhaseChangeWithVolume:', phase, round);
+    
+    // Reset played sounds flags when phase changes
+    setPlayedSoundsThisPhase({ beforeStart: false, endWork: false, endRest: false });
+    
+    if (phase === 'work') {
+      // Work phase starting
+      if (round === 1) {
+        console.log('📍 Round 1 work starting - initializing music');
+      }
+      // Notify audio controller about phase changes
+      await handlePhaseChange(phase, round);
+      // Reset volume to 100%
+      await resetVolume();
+    } else if (phase === 'rest') {
+      // Apply rest volume
+      if (selectedRoutine?.restVolume !== undefined && selectedRoutine.restVolume < 100) {
+        console.log('📍 Applying rest volume:', selectedRoutine.restVolume);
+        await applyRestVolume(selectedRoutine.restVolume);
+      }
+      // Notify audio controller about phase changes so music can sync
+      await handlePhaseChange(phase, round);
+    } else {
+      // Other phases (beforeStart, etc.)
+      await handlePhaseChange(phase, round);
+    }
+  }, [handlePhaseChange, applyRestVolume, resetVolume, selectedRoutine]);
 
   const {
     timeRemaining,
@@ -83,6 +143,7 @@ function HomeScreen({ navigation }) {
     currentRound,
     isActive: isTimerActive,
     isPaused,
+    isCountdownPhase,
     start: startTimer,
     pause: pauseTimer,
     resume: resumeTimer,
@@ -93,27 +154,88 @@ function HomeScreen({ navigation }) {
     workSec: selectedRoutine ? (selectedRoutine.workSec || 60) : 60,
     restSec: selectedRoutine ? (selectedRoutine.restSec || 30) : 30,
     rounds: selectedRoutine ? (selectedRoutine.rounds || 5) : 5,
-    onPhaseChange: (phase, round) => {
-       // Notify audio controller about phase changes so music can sync
-       handlePhaseChange(phase, round);
-    },
+    // Only beforeStart has a countdown - other sounds play at phase transitions
+    countdownBeforeStartSec: selectedRoutine?.countdownBeforeStartDuration || 0,
+    onPhaseChange: handlePhaseChangeWithVolume,
+    onCountdownStart: handleCountdownStart,
     onComplete: handleWorkoutComplete,
   });
 
+  // Time-based sound triggers: Play sounds X seconds before phase ends (X = sound duration)
+  useEffect(() => {
+    if (!isWorkoutRunning || isPaused || !selectedRoutine) return;
+
+    // Helper to get sound duration in seconds
+    const getSoundDurationSec = (sound) => {
+      if (!sound || !sound.duration) return 0;
+      // Duration is already in seconds (from MusicSearchModal DEFAULT_VOICES)
+      return sound.duration;
+    };
+
+    // Before Start phase - play countdownBeforeStartSound
+    if (currentPhase === 'beforeStart' && !playedSoundsThisPhase.beforeStart) {
+      const soundDurationSec = getSoundDurationSec(selectedRoutine.countdownBeforeStartSound);
+      if (soundDurationSec > 0 && timeRemaining === soundDurationSec) {
+        console.log(`🔔 Before Start: ${timeRemaining}s remaining, playing sound (duration: ${soundDurationSec}s)`);
+        playCountdownSound('beforeStart');
+        setPlayedSoundsThisPhase(prev => ({ ...prev, beforeStart: true }));
+      }
+    }
+
+    // Work phase - play endWorkSound before work ends
+    if (currentPhase === 'work' && !playedSoundsThisPhase.endWork) {
+      const soundDurationSec = getSoundDurationSec(selectedRoutine.endWorkSound);
+      if (soundDurationSec > 0 && timeRemaining === soundDurationSec) {
+        console.log(`🔔 Work phase: ${timeRemaining}s remaining, playing endWorkSound (duration: ${soundDurationSec}s)`);
+        playCountdownSound('endWork');
+        setPlayedSoundsThisPhase(prev => ({ ...prev, endWork: true }));
+      }
+    }
+
+    // Rest phase - play endRestSound before rest ends
+    if (currentPhase === 'rest' && !playedSoundsThisPhase.endRest) {
+      const soundDurationSec = getSoundDurationSec(selectedRoutine.endRestSound);
+      if (soundDurationSec > 0 && timeRemaining === soundDurationSec) {
+        console.log(`🔔 Rest phase: ${timeRemaining}s remaining, playing endRestSound (duration: ${soundDurationSec}s)`);
+        playCountdownSound('endRest');
+        setPlayedSoundsThisPhase(prev => ({ ...prev, endRest: true }));
+      }
+    }
+  }, [timeRemaining, currentPhase, isWorkoutRunning, isPaused, selectedRoutine, playedSoundsThisPhase, playCountdownSound]);
+
   // Sync playback status with API periodically (every 2 seconds)
-  // This keeps track info and progress bar updated
   useEffect(() => {
     if (!selectedPlatform || !isWorkoutRunning || !musicPlayer) return;
     
-    // Fetch immediately when workout starts
-    fetchPlayback();
+    const hasBeforeStartCountdown = (selectedRoutine?.countdownBeforeStartDuration || 0) > 0;
+    if (isCountdownPhase || currentPhase === 'beforeStart') return;
+    
+    // Also skip if workout just started and has countdown (race condition protection)
+    // Only fetch after first real phase (work/rest) has started
+    if (hasBeforeStartCountdown && currentPhase === 'work' && currentRound === 1) {
+      // Wait a bit to let the phase settle
+      const timeout = setTimeout(() => {
+        if (!isCountdownPhase && currentPhase !== 'beforeStart') {
+          fetchPlayback();
+        }
+      }, 1000);
+      return () => clearTimeout(timeout);
+    }
+    
+    // Fetch immediately when work/rest starts (no countdown case)
+    if (!hasBeforeStartCountdown) {
+      fetchPlayback();
+    }
     
     const interval = setInterval(async () => {
-      await fetchPlayback();
-    }, 2000); // Sync every 2 seconds
+      // Double check we're not in countdown
+      if (!isCountdownPhase && currentPhase !== 'beforeStart') {
+        await fetchPlayback();
+      }
+    }, 1000); // Sync every 1 second for smoother progress
     
     return () => clearInterval(interval);
-  }, [selectedPlatform, isWorkoutRunning, musicPlayer, fetchPlayback]);
+  }, [selectedPlatform, isWorkoutRunning, musicPlayer, fetchPlayback, isCountdownPhase, currentPhase, currentRound, selectedRoutine]);
 
   // Reset timer when routine changes (if not running)
   useEffect(() => {
@@ -132,12 +254,49 @@ function HomeScreen({ navigation }) {
       return false;
     }
 
+    // Preload countdown sounds for instant playback
+    const soundsToPreload = [];
+    if (selectedRoutine.countdownBeforeStartSound?.uri) {
+      soundsToPreload.push(selectedRoutine.countdownBeforeStartSound.uri);
+    }
+    if (selectedRoutine.endWorkSound?.uri) {
+      soundsToPreload.push(selectedRoutine.endWorkSound.uri);
+    }
+    if (selectedRoutine.endRestSound?.uri) {
+      soundsToPreload.push(selectedRoutine.endRestSound.uri);
+    }
+    if (soundsToPreload.length > 0) {
+      countdownSoundPlayer.preload(soundsToPreload);
+    }
+
+    // Debug: Log routine settings
+    console.log('🚀 Starting workout with routine:', selectedRoutine.name);
+    console.log('🚀 Routine settings:', {
+      restVolume: selectedRoutine.restVolume,
+      countdownBeforeStartDuration: selectedRoutine.countdownBeforeStartDuration,
+      countdownBeforeStartSound: selectedRoutine.countdownBeforeStartSound,
+      countdownEndWorkDuration: selectedRoutine.countdownEndWorkDuration,
+      countdownEndWorkSound: selectedRoutine.countdownEndWorkSound,
+      countdownEndRestDuration: selectedRoutine.countdownEndRestDuration,
+      countdownEndRestSound: selectedRoutine.countdownEndRestSound,
+    });
+
     setPhase('work', 1);
     setIsWorkoutRunning(true);
     startTimer();
 
-    // Start music playback for first phase
-    await handlePhaseChange('work', 1);
+    // Check if we have a beforeStart countdown
+    const hasBeforeStartCountdown = (selectedRoutine?.countdownBeforeStartDuration || 0) > 0;
+    console.log('🚀 hasBeforeStartCountdown:', hasBeforeStartCountdown);
+    
+    // Only start music immediately if there's no countdown
+    // Otherwise, music will start when countdown ends and work phase begins
+    if (!hasBeforeStartCountdown) {
+      console.log('🚀 No countdown, starting music immediately');
+      await handlePhaseChange('work', 1);
+    } else {
+      console.log('🚀 Has countdown, music will start after countdown');
+    }
 
     return true;
   }, [
@@ -179,10 +338,13 @@ function HomeScreen({ navigation }) {
   ]);
 
   const handleStopWorkout = useCallback(async () => {
+    console.log('⏹️ handleStopWorkout called - stop button pressed!');
     stopTimer();
     setPhase('work', 1);
     setIsWorkoutRunning(false);
+    console.log('⏹️ Calling stopMusic...');
     await stopMusic();
+    console.log('⏹️ handleStopWorkout done');
   }, [stopTimer, setPhase, stopMusic]);
 
   const handleSkipBackward = useCallback(() => {
@@ -212,40 +374,32 @@ function HomeScreen({ navigation }) {
 
   return (
     <ScreenWrapper style={screenStyles.container} backgroundColor={theme.background}>
-    <View style={{ flex: 1 }}>
-      {/* Top Bar */}
-      <View style={screenStyles.topBar}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', position: 'relative' }}>
+    <View style={screenStyles.flexContainer}>
+      {/* Header - Same structure as Routine screen */}
+      <View style={screenStyles.pageHeader}>
+        <View style={[screenStyles.pageHeaderContent, { marginBottom: theme.spacing.sm }]}>
           <View style={screenStyles.routineSelectorBar}>
-            <View style={screenStyles.routineDropdownButton}>
             <TouchableOpacity style={screenStyles.routineSelectorTextContainer} onPress={() => setShowRoutineDropdown(!showRoutineDropdown)} activeOpacity={0.7}>
-              <Text style={screenStyles.routineSelectorTitle} numberOfLines={1}>
-                {selectedRoutine ? selectedRoutine.name : 'No routine selected'}
-              </Text>
-              {selectedRoutine && (
-                <TouchableOpacity 
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    navigateToCreateRoutine(navigation, selectedRoutine);
-                  }}
-                  style={{ marginLeft: theme.spacing.sm, marginRight: theme.spacing.xs }}
-                  activeOpacity={0.7}
-                >
-                  <Ionicons name="create-outline" size={18} color={theme.accent} />
-                </TouchableOpacity>
-              )}
-                <Ionicons name="chevron-down" size={20} color={theme.accent} />
-            </TouchableOpacity>
-              <View style={screenStyles.routineSelectorActions}>
-                <TouchableOpacity style={screenStyles.routineSelectorActionButton} onPress={() => navigateToCreateRoutine(navigation)} activeOpacity={0.7}>
-                  <Ionicons name="add" size={20} color={theme.accent} />
+            <Text style={screenStyles.routineSelectorTitle} numberOfLines={1}>
+              {selectedRoutine ? selectedRoutine.name : 'No routine selected'}
+            </Text>
+            {selectedRoutine && (
+              <TouchableOpacity 
+                onPress={(e) => {
+                  e.stopPropagation();
+                  navigateToCreateRoutine(navigation, selectedRoutine);
+                }}
+                style={screenStyles.routineSelectorEditIcon}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="create-outline" size={18} color={theme.accent} />
+              </TouchableOpacity>
+            )}
+            <Ionicons name="chevron-down" size={20} color={theme.accent} />
           </TouchableOpacity>
-              </View>
-            </View>
-          </View>
           {showRoutineDropdown && (
             <>
-              <TouchableOpacity style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999 }} onPress={() => setShowRoutineDropdown(false)} activeOpacity={1} />
+              <TouchableOpacity style={screenStyles.dropdownOverlay} onPress={() => setShowRoutineDropdown(false)} activeOpacity={1} />
               <View style={screenStyles.routineDropdownMenu} pointerEvents="box-none">
                 <View pointerEvents="auto">
                 <ScrollView>
@@ -260,8 +414,12 @@ function HomeScreen({ navigation }) {
                 </ScrollView>
                 </View>
               </View>
-            </>
-          )}
+              </>
+            )}
+          </View>
+          <TouchableOpacity style={screenStyles.addButton} onPress={() => navigateToCreateRoutine(navigation)}>
+            <Text style={screenStyles.addButtonText}>+</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -275,9 +433,11 @@ function HomeScreen({ navigation }) {
         currentPhase={currentPhase}
         currentRound={currentRound}
         selectedRoutine={selectedRoutine}
+        isCountdownActive={isCountdownPhase}
+        countdownTime={isCountdownPhase ? timeRemaining : null}
       />
 
-      <View style={{ width: '100%', height: 1, backgroundColor: theme.divider, marginTop: theme.spacing['2xl'], marginBottom: theme.spacing.sm }} />
+      <View style={screenStyles.divider} />
 
         <AudioControllerUI
           screenStyles={screenStyles}
@@ -304,7 +464,7 @@ function HomeScreen({ navigation }) {
           currentRound={currentRound}
           currentPhase={currentPhase}
           isWorkoutRunning={isWorkoutRunning}
-          timeRemaining={timeRemaining}
+          isPaused={isPaused}
         />
       </ScrollView>
               </View>
