@@ -7,6 +7,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../context/ThemeContext';
 import { createScreenStyles } from '../../styles/screenStyles';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
+import { EmptyState } from '../../components/common/StateViews';
 import { formatDate } from '../../utils/timeFormatters';
 import { useLogData } from './hooks/useLogData';
 
@@ -60,25 +61,22 @@ export default function LogScreen({ navigation }) {
             <TouchableOpacity
               style={screenStyles.addButton}
               onPress={handleClearAll}
+              accessibilityRole="button"
+              accessibilityLabel="Clear all workout logs"
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-              <Ionicons name="trash-outline" size={20} color={theme.text} />
+              <Ionicons name="trash-outline" size={theme.iconSize.lg} color={theme.text} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
       {sortedCompleted.length === 0 ? (
-        <View style={logStyles.emptyStateContainer}>
-          <View style={logStyles.emptyStateIconContainer}>
-            <Ionicons name="checkmark-circle-outline" size={64} color={theme.iconTertiary} />
-          </View>
-          <Text style={logStyles.emptyStateTitle}>
-            No completed routines yet
-          </Text>
-          <Text style={logStyles.emptyStateSubtitle}>
-            Complete a routine from the Home screen{'\n'}to see it here.
-          </Text>
-        </View>
+        <EmptyState
+          icon="checkmark-circle-outline"
+          title="No completed routines yet"
+          description="Complete a routine from the Home screen to see it here."
+        />
       ) : (
         <ScrollView 
           contentContainerStyle={{ paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing['2xl'], paddingBottom: theme.spacing['4xl'] }}
@@ -113,7 +111,12 @@ export default function LogScreen({ navigation }) {
               </Text>
               
               {routines.map((completed, index) => {
-            const totalDuration = completed.rounds * (completed.workSec + completed.restSec);
+            // Prefer the wall-clock duration (recorded when the workout
+            // ended) and fall back to the planned duration for older entries.
+            const totalDuration =
+              typeof completed.actualDurationSec === 'number' && completed.actualDurationSec >= 0
+                ? completed.actualDurationSec
+                : completed.rounds * (completed.workSec + completed.restSec);
             const minutes = Math.floor(totalDuration / 60);
             const seconds = totalDuration % 60;
                 const durationLabel = minutes > 0 
@@ -150,8 +153,11 @@ export default function LogScreen({ navigation }) {
                           <TouchableOpacity
                             onPress={() => handleDeleteLog(completed)}
                             style={logStyles.deleteButton}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Delete log entry for ${completed?.name || 'routine'}`}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           >
-                            <Ionicons name="trash-outline" size={16} color={theme.error} />
+                            <Ionicons name="trash-outline" size={theme.iconSize.md} color={theme.error} />
                           </TouchableOpacity>
                         )}
                         <View style={logStyles.logCardIcon}>
@@ -1304,9 +1310,9 @@ const createLogStyles = (themeWithIsDark) => {
     opacity: 0.5,
   },
   clearAllButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
@@ -1425,9 +1431,9 @@ const createLogStyles = (themeWithIsDark) => {
     justifyContent: 'center',
   },
   deleteButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: isDark ? 'rgba(239, 68, 68, 0.2)' : '#fee2e2',
     alignItems: 'center',
     justifyContent: 'center',

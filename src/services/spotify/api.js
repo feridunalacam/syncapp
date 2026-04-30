@@ -1,4 +1,4 @@
-import { SPOTIFY_CLIENT_ID, SPOTIFY_REDIRECT_URI } from './spotifyConstants';
+import { SPOTIFY_CLIENT_ID, SPOTIFY_REDIRECT_URI } from './config';
 
 const NETWORK_RETRY_ATTEMPTS = 2;
 const NETWORK_RETRY_BASE_DELAY_MS = 400;

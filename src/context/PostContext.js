@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import storage, { STORAGE_KEYS } from '../lib/storage';
 
 const PostContext = createContext({
   posts: [],
@@ -149,8 +150,63 @@ const examplePosts = [
   },
 ];
 
+/**
+ * Toggle/swap a vote in one place. `direction` is +1 (upvote) or -1 (downvote).
+ *
+ * Rules (matching the previous upvote/downvote implementations):
+ *   - Voting in the same direction again clears the vote.
+ *   - Voting in the opposite direction swaps it (decrements old, increments new).
+ *   - Counters are floored at zero so an out-of-sync server payload can't break UI.
+ */
+const applyVote = (post, direction) => {
+  const currentVote = post.userVote || 0;
+  let upvotes = post.upvotes || 0;
+  let downvotes = post.downvotes || 0;
+
+  // toggle off
+  if (currentVote === direction) {
+    if (direction === 1) upvotes = Math.max(0, upvotes - 1);
+    else downvotes = Math.max(0, downvotes - 1);
+    return { ...post, userVote: 0, upvotes, downvotes };
+  }
+
+  // switch direction or fresh vote
+  if (currentVote === -direction) {
+    if (direction === 1) downvotes = Math.max(0, downvotes - 1);
+    else upvotes = Math.max(0, upvotes - 1);
+  }
+  if (direction === 1) upvotes += 1;
+  else downvotes += 1;
+
+  return { ...post, userVote: direction, upvotes, downvotes };
+};
+
 export const PostProvider = ({ children }) => {
   const [posts, setPosts] = useState(examplePosts);
+  const [hydrated, setHydrated] = useState(false);
+
+  // Load persisted posts on mount; fall back to seed example posts on first run.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const stored = await storage.getJSON(STORAGE_KEYS.POSTS, null);
+      if (cancelled) return;
+      if (Array.isArray(stored)) {
+        setPosts(stored);
+      }
+      setHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist whenever posts change (after we've hydrated, to avoid clobbering
+  // saved data with the seed list on the first render).
+  useEffect(() => {
+    if (!hydrated) return;
+    storage.setJSON(STORAGE_KEYS.POSTS, posts);
+  }, [posts, hydrated]);
 
   const addPost = useCallback((post) => {
     setPosts((prev) => [post, ...prev]);
@@ -158,6 +214,11 @@ export const PostProvider = ({ children }) => {
 
   const deletePost = useCallback((postId) => {
     setPosts((prev) => prev.filter((post) => post.id !== postId));
+  }, []);
+
+  // Wipe all posts (used by Logout / "reset everything").
+  const clearAllPosts = useCallback(() => {
+    setPosts([]);
   }, []);
 
   const likePost = useCallback((postId) => {
@@ -174,65 +235,15 @@ export const PostProvider = ({ children }) => {
     );
   }, []);
 
-  const upvotePost = useCallback((postId) => {
+  const votePost = useCallback((postId, direction) => {
+    if (direction !== 1 && direction !== -1) return;
     setPosts((prev) =>
-      prev.map((post) => {
-        if (post.id !== postId) return post;
-
-        const currentVote = post.userVote || 0;
-        let newVote = 1;
-        let upvotes = post.upvotes || 0;
-        let downvotes = post.downvotes || 0;
-
-        if (currentVote === 1) {
-          newVote = 0;
-          upvotes = Math.max(0, upvotes - 1);
-        } else {
-          if (currentVote === -1) {
-            downvotes = Math.max(0, downvotes - 1);
-          }
-          upvotes += 1;
-        }
-
-        return {
-          ...post,
-          userVote: newVote,
-          upvotes,
-          downvotes,
-        };
-      }),
+      prev.map((post) => (post.id === postId ? applyVote(post, direction) : post)),
     );
   }, []);
 
-  const downvotePost = useCallback((postId) => {
-    setPosts((prev) =>
-      prev.map((post) => {
-        if (post.id !== postId) return post;
-
-        const currentVote = post.userVote || 0;
-        let newVote = -1;
-        let upvotes = post.upvotes || 0;
-        let downvotes = post.downvotes || 0;
-
-        if (currentVote === -1) {
-          newVote = 0;
-          downvotes = Math.max(0, downvotes - 1);
-        } else {
-          if (currentVote === 1) {
-            upvotes = Math.max(0, upvotes - 1);
-          }
-          downvotes += 1;
-        }
-
-        return {
-          ...post,
-          userVote: newVote,
-          upvotes,
-          downvotes,
-        };
-      }),
-    );
-  }, []);
+  const upvotePost = useCallback((postId) => votePost(postId, 1), [votePost]);
+  const downvotePost = useCallback((postId) => votePost(postId, -1), [votePost]);
 
   const searchPosts = useCallback(
     (query) => {
@@ -263,19 +274,17 @@ export const PostProvider = ({ children }) => {
       posts,
       addPost,
       deletePost,
+      clearAllPosts,
       likePost,
       upvotePost,
       downvotePost,
+      votePost,
       searchPosts,
     }),
-    [posts, addPost, deletePost, likePost, upvotePost, downvotePost, searchPosts],
+    [posts, addPost, deletePost, clearAllPosts, likePost, upvotePost, downvotePost, votePost, searchPosts],
   );
 
   return <PostContext.Provider value={value}>{children}</PostContext.Provider>;
 };
 
 export const usePostContext = () => useContext(PostContext);
-
-
-
-

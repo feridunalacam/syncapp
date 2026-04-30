@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRoutineContext } from '../../context/RoutineContext';
@@ -18,8 +18,8 @@ const DEFAULT_ROUTINE_KEY = 'deneme';
 
 function HomeScreen({ navigation }) {
   const { routines, addCompletedRoutine } = useRoutineContext();
-  const { theme } = useTheme();
-  const screenStyles = createScreenStyles({ ...theme, isDark: theme.background === '#000000' });
+  const { theme, isDark } = useTheme();
+  const screenStyles = createScreenStyles({ ...theme, isDark });
   
   const { 
     selectedPlatform, 
@@ -32,6 +32,10 @@ function HomeScreen({ navigation }) {
   const [selectedRoutineId, setSelectedRoutineId] = useState(DEFAULT_ROUTINE_KEY);
   const [isWorkoutRunning, setIsWorkoutRunning] = useState(false);
   const [showRoutineDropdown, setShowRoutineDropdown] = useState(false);
+  // Wall-clock timestamp of when the active workout started. Used for true
+  // elapsed-time logging instead of relying on the planned routine duration
+  // (which over-reports if the user pauses or cuts the workout short).
+  const workoutStartedAtRef = useRef(null);
 
   const selectedRoutine = useMemo(
     () => routines.find((routine) => routine.id === selectedRoutineId) ?? null,
@@ -75,18 +79,24 @@ function HomeScreen({ navigation }) {
       countdownSoundPlayer,
   });
 
-  // Handler for workout completion
   const handleWorkoutComplete = useCallback(async () => {
-      console.log('🏁 handleWorkoutComplete called - routine finished!');
-      setIsWorkoutRunning(false);
-      console.log('🏁 Calling stopMusic...');
-      await stopMusic();
-      console.log('🏁 stopMusic completed, adding completed routine...');
-      addCompletedRoutine({
-        ...selectedRoutine,
-        completedAt: new Date().toISOString(),
-      });
-      console.log('🏁 handleWorkoutComplete done');
+    setIsWorkoutRunning(false);
+    await stopMusic();
+    const startedAtMs = workoutStartedAtRef.current;
+    const completedAt = new Date();
+    const actualDurationSec = startedAtMs
+      ? Math.max(0, Math.round((completedAt.getTime() - startedAtMs) / 1000))
+      : null;
+    addCompletedRoutine({
+      ...selectedRoutine,
+      startedAt: startedAtMs ? new Date(startedAtMs).toISOString() : null,
+      completedAt: completedAt.toISOString(),
+      actualDurationSec,
+      status: 'completed',
+      roundsCompleted: selectedRoutine?.rounds ?? null,
+      totalRounds: selectedRoutine?.rounds ?? null,
+    });
+    workoutStartedAtRef.current = null;
   }, [selectedRoutine, addCompletedRoutine, stopMusic]);
 
   // Handle countdown start - play music for beforeStart phase (like a round)
@@ -203,39 +213,43 @@ function HomeScreen({ navigation }) {
     }
   }, [timeRemaining, currentPhase, isWorkoutRunning, isPaused, selectedRoutine, playedSoundsThisPhase, playCountdownSound]);
 
-  // Sync playback status with API periodically (every 2 seconds)
+  // Sync playback status with the music platform once per second while a
+  // workout is running. Phase/round/countdown state is read through refs so
+  // the interval isn't torn down and re-created on every timer tick.
+  const phaseStateRef = useRef({ phase: currentPhase, round: currentRound, isCountdown: isCountdownPhase });
+  useEffect(() => {
+    phaseStateRef.current = { phase: currentPhase, round: currentRound, isCountdown: isCountdownPhase };
+  }, [currentPhase, currentRound, isCountdownPhase]);
+
   useEffect(() => {
     if (!selectedPlatform || !isWorkoutRunning || !musicPlayer) return;
-    
+
+    const inActivePhase = () => {
+      const { phase, isCountdown } = phaseStateRef.current;
+      return !isCountdown && phase !== 'beforeStart';
+    };
+
     const hasBeforeStartCountdown = (selectedRoutine?.countdownBeforeStartDuration || 0) > 0;
-    if (isCountdownPhase || currentPhase === 'beforeStart') return;
-    
-    // Also skip if workout just started and has countdown (race condition protection)
-    // Only fetch after first real phase (work/rest) has started
-    if (hasBeforeStartCountdown && currentPhase === 'work' && currentRound === 1) {
-      // Wait a bit to let the phase settle
-      const timeout = setTimeout(() => {
-        if (!isCountdownPhase && currentPhase !== 'beforeStart') {
-          fetchPlayback();
-        }
+
+    let initialFetchTimeout = null;
+    if (hasBeforeStartCountdown) {
+      // Give the beforeStart phase ~1s to settle before polling starts.
+      initialFetchTimeout = setTimeout(() => {
+        if (inActivePhase()) fetchPlayback();
       }, 1000);
-      return () => clearTimeout(timeout);
-    }
-    
-    // Fetch immediately when work/rest starts (no countdown case)
-    if (!hasBeforeStartCountdown) {
+    } else {
       fetchPlayback();
     }
-    
-    const interval = setInterval(async () => {
-      // Double check we're not in countdown
-      if (!isCountdownPhase && currentPhase !== 'beforeStart') {
-        await fetchPlayback();
-      }
-    }, 1000); // Sync every 1 second for smoother progress
-    
-    return () => clearInterval(interval);
-  }, [selectedPlatform, isWorkoutRunning, musicPlayer, fetchPlayback, isCountdownPhase, currentPhase, currentRound, selectedRoutine]);
+
+    const interval = setInterval(() => {
+      if (inActivePhase()) fetchPlayback();
+    }, 1000);
+
+    return () => {
+      if (initialFetchTimeout) clearTimeout(initialFetchTimeout);
+      clearInterval(interval);
+    };
+  }, [selectedPlatform, isWorkoutRunning, musicPlayer, fetchPlayback, selectedRoutine?.countdownBeforeStartDuration]);
 
   // Reset timer when routine changes (if not running)
   useEffect(() => {
@@ -269,20 +283,21 @@ function HomeScreen({ navigation }) {
       countdownSoundPlayer.preload(soundsToPreload);
     }
 
-    // Debug: Log routine settings
-    console.log('🚀 Starting workout with routine:', selectedRoutine.name);
-    console.log('🚀 Routine settings:', {
-      restVolume: selectedRoutine.restVolume,
-      countdownBeforeStartDuration: selectedRoutine.countdownBeforeStartDuration,
-      countdownBeforeStartSound: selectedRoutine.countdownBeforeStartSound,
-      countdownEndWorkDuration: selectedRoutine.countdownEndWorkDuration,
-      countdownEndWorkSound: selectedRoutine.countdownEndWorkSound,
-      countdownEndRestDuration: selectedRoutine.countdownEndRestDuration,
-      countdownEndRestSound: selectedRoutine.countdownEndRestSound,
-    });
+    if (__DEV__) {
+      console.log('🚀 Starting workout:', selectedRoutine.name, {
+        restVolume: selectedRoutine.restVolume,
+        beforeStart: {
+          dur: selectedRoutine.countdownBeforeStartDuration,
+          sound: selectedRoutine.countdownBeforeStartSound?.name,
+        },
+        endWorkSound: selectedRoutine.endWorkSound?.name,
+        endRestSound: selectedRoutine.endRestSound?.name,
+      });
+    }
 
     setPhase('work', 1);
     setIsWorkoutRunning(true);
+    workoutStartedAtRef.current = Date.now();
     startTimer();
 
     // Check if we have a beforeStart countdown
@@ -338,14 +353,47 @@ function HomeScreen({ navigation }) {
   ]);
 
   const handleStopWorkout = useCallback(async () => {
-    console.log('⏹️ handleStopWorkout called - stop button pressed!');
+    // Capture phase/round BEFORE stopping the timer so we can log it as
+    // an "aborted" entry if the user got at least one work phase in.
+    const phaseAtStop = currentPhase;
+    const roundAtStop = currentRound;
+
     stopTimer();
-    setPhase('work', 1);
     setIsWorkoutRunning(false);
-    console.log('⏹️ Calling stopMusic...');
     await stopMusic();
-    console.log('⏹️ handleStopWorkout done');
-  }, [stopTimer, setPhase, stopMusic]);
+
+    // Don't log a workout that never actually started (still in beforeStart
+    // countdown or never moved past round 1's work clock).
+    const startedRealPhase = phaseAtStop !== 'beforeStart' && roundAtStop >= 1;
+    if (startedRealPhase && selectedRoutine) {
+      const roundsCompleted = phaseAtStop === 'rest' ? roundAtStop : roundAtStop - 1;
+      const startedAtMs = workoutStartedAtRef.current;
+      const completedAt = new Date();
+      const actualDurationSec = startedAtMs
+        ? Math.max(0, Math.round((completedAt.getTime() - startedAtMs) / 1000))
+        : null;
+      addCompletedRoutine({
+        ...selectedRoutine,
+        startedAt: startedAtMs ? new Date(startedAtMs).toISOString() : null,
+        completedAt: completedAt.toISOString(),
+        actualDurationSec,
+        status: 'aborted',
+        roundsCompleted: Math.max(0, roundsCompleted),
+        totalRounds: selectedRoutine.rounds,
+      });
+    }
+
+    workoutStartedAtRef.current = null;
+    setPhase('work', 1);
+  }, [
+    stopTimer,
+    setPhase,
+    stopMusic,
+    currentPhase,
+    currentRound,
+    selectedRoutine,
+    addCompletedRoutine,
+  ]);
 
   const handleSkipBackward = useCallback(() => {
     if (!selectedRoutine || !isWorkoutRunning) return;

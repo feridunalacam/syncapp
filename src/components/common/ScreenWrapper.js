@@ -1,93 +1,55 @@
 import React from 'react';
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
 
-// Try to import SafeAreaView - handle case where it might be undefined
-let RNSafeAreaView = null;
-let RNSafeAreaInsets = null;
-let isSafeAreaViewAvailable = false;
-
-try {
-  const safeAreaModule = require('react-native-safe-area-context');
-  if (safeAreaModule && safeAreaModule.SafeAreaView) {
-    RNSafeAreaView = safeAreaModule.SafeAreaView;
-    // Verify it's actually a valid component, not just undefined
-    if (RNSafeAreaView && (typeof RNSafeAreaView === 'function' || (typeof RNSafeAreaView === 'object' && RNSafeAreaView.$$typeof))) {
-      isSafeAreaViewAvailable = true;
-    } else {
-      RNSafeAreaView = null;
-    }
-  }
-  if (safeAreaModule && safeAreaModule.useSafeAreaInsets) {
-    RNSafeAreaInsets = safeAreaModule.useSafeAreaInsets;
-  }
-} catch (e) {
-  // Module not available or error loading
-  RNSafeAreaView = null;
-  RNSafeAreaInsets = null;
-  isSafeAreaViewAvailable = false;
-}
-
-// Fallback hook that returns default insets if the real hook is not available
-const useSafeAreaInsetsFallback = () => ({ top: 0, bottom: 0, left: 0, right: 0 });
-
-// Use the real hook if available, otherwise use fallback
-const useInsets = (RNSafeAreaInsets && typeof RNSafeAreaInsets === 'function') 
-  ? RNSafeAreaInsets 
-  : useSafeAreaInsetsFallback;
-
+/**
+ * Screen-level container that paints the themed background and respects the
+ * device safe-area insets via `react-native-safe-area-context`.
+ *
+ * Props:
+ * - `edges`             — array of edges to inset (default: all four).
+ * - `includeTopInset`   — convenience flag; pass `false` if a sibling header
+ *                         already takes care of the top inset.
+ * - `topOffset`         — extra padding to add on top after the safe-area inset.
+ * - `backgroundColor`   — override for the themed background.
+ *
+ * Note: previously this component dynamically `require()`d safe-area-context
+ * and added a hard-coded 55px top padding when the module wasn't found. That
+ * codepath added ~55px of extra padding on top of an already-correct
+ * SafeAreaView, which made every screen sit further from the status bar than
+ * intended. The dynamic guard is no longer needed because the dependency is
+ * declared in package.json and Expo guarantees its presence.
+ */
 export default function ScreenWrapper({
   children,
   style,
   backgroundColor,
-  edges = ['left', 'right', 'bottom'],
-  includeTopInset = false,
+  edges,
+  includeTopInset = true,
   topOffset = 0,
 }) {
-  // Always call a hook (hooks must be called unconditionally)
-  const insets = useInsets();
   const { theme } = useTheme();
-  const effectiveBackgroundColor = backgroundColor || theme.background;
-  const effectiveEdges = includeTopInset ? edges.concat('top') : edges.filter((edge) => edge !== 'top');
-  const paddingTop = (includeTopInset ? insets.top : 55) + topOffset;
 
-  // If SafeAreaView is available and valid, use it with edges prop
-  // Only render if we're absolutely sure it's a valid component
-  if (isSafeAreaViewAvailable && RNSafeAreaView) {
-    return React.createElement(
-      RNSafeAreaView,
-      {
-        edges: effectiveEdges,
-        style: [
-          styles.safeArea,
-          { backgroundColor: effectiveBackgroundColor, paddingTop },
-          style,
-        ],
-      },
-      children
-    );
-  }
+  const baseEdges = edges ?? ['top', 'left', 'right', 'bottom'];
+  const effectiveEdges = includeTopInset
+    ? baseEdges.includes('top')
+      ? baseEdges
+      : [...baseEdges, 'top']
+    : baseEdges.filter((edge) => edge !== 'top');
 
-  // If SafeAreaView is not available, apply manual padding
-  const safeAreaStyle = {
-    paddingTop: includeTopInset ? insets.top + topOffset : paddingTop,
-    paddingBottom: effectiveEdges.includes('bottom') ? insets.bottom : 0,
-    paddingLeft: effectiveEdges.includes('left') ? insets.left : 0,
-    paddingRight: effectiveEdges.includes('right') ? insets.right : 0,
-  };
-
-  // Otherwise, use regular View with manual padding
   return (
-    <View
+    <SafeAreaView
+      edges={effectiveEdges}
       style={[
         styles.safeArea,
-        { backgroundColor: effectiveBackgroundColor },
-        safeAreaStyle,
+        { backgroundColor: backgroundColor || theme.background },
+        topOffset ? { paddingTop: topOffset } : null,
         style,
       ]}
     >
       {children}
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -96,4 +58,3 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
-

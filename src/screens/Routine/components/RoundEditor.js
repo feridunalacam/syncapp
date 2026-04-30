@@ -5,13 +5,7 @@ import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../../context/ThemeContext';
 import { createScreenStyles } from '../../../styles/screenStyles';
-
-// Format seconds to MM:SS
-const formatTime = (seconds) => {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
+import { formatTime } from '../../../utils/timeFormatters';
 
 // Parse MM:SS or M:SS format to seconds
 const parseTime = (timeString) => {
@@ -72,8 +66,8 @@ export const RoundEditor = ({
   onReorderRound,
   index,
 }) => {
-  const { theme } = useTheme();
-  const screenStyles = createScreenStyles({ ...theme, isDark: theme.background === '#000000' });
+  const { theme, isDark } = useTheme();
+  const screenStyles = createScreenStyles({ ...theme, isDark });
   const [isExpanded, setIsExpanded] = useState(false);
   const [showWorkPicker, setShowWorkPicker] = useState(false);
   const [showRestPicker, setShowRestPicker] = useState(false);

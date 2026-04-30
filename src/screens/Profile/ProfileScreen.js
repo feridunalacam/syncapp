@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, ScrollView, TextInput, Modal, Alert, ActivityIndicator, Image } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import storage, { STORAGE_KEYS } from '../../lib/storage';
 import * as AuthSession from 'expo-auth-session';
 import * as Linking from 'expo-linking';
 import * as Clipboard from 'expo-clipboard';
@@ -12,7 +12,10 @@ import { usePlatformContext, PLATFORMS } from '../../context/PlatformContext';
 import { useTheme } from '../../context/ThemeContext';
 import { createScreenStyles } from '../../styles/screenStyles';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
-import { SPOTIFY_CLIENT_ID, SPOTIFY_REDIRECT_URI, SPOTIFY_SCOPES } from '../../utils/spotifyConstants';
+import useConfirm from '../../hooks/useConfirm';
+import { SPOTIFY_CLIENT_ID, SPOTIFY_REDIRECT_URI, SPOTIFY_SCOPES } from '../../services/spotify/config';
+import { computeAccessTokenExpiresAt } from '../../services/spotify/auth';
+import { formatTimeAgo } from '../../utils/timeFormatters';
 import SpotifyLogo from './components/SpotifyLogo';
 
 const SettingRow = ({
@@ -114,16 +117,11 @@ const ThemeToggle = ({ isOn, theme }) => {
   );
 };
 
-const computeSpotifyExpiryTimestamp = (expiresInSeconds) => {
-  const ttl = typeof expiresInSeconds === 'number' ? expiresInSeconds : 3600;
-  const safeTtl = Math.max(ttl - 60, 60);
-  return Date.now() + safeTtl * 1000;
-};
-
 export default function ProfileScreen({ navigation }) {
-  const { routines, completedRoutines } = useRoutineContext();
-  const { posts, addPost, deletePost } = usePostContext();
-  const { theme, isDark, toggleTheme } = useTheme();
+  const { routines, completedRoutines, resetRoutinesToDefaults } = useRoutineContext();
+  const { posts, addPost, deletePost, clearAllPosts } = usePostContext();
+  const { theme, isDark, toggleTheme, setTheme } = useTheme();
+  const confirm = useConfirm();
   const screenStyles = createScreenStyles({ ...theme, isDark });
   const [isLoading, setIsLoading] = useState(false);
   const [showPostModal, setShowPostModal] = useState(false);
@@ -131,7 +129,7 @@ export default function ProfileScreen({ navigation }) {
   const [postCaption, setPostCaption] = useState('');
   const [postType, setPostType] = useState('new'); // 'new' or 'completed'
   const [postCategory, setPostCategory] = useState('sport'); // 'sport', 'learn', or 'study'
-  const { connectedPlatforms, connectPlatform, disconnectPlatform, isPlatformConnected } = usePlatformContext();
+  const { connectedPlatforms, connectPlatform, disconnectPlatform, isPlatformConnected, PLATFORMS: PLATFORM_MAP } = usePlatformContext();
   const [connectingPlatform, setConnectingPlatform] = useState(null);
   const connectingTimeoutRef = React.useRef(null);
   const [showShortcutsModal, setShowShortcutsModal] = useState(false);
@@ -160,39 +158,36 @@ export default function ProfileScreen({ navigation }) {
   // Filter posts by current user (for now, all posts are shown)
   const myPosts = posts.filter(post => post.authorId === 'current-user');
 
-  // Load profile data on mount
   useEffect(() => {
-    const loadProfileData = async () => {
-      try {
-        const savedUri = await AsyncStorage.getItem('profilePictureUri');
-        if (savedUri) {
-          setProfilePictureUri(savedUri);
-        }
-        const savedBio = await AsyncStorage.getItem('profileBio');
-        if (savedBio) {
-          setBio(savedBio);
-        }
-        const savedSocialLinks = await AsyncStorage.getItem('profileSocialLinks');
-        if (savedSocialLinks) {
-          setSocialLinks(JSON.parse(savedSocialLinks));
-        }
-      } catch (error) {
-        console.error('Error loading profile data:', error);
+    let cancelled = false;
+    (async () => {
+      const [savedUri, savedBio, savedSocialLinks] = await Promise.all([
+        storage.getString(STORAGE_KEYS.PROFILE_PICTURE_URI),
+        storage.getString(STORAGE_KEYS.PROFILE_BIO),
+        storage.getJSON(STORAGE_KEYS.PROFILE_SOCIAL_LINKS, null),
+      ]);
+      if (cancelled) return;
+      if (savedUri) setProfilePictureUri(savedUri);
+      if (savedBio) setBio(savedBio);
+      if (savedSocialLinks && typeof savedSocialLinks === 'object') {
+        setSocialLinks(savedSocialLinks);
       }
+    })();
+    return () => {
+      cancelled = true;
     };
-    loadProfileData();
   }, []);
 
   const handleSaveProfile = async () => {
-    try {
-      await AsyncStorage.setItem('profileBio', bio);
-      await AsyncStorage.setItem('profileSocialLinks', JSON.stringify(socialLinks));
-      setShowEditProfileModal(false);
-      Alert.alert('Success', 'Profile updated successfully!');
-    } catch (error) {
-      console.error('Error saving profile:', error);
+    const ok =
+      (await storage.setString(STORAGE_KEYS.PROFILE_BIO, bio)) &&
+      (await storage.setJSON(STORAGE_KEYS.PROFILE_SOCIAL_LINKS, socialLinks));
+    if (!ok) {
       Alert.alert('Error', 'Failed to save profile. Please try again.');
+      return;
     }
+    setShowEditProfileModal(false);
+    Alert.alert('Success', 'Profile updated successfully!');
   };
 
   const handleSocialLinkChange = (platform, value) => {
@@ -273,7 +268,7 @@ export default function ProfileScreen({ navigation }) {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const uri = result.assets[0].uri;
         setProfilePictureUri(uri);
-        await AsyncStorage.setItem('profilePictureUri', uri);
+        await storage.setString(STORAGE_KEYS.PROFILE_PICTURE_URI, uri);
       }
     } catch (error) {
       console.error('Error picking image:', error);
@@ -281,27 +276,56 @@ export default function ProfileScreen({ navigation }) {
     }
   };
 
+  const performHardLogout = async () => {
+    // 1. Disconnect every connected music platform (Spotify token revoke is
+    //    not possible from the client, but we forget the token locally).
+    Object.keys(connectedPlatforms || {}).forEach((platformId) => {
+      // 'device' isn't really a connected account, leave it.
+      if (platformId === 'device') return;
+      try { disconnectPlatform(platformId); } catch (e) { /* swallow */ }
+    });
+
+    // 2. Reset routines + workout history to factory defaults.
+    resetRoutinesToDefaults();
+
+    // 3. Wipe social posts.
+    clearAllPosts();
+
+    // 4. Reset theme to light.
+    try { await setTheme('light'); } catch (e) { /* swallow */ }
+
+    // 5. Wipe profile-specific keys + auth token leftovers.
+    await storage.removeMany([
+      STORAGE_KEYS.PROFILE_PICTURE_URI,
+      STORAGE_KEYS.PROFILE_BIO,
+      STORAGE_KEYS.PROFILE_SOCIAL_LINKS,
+      STORAGE_KEYS.USER_TOKEN,
+    ]);
+
+    // 6. Reset local screen state so the UI updates immediately.
+    setProfilePictureUri(null);
+    setBio('');
+    setSocialLinks({ instagram: '', twitter: '', tiktok: '', youtube: '' });
+    setIsLoggedIn(false);
+  };
+
   const handleLogout = () => {
-    Alert.alert(
-      'Log Out',
-      'Are you sure you want to log out?',
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Log Out',
-          style: 'destructive',
-          onPress: () => {
-            setIsLoggedIn(false);
-            // Clear any stored authentication data
-            AsyncStorage.removeItem('userToken').catch(() => {});
-            Alert.alert('Logged Out', 'You have been successfully logged out.');
-          },
-        },
-      ]
-    );
+    confirm({
+      title: 'Log Out',
+      message:
+        'This will sign you out and remove your local data: connected music platforms, profile info, posts, custom routines, workout history, and theme. This cannot be undone.',
+      confirmLabel: 'Log Out',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await performHardLogout();
+          Alert.alert('Logged Out', 'Your local data has been cleared.');
+        } catch (error) {
+          console.error('Logout failed:', error);
+          Alert.alert('Logout failed', 'Some data could not be cleared. Please try again.');
+        }
+      },
+    });
   };
 
   const handleAccountAccess = () => {
@@ -420,7 +444,7 @@ export default function ProfileScreen({ navigation }) {
           
           if (tokenData.access_token) {
             // Update platform context
-            const expiresAt = computeSpotifyExpiryTimestamp(tokenData.expires_in);
+            const expiresAt = computeAccessTokenExpiresAt(tokenData.expires_in);
             connectPlatform('spotify', {
               accessToken: tokenData.access_token,
               refreshToken: tokenData.refresh_token,
@@ -526,18 +550,6 @@ export default function ProfileScreen({ navigation }) {
       setIsLoading(false);
       alert('Facebook sign-in would be implemented here');
     }, 1000);
-  };
-
-  const formatTimeAgo = (dateString) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInSeconds = Math.floor((now - date) / 1000);
-    
-    if (diffInSeconds < 60) return 'just now';
-    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
-    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
-    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
-    return `${Math.floor(diffInSeconds / 604800)}w ago`;
   };
 
   const sectionLabelStyle = {
@@ -780,22 +792,18 @@ export default function ProfileScreen({ navigation }) {
                   </View>
                 </View>
       <TouchableOpacity
-                  onPress={() => {
-                    Alert.alert(
-                      'Delete Post',
-                      'Are you sure you want to delete this post?',
-                      [
-                        { text: 'Cancel', style: 'cancel' },
-                        {
-                          text: 'Delete',
-                          style: 'destructive',
-                          onPress: () => {
-                            deletePost(post.id);
-                          },
-                        },
-                      ]
-                    );
-                  }}
+                  onPress={() =>
+                    confirm({
+                      title: 'Delete Post',
+                      message: 'Are you sure you want to delete this post?',
+                      confirmLabel: 'Delete',
+                      destructive: true,
+                      onConfirm: () => deletePost(post.id),
+                    })
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete post"
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
                   <Ionicons name="trash-outline" size={20} color={theme.error} />
       </TouchableOpacity>
@@ -890,18 +898,13 @@ export default function ProfileScreen({ navigation }) {
                   activeOpacity={0.9}
                   onPress={async () => {
                     if (isConnected) {
-                      Alert.alert(
-                        `Disconnect ${platform.name}?`,
-                        `Are you sure you want to disconnect from ${platform.name}?`,
-                        [
-                          { text: 'Cancel', style: 'cancel' },
-                          {
-                            text: 'Disconnect',
-                            style: 'destructive',
-                            onPress: () => disconnectPlatform(platform.id),
-                          },
-                        ],
-                      );
+                      confirm({
+                        title: `Disconnect ${platform.name}?`,
+                        message: `Are you sure you want to disconnect from ${platform.name}?`,
+                        confirmLabel: 'Disconnect',
+                        destructive: true,
+                        onConfirm: () => disconnectPlatform(platform.id),
+                      });
                     } else {
                       setConnectingPlatform(platform.id);
                       if (SPOTIFY_CLIENT_ID === 'YOUR_SPOTIFY_CLIENT_ID') {
@@ -1139,38 +1142,38 @@ export default function ProfileScreen({ navigation }) {
         animationType="slide"
         onRequestClose={() => setShowPostModal(false)}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' }}>
+        <View style={{ flex: 1, backgroundColor: theme.modalOverlay, justifyContent: 'flex-end' }}>
           <View style={{
-            backgroundColor: '#ffffff',
+            backgroundColor: theme.modalBackground,
             borderTopLeftRadius: 20,
             borderTopRightRadius: 20,
             padding: theme.spacing.xl,
             maxHeight: '80%',
           }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <Text style={{ fontSize: 20, fontWeight: '700', color: '#1f2937' }}>Create Post</Text>
+              <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text }}>Create Post</Text>
               <TouchableOpacity onPress={() => setShowPostModal(false)}>
-                <Ionicons name="close" size={24} color="#1f2937" />
+                <Ionicons name="close" size={24} color={theme.iconPrimary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView>
               {/* Post Type Selector */}
               <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 12 }}>Post Type</Text>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 12 }}>Post Type</Text>
                 <View style={{ flexDirection: 'row', gap: 12 }}>
                   <TouchableOpacity
                     style={{
                       flex: 1,
                       padding: theme.spacing.md,
                       borderRadius: 8,
-                      backgroundColor: postType === 'new' ? '#e0d7ff' : '#f3f4f6',
+                      backgroundColor: postType === 'new' ? '#e0d7ff' : theme.cardSecondary,
                       borderWidth: 2,
-                      borderColor: postType === 'new' ? '#06b6d4' : '#e5e7eb',
+                      borderColor: postType === 'new' ? '#06b6d4' : theme.border,
                     }}
                     onPress={() => setPostType('new')}
                   >
-                    <Text style={{ color: postType === 'new' ? '#06b6d4' : '#6b7280', fontWeight: '600', textAlign: 'center' }}>
+                    <Text style={{ color: postType === 'new' ? '#06b6d4' : theme.textSecondary, fontWeight: '600', textAlign: 'center' }}>
                       New Routine
                     </Text>
                   </TouchableOpacity>
@@ -1179,13 +1182,13 @@ export default function ProfileScreen({ navigation }) {
                       flex: 1,
                       padding: theme.spacing.md,
                       borderRadius: 8,
-                      backgroundColor: postType === 'completed' ? '#dbeafe' : '#f3f4f6',
+                      backgroundColor: postType === 'completed' ? '#dbeafe' : theme.cardSecondary,
                       borderWidth: 2,
-                      borderColor: postType === 'completed' ? '#3b82f6' : '#e5e7eb',
+                      borderColor: postType === 'completed' ? '#3b82f6' : theme.border,
                     }}
                     onPress={() => setPostType('completed')}
                   >
-                    <Text style={{ color: postType === 'completed' ? '#3b82f6' : '#6b7280', fontWeight: '600', textAlign: 'center' }}>
+                    <Text style={{ color: postType === 'completed' ? '#3b82f6' : theme.textSecondary, fontWeight: '600', textAlign: 'center' }}>
                       Completed
                     </Text>
                   </TouchableOpacity>
@@ -1194,7 +1197,7 @@ export default function ProfileScreen({ navigation }) {
 
               {/* Category Selector */}
               <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 12 }}>Category</Text>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 12 }}>Category</Text>
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
                   <TouchableOpacity
                     style={{
@@ -1202,9 +1205,9 @@ export default function ProfileScreen({ navigation }) {
                       marginRight: 1,
                       padding: theme.spacing.md,
                       borderRadius: 4,
-                      backgroundColor: postCategory === 'sport' ? '#fee2e2' : '#f3f4f6',
+                      backgroundColor: postCategory === 'sport' ? '#fee2e2' : theme.cardSecondary,
                       borderWidth: 2,
-                      borderColor: postCategory === 'sport' ? '#ef4444' : '#e5e7eb',
+                      borderColor: postCategory === 'sport' ? '#ef4444' : theme.border,
                       flexDirection: 'row',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1212,8 +1215,8 @@ export default function ProfileScreen({ navigation }) {
                     }}
                     onPress={() => setPostCategory('sport')}
                   >
-                    <Ionicons name="barbell-outline" size={16} color={postCategory === 'sport' ? '#ef4444' : '#6b7280'} />
-                    <Text style={{ color: postCategory === 'sport' ? '#ef4444' : '#6b7280', fontWeight: '600', textAlign: 'center' }}>
+                    <Ionicons name="barbell-outline" size={16} color={postCategory === 'sport' ? '#ef4444' : theme.textSecondary} />
+                    <Text style={{ color: postCategory === 'sport' ? '#ef4444' : theme.textSecondary, fontWeight: '600', textAlign: 'center' }}>
                       Sport
                     </Text>
                   </TouchableOpacity>
@@ -1223,9 +1226,9 @@ export default function ProfileScreen({ navigation }) {
                       marginHorizontal: 1,
                       padding: theme.spacing.md,
                       borderRadius: 4,
-                      backgroundColor: postCategory === 'learn' ? '#dbeafe' : '#f3f4f6',
+                      backgroundColor: postCategory === 'learn' ? '#dbeafe' : theme.cardSecondary,
                       borderWidth: 2,
-                      borderColor: postCategory === 'learn' ? '#3b82f6' : '#e5e7eb',
+                      borderColor: postCategory === 'learn' ? '#3b82f6' : theme.border,
                       flexDirection: 'row',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1233,8 +1236,8 @@ export default function ProfileScreen({ navigation }) {
                     }}
                     onPress={() => setPostCategory('learn')}
                   >
-                    <Ionicons name="school-outline" size={16} color={postCategory === 'learn' ? '#3b82f6' : '#6b7280'} />
-                    <Text style={{ color: postCategory === 'learn' ? '#3b82f6' : '#6b7280', fontWeight: '600', textAlign: 'center' }}>
+                    <Ionicons name="school-outline" size={16} color={postCategory === 'learn' ? '#3b82f6' : theme.textSecondary} />
+                    <Text style={{ color: postCategory === 'learn' ? '#3b82f6' : theme.textSecondary, fontWeight: '600', textAlign: 'center' }}>
                       Learn
                     </Text>
                   </TouchableOpacity>
@@ -1244,9 +1247,9 @@ export default function ProfileScreen({ navigation }) {
                       marginLeft: 1,
                       padding: theme.spacing.md,
                       borderRadius: 4,
-                      backgroundColor: postCategory === 'study' ? '#ede9fe' : '#f3f4f6',
+                      backgroundColor: postCategory === 'study' ? '#ede9fe' : theme.cardSecondary,
                       borderWidth: 2,
-                      borderColor: postCategory === 'study' ? '#06b6d4' : '#e5e7eb',
+                      borderColor: postCategory === 'study' ? '#06b6d4' : theme.border,
                       flexDirection: 'row',
                       alignItems: 'center',
                       justifyContent: 'center',
@@ -1254,8 +1257,8 @@ export default function ProfileScreen({ navigation }) {
                     }}
                     onPress={() => setPostCategory('study')}
                   >
-                    <Ionicons name="book-outline" size={16} color={postCategory === 'study' ? '#06b6d4' : '#6b7280'} />
-                    <Text style={{ color: postCategory === 'study' ? '#06b6d4' : '#6b7280', fontWeight: '600', textAlign: 'center' }}>
+                    <Ionicons name="book-outline" size={16} color={postCategory === 'study' ? '#06b6d4' : theme.textSecondary} />
+                    <Text style={{ color: postCategory === 'study' ? '#06b6d4' : theme.textSecondary, fontWeight: '600', textAlign: 'center' }}>
                       Study
                     </Text>
                   </TouchableOpacity>
@@ -1264,7 +1267,7 @@ export default function ProfileScreen({ navigation }) {
 
               {/* Routine Selector */}
               <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 12 }}>Select Routine</Text>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 12 }}>Select Routine</Text>
                 <ScrollView style={{ maxHeight: 200 }}>
                   {(postType === 'completed' ? completedRoutines : routines).map((routine) => (
                     <TouchableOpacity
@@ -1272,15 +1275,15 @@ export default function ProfileScreen({ navigation }) {
                       style={{
                         padding: theme.spacing.lg,
                         borderRadius: 8,
-                        backgroundColor: selectedRoutineForPost?.id === routine.id ? '#e0d7ff' : '#f3f4f6',
+                        backgroundColor: selectedRoutineForPost?.id === routine.id ? '#e0d7ff' : theme.cardSecondary,
                         marginBottom: 8,
                         borderWidth: 2,
-                        borderColor: selectedRoutineForPost?.id === routine.id ? '#06b6d4' : '#e5e7eb',
+                        borderColor: selectedRoutineForPost?.id === routine.id ? '#06b6d4' : theme.border,
                       }}
                       onPress={() => setSelectedRoutineForPost(routine)}
                     >
-                      <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937' }}>{routine.name}</Text>
-                      <Text style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>{routine.name}</Text>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>
                         {routine.rounds} rounds • {routine.workSec}s / {routine.restSec}s
                       </Text>
                     </TouchableOpacity>
@@ -1290,15 +1293,15 @@ export default function ProfileScreen({ navigation }) {
 
               {/* Caption */}
               <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 12 }}>Caption (Optional)</Text>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 12 }}>Caption (Optional)</Text>
                 <TextInput
                   style={{
                     borderWidth: 1,
-                    borderColor: '#e5e7eb',
+                    borderColor: theme.border,
                     borderRadius: 8,
                     padding: 12,
                     fontSize: 16,
-                    color: '#1f2937',
+                    color: theme.text,
                     minHeight: 100,
                     textAlignVertical: 'top',
                   }}
@@ -1334,13 +1337,13 @@ export default function ProfileScreen({ navigation }) {
         <View style={screenStyles.modalBackdrop}>
           <View style={[screenStyles.modalCard, { maxHeight: '80%' }]}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <Text style={{ fontSize: 20, fontWeight: '700', color: '#1f2937' }}>Create Shortcut</Text>
+              <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text }}>Create Shortcut</Text>
               <TouchableOpacity onPress={() => setShowShortcutsModal(false)}>
-                <Ionicons name="close" size={24} color="#1f2937" />
+                <Ionicons name="close" size={24} color={theme.iconPrimary} />
               </TouchableOpacity>
             </View>
 
-            <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 20, lineHeight: 20 }}>
+            <Text style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 20, lineHeight: 20 }}>
               Create an iOS Shortcut to quickly start a routine. Select a routine below and follow the instructions to add it to your Shortcuts app.
             </Text>
 
@@ -1348,10 +1351,10 @@ export default function ProfileScreen({ navigation }) {
               {routines.length === 0 ? (
                 <View style={{ padding: 20, alignItems: 'center' }}>
                   <Ionicons name="flash-outline" size={48} color="#d1d5db" />
-                  <Text style={{ fontSize: 16, color: '#6b7280', marginTop: 12, textAlign: 'center' }}>
+                  <Text style={{ fontSize: 16, color: theme.textSecondary, marginTop: 12, textAlign: 'center' }}>
                     No routines available
                   </Text>
-                  <Text style={{ fontSize: 14, color: '#9ca3af', marginTop: 8, textAlign: 'center' }}>
+                  <Text style={{ fontSize: 14, color: theme.textTertiary, marginTop: 8, textAlign: 'center' }}>
                     Create a routine first to create a shortcut
                   </Text>
                 </View>
@@ -1369,9 +1372,9 @@ export default function ProfileScreen({ navigation }) {
                       style={{
                         padding: theme.spacing.lg,
                         borderRadius: 12,
-                        backgroundColor: '#f9fafb',
+                        backgroundColor: theme.cardSecondary,
                         borderWidth: 1,
-                        borderColor: '#e5e7eb',
+                        borderColor: theme.border,
                         marginBottom: 12,
                       }}
                       onPress={async () => {
@@ -1399,17 +1402,17 @@ export default function ProfileScreen({ navigation }) {
                     >
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 16, fontWeight: '700', color: '#1f2937', marginBottom: 4 }}>
+                          <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text, marginBottom: 4 }}>
                             {routine.name}
                           </Text>
                           <View style={{ flexDirection: 'row', gap: 12, marginTop: 8 }}>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                              <Ionicons name="barbell-outline" size={14} color="#6b7280" />
-                              <Text style={{ fontSize: 12, color: '#6b7280' }}>{routine.rounds} rounds</Text>
+                              <Ionicons name="barbell-outline" size={14} color={theme.iconSecondary} />
+                              <Text style={{ fontSize: 12, color: theme.textSecondary }}>{routine.rounds} rounds</Text>
                             </View>
                             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                              <Ionicons name="time-outline" size={14} color="#6b7280" />
-                              <Text style={{ fontSize: 12, color: '#6b7280' }}>{durationLabel}</Text>
+                              <Ionicons name="time-outline" size={14} color={theme.iconSecondary} />
+                              <Text style={{ fontSize: 12, color: theme.textSecondary }}>{durationLabel}</Text>
                             </View>
                           </View>
                         </View>
@@ -1421,8 +1424,8 @@ export default function ProfileScreen({ navigation }) {
               )}
             </ScrollView>
 
-            <View style={{ marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderTopColor: '#e5e7eb' }}>
-              <Text style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', lineHeight: 18 }}>
+            <View style={{ marginTop: 20, paddingTop: 20, borderTopWidth: 1, borderTopColor: theme.border }}>
+              <Text style={{ fontSize: 12, color: theme.textTertiary, textAlign: 'center', lineHeight: 18 }}>
                 💡 Tip: After creating the shortcut, you can say "Hey Siri, [shortcut name]" to start your routine instantly!
               </Text>
             </View>
@@ -1442,12 +1445,12 @@ export default function ProfileScreen({ navigation }) {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <Text style={screenStyles.modalTitle}>Notification Settings</Text>
               <TouchableOpacity onPress={() => setShowNotificationsModal(false)}>
-                <Ionicons name="close" size={24} color="#1f2937" />
+                <Ionicons name="close" size={24} color={theme.iconPrimary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView>
-              <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 20, lineHeight: 20 }}>
+              <Text style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 20, lineHeight: 20 }}>
                 Manage how and when you receive notifications about your workouts and routines.
               </Text>
 
@@ -1458,15 +1461,15 @@ export default function ProfileScreen({ navigation }) {
                   alignItems: 'center',
                   paddingVertical: theme.spacing.lg,
                   borderBottomWidth: 1,
-                  borderBottomColor: '#f3f4f6',
+                  borderBottomColor: theme.borderLight,
                 }}
                 onPress={() => setNotificationSettings({ ...notificationSettings, workoutReminders: !notificationSettings.workoutReminders })}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 4 }}>
                     Workout Reminders
                   </Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>
                     Get reminded to start your scheduled workouts
                   </Text>
                 </View>
@@ -1474,7 +1477,7 @@ export default function ProfileScreen({ navigation }) {
                   width: 50,
                   height: 30,
                   borderRadius: 15,
-                  backgroundColor: notificationSettings.workoutReminders ? '#06b6d4' : '#d1d5db',
+                  backgroundColor: notificationSettings.workoutReminders ? '#06b6d4' : theme.borderDark,
                   justifyContent: 'center',
                   paddingHorizontal: theme.spacing.xs,
                 }}>
@@ -1495,15 +1498,15 @@ export default function ProfileScreen({ navigation }) {
                   alignItems: 'center',
                   paddingVertical: theme.spacing.lg,
                   borderBottomWidth: 1,
-                  borderBottomColor: '#f3f4f6',
+                  borderBottomColor: theme.borderLight,
                 }}
                 onPress={() => setNotificationSettings({ ...notificationSettings, completionAlerts: !notificationSettings.completionAlerts })}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 4 }}>
                     Completion Alerts
                   </Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>
                     Notify when you complete a routine
                   </Text>
                 </View>
@@ -1511,7 +1514,7 @@ export default function ProfileScreen({ navigation }) {
                   width: 50,
                   height: 30,
                   borderRadius: 15,
-                  backgroundColor: notificationSettings.completionAlerts ? '#06b6d4' : '#d1d5db',
+                  backgroundColor: notificationSettings.completionAlerts ? '#06b6d4' : theme.borderDark,
                   justifyContent: 'center',
                   paddingHorizontal: theme.spacing.xs,
                 }}>
@@ -1535,10 +1538,10 @@ export default function ProfileScreen({ navigation }) {
                 onPress={() => setNotificationSettings({ ...notificationSettings, weeklySummary: !notificationSettings.weeklySummary })}
               >
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 4 }}>
                     Weekly Summary
                   </Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>
                     Receive a weekly summary of your workout progress
                   </Text>
                 </View>
@@ -1546,7 +1549,7 @@ export default function ProfileScreen({ navigation }) {
                   width: 50,
                   height: 30,
                   borderRadius: 15,
-                  backgroundColor: notificationSettings.weeklySummary ? '#06b6d4' : '#d1d5db',
+                  backgroundColor: notificationSettings.weeklySummary ? '#06b6d4' : theme.borderDark,
                   justifyContent: 'center',
                   paddingHorizontal: theme.spacing.xs,
                 }}>
@@ -1576,12 +1579,12 @@ export default function ProfileScreen({ navigation }) {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <Text style={screenStyles.modalTitle}>Units</Text>
               <TouchableOpacity onPress={() => setShowUnitsModal(false)}>
-                <Ionicons name="close" size={24} color="#1f2937" />
+                <Ionicons name="close" size={24} color={theme.iconPrimary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView>
-              <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 24, lineHeight: 20 }}>
+              <Text style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 24, lineHeight: 20 }}>
                 Choose your preferred unit system for displaying measurements and distances.
               </Text>
 
@@ -1591,9 +1594,9 @@ export default function ProfileScreen({ navigation }) {
                   alignItems: 'center',
                   padding: 16,
                   borderRadius: 12,
-                  backgroundColor: unitPreference === 'metric' ? '#e0d7ff' : '#f3f4f6',
+                  backgroundColor: unitPreference === 'metric' ? '#e0d7ff' : theme.cardSecondary,
                   borderWidth: 2,
-                  borderColor: unitPreference === 'metric' ? '#06b6d4' : '#e5e7eb',
+                  borderColor: unitPreference === 'metric' ? '#06b6d4' : theme.border,
                   marginBottom: 12,
                 }}
                 onPress={() => setUnitPreference('metric')}
@@ -1601,14 +1604,14 @@ export default function ProfileScreen({ navigation }) {
                 <Ionicons 
                   name={unitPreference === 'metric' ? 'radio-button-on' : 'radio-button-off'} 
                   size={24} 
-                  color={unitPreference === 'metric' ? '#06b6d4' : '#6b7280'} 
+                  color={unitPreference === 'metric' ? '#06b6d4' : theme.textSecondary} 
                   style={{ marginRight: 12 }}
                 />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 4 }}>
                     Metric
                   </Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>
                     Kilometers, meters, kilograms
                   </Text>
                 </View>
@@ -1620,23 +1623,23 @@ export default function ProfileScreen({ navigation }) {
                   alignItems: 'center',
                   padding: 16,
                   borderRadius: 12,
-                  backgroundColor: unitPreference === 'imperial' ? '#e0d7ff' : '#f3f4f6',
+                  backgroundColor: unitPreference === 'imperial' ? '#e0d7ff' : theme.cardSecondary,
                   borderWidth: 2,
-                  borderColor: unitPreference === 'imperial' ? '#06b6d4' : '#e5e7eb',
+                  borderColor: unitPreference === 'imperial' ? '#06b6d4' : theme.border,
                 }}
                 onPress={() => setUnitPreference('imperial')}
               >
                 <Ionicons 
                   name={unitPreference === 'imperial' ? 'radio-button-on' : 'radio-button-off'} 
                   size={24} 
-                  color={unitPreference === 'imperial' ? '#06b6d4' : '#6b7280'} 
+                  color={unitPreference === 'imperial' ? '#06b6d4' : theme.textSecondary} 
                   style={{ marginRight: 12 }}
                 />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 4 }}>
                     Imperial
                   </Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>
                     Miles, feet, pounds
                   </Text>
                 </View>
@@ -1658,7 +1661,7 @@ export default function ProfileScreen({ navigation }) {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <Text style={screenStyles.modalTitle}>About</Text>
               <TouchableOpacity onPress={() => setShowAboutModal(false)}>
-                <Ionicons name="close" size={24} color="#1f2937" />
+                <Ionicons name="close" size={24} color={theme.iconPrimary} />
               </TouchableOpacity>
             </View>
 
@@ -1675,33 +1678,33 @@ export default function ProfileScreen({ navigation }) {
                 }}>
                   <Ionicons name="fitness" size={40} color="#06b6d4" />
                 </View>
-                <Text style={{ fontSize: 24, fontWeight: '700', color: '#1f2937', marginBottom: 8 }}>
+                <Text style={{ fontSize: 24, fontWeight: '700', color: theme.text, marginBottom: 8 }}>
                   SyncApp
                 </Text>
-                <Text style={{ fontSize: 16, color: '#6b7280', marginBottom: 4 }}>
+                <Text style={{ fontSize: 16, color: theme.textSecondary, marginBottom: 4 }}>
                   Version 1.0.0
                 </Text>
               </View>
 
-              <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 20, lineHeight: 20 }}>
+              <Text style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 20, lineHeight: 20 }}>
                 SyncApp is a fitness and productivity app that helps you create and manage workout routines with integrated music playback. Build custom interval training routines, connect your favorite music platforms, and track your progress.
               </Text>
 
-              <View style={{ marginTop: theme.spacing.xl, paddingTop: theme.spacing.xl, borderTopWidth: 1, borderTopColor: '#e5e7eb' }}>
-                <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937', marginBottom: 12 }}>
+              <View style={{ marginTop: theme.spacing.xl, paddingTop: theme.spacing.xl, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text, marginBottom: 12 }}>
                   Features
                 </Text>
                 <View style={{ marginBottom: 8 }}>
-                  <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 4 }}>• Custom workout routines</Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 4 }}>• Interval timer with visual progress</Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 4 }}>• Music platform integration</Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 4 }}>• Workout sharing and discovery</Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280' }}>• Progress tracking</Text>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 4 }}>• Custom workout routines</Text>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 4 }}>• Interval timer with visual progress</Text>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 4 }}>• Music platform integration</Text>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 4 }}>• Workout sharing and discovery</Text>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>• Progress tracking</Text>
                 </View>
               </View>
 
-              <View style={{ marginTop: theme.spacing.xl, paddingTop: theme.spacing.xl, borderTopWidth: 1, borderTopColor: '#e5e7eb' }}>
-                <Text style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center' }}>
+              <View style={{ marginTop: theme.spacing.xl, paddingTop: theme.spacing.xl, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <Text style={{ fontSize: 12, color: theme.textTertiary, textAlign: 'center' }}>
                   © 2024 SyncApp. All rights reserved.
                 </Text>
               </View>
@@ -1722,17 +1725,17 @@ export default function ProfileScreen({ navigation }) {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <Text style={screenStyles.modalTitle}>Settings</Text>
               <TouchableOpacity onPress={() => setShowSettingsModal(false)}>
-                <Ionicons name="close" size={24} color="#1f2937" />
+                <Ionicons name="close" size={24} color={theme.iconPrimary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView>
-              <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 24, lineHeight: 20 }}>
+              <Text style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 24, lineHeight: 20 }}>
                 Configure app preferences and behavior settings.
               </Text>
 
               <View style={{ marginBottom: 20 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 12 }}>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 12 }}>
                   App Preferences
                 </Text>
                 
@@ -1743,15 +1746,15 @@ export default function ProfileScreen({ navigation }) {
                     alignItems: 'center',
                     paddingVertical: theme.spacing.lg,
                     borderBottomWidth: 1,
-                    borderBottomColor: '#f3f4f6',
+                    borderBottomColor: theme.borderLight,
                   }}
                   onPress={() => Alert.alert('Theme', 'Dark mode coming soon!')}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="moon-outline" size={20} color="#1f2937" style={{ marginRight: 12 }} />
-                    <Text style={{ fontSize: 16, color: '#1f2937' }}>Dark Mode</Text>
+                    <Ionicons name="moon-outline" size={20} color={theme.iconPrimary} style={{ marginRight: 12 }} />
+                    <Text style={{ fontSize: 16, color: theme.text }}>Dark Mode</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                  <Ionicons name="chevron-forward" size={20} color={theme.iconTertiary} />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1761,15 +1764,15 @@ export default function ProfileScreen({ navigation }) {
                     alignItems: 'center',
                     paddingVertical: theme.spacing.lg,
                     borderBottomWidth: 1,
-                    borderBottomColor: '#f3f4f6',
+                    borderBottomColor: theme.borderLight,
                   }}
                   onPress={() => Alert.alert('Language', 'Language selection coming soon!')}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="language-outline" size={20} color="#1f2937" style={{ marginRight: 12 }} />
-                    <Text style={{ fontSize: 16, color: '#1f2937' }}>Language</Text>
+                    <Ionicons name="language-outline" size={20} color={theme.iconPrimary} style={{ marginRight: 12 }} />
+                    <Text style={{ fontSize: 16, color: theme.text }}>Language</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                  <Ionicons name="chevron-forward" size={20} color={theme.iconTertiary} />
                 </TouchableOpacity>
 
                 <TouchableOpacity
@@ -1782,15 +1785,15 @@ export default function ProfileScreen({ navigation }) {
                   onPress={() => Alert.alert('Data & Privacy', 'Privacy settings coming soon!')}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="shield-checkmark-outline" size={20} color="#1f2937" style={{ marginRight: 12 }} />
-                    <Text style={{ fontSize: 16, color: '#1f2937' }}>Data & Privacy</Text>
+                    <Ionicons name="shield-checkmark-outline" size={20} color={theme.iconPrimary} style={{ marginRight: 12 }} />
+                    <Text style={{ fontSize: 16, color: theme.text }}>Data & Privacy</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                  <Ionicons name="chevron-forward" size={20} color={theme.iconTertiary} />
                 </TouchableOpacity>
               </View>
 
-              <View style={{ marginTop: theme.spacing.xl, paddingTop: theme.spacing.xl, borderTopWidth: 1, borderTopColor: '#e5e7eb' }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 12 }}>
+              <View style={{ marginTop: theme.spacing.xl, paddingTop: theme.spacing.xl, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 12 }}>
                   Storage
                 </Text>
                 
@@ -1804,10 +1807,10 @@ export default function ProfileScreen({ navigation }) {
                   onPress={() => Alert.alert('Clear Cache', 'Cache cleared successfully!')}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons name="trash-outline" size={20} color="#1f2937" style={{ marginRight: 12 }} />
-                    <Text style={{ fontSize: 16, color: '#1f2937' }}>Clear Cache</Text>
+                    <Ionicons name="trash-outline" size={20} color={theme.iconPrimary} style={{ marginRight: 12 }} />
+                    <Text style={{ fontSize: 16, color: theme.text }}>Clear Cache</Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                  <Ionicons name="chevron-forward" size={20} color={theme.iconTertiary} />
                 </TouchableOpacity>
               </View>
             </ScrollView>
@@ -1827,12 +1830,12 @@ export default function ProfileScreen({ navigation }) {
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <Text style={screenStyles.modalTitle}>Help & Support</Text>
               <TouchableOpacity onPress={() => setShowHelpModal(false)}>
-                <Ionicons name="close" size={24} color="#1f2937" />
+                <Ionicons name="close" size={24} color={theme.iconPrimary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView>
-              <Text style={{ fontSize: 14, color: '#6b7280', marginBottom: 24, lineHeight: 20 }}>
+              <Text style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 24, lineHeight: 20 }}>
                 Get help with using SyncApp or contact our support team.
               </Text>
 
@@ -1842,23 +1845,23 @@ export default function ProfileScreen({ navigation }) {
                   alignItems: 'center',
                   padding: 16,
                   borderRadius: 12,
-                  backgroundColor: '#f9fafb',
+                  backgroundColor: theme.cardSecondary,
                   borderWidth: 1,
-                  borderColor: '#e5e7eb',
+                  borderColor: theme.border,
                   marginBottom: 12,
                 }}
                 onPress={() => Alert.alert('Getting Started', 'To get started:\n\n1. Create a routine from the Home screen\n2. Set your work and rest intervals\n3. Connect a music platform\n4. Start your workout!')}
               >
                 <Ionicons name="book-outline" size={24} color="#06b6d4" style={{ marginRight: 12 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 4 }}>
                     Getting Started Guide
                   </Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>
                     Learn how to use SyncApp
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                <Ionicons name="chevron-forward" size={20} color={theme.iconTertiary} />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1867,23 +1870,23 @@ export default function ProfileScreen({ navigation }) {
                   alignItems: 'center',
                   padding: 16,
                   borderRadius: 12,
-                  backgroundColor: '#f9fafb',
+                  backgroundColor: theme.cardSecondary,
                   borderWidth: 1,
-                  borderColor: '#e5e7eb',
+                  borderColor: theme.border,
                   marginBottom: 12,
                 }}
                 onPress={() => Alert.alert('FAQ', 'Frequently Asked Questions:\n\nQ: How do I connect Spotify?\nA: Go to Profile > Music Platforms > Spotify\n\nQ: Can I use multiple music platforms?\nA: Yes, you can connect multiple platforms\n\nQ: How do I share a routine?\nA: Create a post from the Profile screen')}
               >
                 <Ionicons name="help-circle-outline" size={24} color="#3b82f6" style={{ marginRight: 12 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 4 }}>
                     Frequently Asked Questions
                   </Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>
                     Common questions and answers
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                <Ionicons name="chevron-forward" size={20} color={theme.iconTertiary} />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1892,23 +1895,23 @@ export default function ProfileScreen({ navigation }) {
                   alignItems: 'center',
                   padding: 16,
                   borderRadius: 12,
-                  backgroundColor: '#f9fafb',
+                  backgroundColor: theme.cardSecondary,
                   borderWidth: 1,
-                  borderColor: '#e5e7eb',
+                  borderColor: theme.border,
                   marginBottom: 12,
                 }}
                 onPress={() => Alert.alert('Contact Support', 'Email: support@syncapp.com\n\nWe typically respond within 24 hours.')}
               >
                 <Ionicons name="mail-outline" size={24} color="#10b981" style={{ marginRight: 12 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 4 }}>
                     Contact Support
                   </Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>
                     Get in touch with our team
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                <Ionicons name="chevron-forward" size={20} color={theme.iconTertiary} />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -1917,26 +1920,26 @@ export default function ProfileScreen({ navigation }) {
                   alignItems: 'center',
                   padding: 16,
                   borderRadius: 12,
-                  backgroundColor: '#f9fafb',
+                  backgroundColor: theme.cardSecondary,
                   borderWidth: 1,
-                  borderColor: '#e5e7eb',
+                  borderColor: theme.border,
                 }}
                 onPress={() => Alert.alert('Report a Bug', 'Found a bug? Please email us at bugs@syncapp.com with details about the issue.')}
               >
                 <Ionicons name="bug-outline" size={24} color="#ef4444" style={{ marginRight: 12 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 4 }}>
                     Report a Bug
                   </Text>
-                  <Text style={{ fontSize: 14, color: '#6b7280' }}>
+                  <Text style={{ fontSize: 14, color: theme.textSecondary }}>
                     Help us improve the app
                   </Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color="#9ca3af" />
+                <Ionicons name="chevron-forward" size={20} color={theme.iconTertiary} />
               </TouchableOpacity>
 
-              <View style={{ marginTop: theme.spacing['2xl'], paddingTop: theme.spacing.xl, borderTopWidth: 1, borderTopColor: '#e5e7eb' }}>
-                <Text style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', lineHeight: 18 }}>
+              <View style={{ marginTop: theme.spacing['2xl'], paddingTop: theme.spacing.xl, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <Text style={{ fontSize: 12, color: theme.textTertiary, textAlign: 'center', lineHeight: 18 }}>
                   Need immediate help? Check out our documentation or reach out to support.
                 </Text>
               </View>
@@ -1952,36 +1955,36 @@ export default function ProfileScreen({ navigation }) {
         animationType="slide"
         onRequestClose={() => setShowEditProfileModal(false)}
       >
-        <View style={{ flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' }}>
+        <View style={{ flex: 1, backgroundColor: theme.modalOverlay, justifyContent: 'flex-end' }}>
           <View style={{
-            backgroundColor: '#ffffff',
+            backgroundColor: theme.modalBackground,
             borderTopLeftRadius: 20,
             borderTopRightRadius: 20,
             padding: theme.spacing.xl,
             maxHeight: '80%',
           }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <Text style={{ fontSize: 20, fontWeight: '700', color: '#1f2937' }}>Edit Profile</Text>
+              <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text }}>Edit Profile</Text>
               <TouchableOpacity onPress={() => setShowEditProfileModal(false)}>
-                <Ionicons name="close" size={24} color="#1f2937" />
+                <Ionicons name="close" size={24} color={theme.iconPrimary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView>
               {/* Bio Input */}
               <View style={{ marginBottom: 24 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 8 }}>Bio</Text>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 8 }}>Bio</Text>
                 <TextInput
                   style={{
                     borderWidth: 1,
-                    borderColor: '#e5e7eb',
+                    borderColor: theme.border,
                     borderRadius: 8,
                     padding: 12,
                     fontSize: 16,
-                    color: '#1f2937',
+                    color: theme.text,
                     minHeight: 100,
                     textAlignVertical: 'top',
-                    backgroundColor: '#f9fafb',
+                    backgroundColor: theme.cardSecondary,
                   }}
                   placeholder="Tell us about yourself..."
                   placeholderTextColor="#9ca3af"
@@ -1994,23 +1997,23 @@ export default function ProfileScreen({ navigation }) {
 
               {/* Social Media Links */}
               <View style={{ marginBottom: 24 }}>
-                <Text style={{ fontSize: 16, fontWeight: '600', color: '#1f2937', marginBottom: 16 }}>Social Media Links</Text>
+                <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text, marginBottom: 16 }}>Social Media Links</Text>
                 
                 {/* Instagram */}
                 <View style={{ marginBottom: 16 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                     <Ionicons name="logo-instagram" size={20} color="#E4405F" style={{ marginRight: 8 }} />
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>Instagram</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>Instagram</Text>
                   </View>
                   <TextInput
                     style={{
                       borderWidth: 1,
-                      borderColor: '#e5e7eb',
+                      borderColor: theme.border,
                       borderRadius: 8,
                       padding: theme.spacing.md,
                       fontSize: 16,
-                      color: '#1f2937',
-                      backgroundColor: '#f9fafb',
+                      color: theme.text,
+                      backgroundColor: theme.cardSecondary,
                     }}
                     placeholder="instagram.com/username"
                     placeholderTextColor="#9ca3af"
@@ -2025,17 +2028,17 @@ export default function ProfileScreen({ navigation }) {
                 <View style={{ marginBottom: 16 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                     <Ionicons name="logo-twitter" size={20} color="#1DA1F2" style={{ marginRight: 8 }} />
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>Twitter/X</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>Twitter/X</Text>
                   </View>
                   <TextInput
                     style={{
                       borderWidth: 1,
-                      borderColor: '#e5e7eb',
+                      borderColor: theme.border,
                       borderRadius: 8,
                       padding: theme.spacing.md,
                       fontSize: 16,
-                      color: '#1f2937',
-                      backgroundColor: '#f9fafb',
+                      color: theme.text,
+                      backgroundColor: theme.cardSecondary,
                     }}
                     placeholder="twitter.com/username or x.com/username"
                     placeholderTextColor="#9ca3af"
@@ -2050,17 +2053,17 @@ export default function ProfileScreen({ navigation }) {
                 <View style={{ marginBottom: 16 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                     <Ionicons name="logo-tiktok" size={20} color="#000000" style={{ marginRight: 8 }} />
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>TikTok</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>TikTok</Text>
                   </View>
                   <TextInput
                     style={{
                       borderWidth: 1,
-                      borderColor: '#e5e7eb',
+                      borderColor: theme.border,
                       borderRadius: 8,
                       padding: theme.spacing.md,
                       fontSize: 16,
-                      color: '#1f2937',
-                      backgroundColor: '#f9fafb',
+                      color: theme.text,
+                      backgroundColor: theme.cardSecondary,
                     }}
                     placeholder="tiktok.com/@username"
                     placeholderTextColor="#9ca3af"
@@ -2075,17 +2078,17 @@ export default function ProfileScreen({ navigation }) {
                 <View style={{ marginBottom: 24 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
                     <Ionicons name="logo-youtube" size={20} color="#FF0000" style={{ marginRight: 8 }} />
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: '#1f2937' }}>YouTube</Text>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>YouTube</Text>
                   </View>
                   <TextInput
                     style={{
                       borderWidth: 1,
-                      borderColor: '#e5e7eb',
+                      borderColor: theme.border,
                       borderRadius: 8,
                       padding: theme.spacing.md,
                       fontSize: 16,
-                      color: '#1f2937',
-                      backgroundColor: '#f9fafb',
+                      color: theme.text,
+                      backgroundColor: theme.cardSecondary,
                     }}
                     placeholder="youtube.com/@username"
                     placeholderTextColor="#9ca3af"

@@ -3,13 +3,7 @@ import { View, Text, TouchableOpacity, Modal, Platform } from 'react-native';
 import { Picker } from '@react-native-picker/picker';
 import { useTheme } from '../../../context/ThemeContext';
 import { createScreenStyles } from '../../../styles/screenStyles';
-
-// Format seconds to MM:SS
-const formatTime = (seconds) => {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
+import { formatTime } from '../../../utils/timeFormatters';
 
 // Generate time options (every 5 seconds, up to 30 min)
 const generateTimeOptions = () => {

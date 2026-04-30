@@ -24,7 +24,10 @@ export const darkTheme = {
   buttonTextSecondary: '#ffffff',
   
   // Special
-  routineSelector: '#212123',
+  // In light theme this chip stays dark (so it pops against a white surface).
+  // In dark theme we use a slightly lifted neutral so the chip stays readable
+  // against the dark background instead of blending into the card.
+  routineSelector: '#3a3a3c',
   routineSelectorText: '#ffffff',
   divider: '#333333',
   
@@ -55,14 +58,36 @@ export const darkTheme = {
     extrabold: '800',
   },
   
-  // Spacing
+  // Icon size scale (mirrors lightTheme).
+  iconSize: {
+    xs: 12,
+    sm: 14,
+    md: 16,
+    lg: 20,
+    xl: 24,
+    '2xl': 28,
+  },
+
+  // Border radius scale (mirrors lightTheme).
+  radius: {
+    xs: 4,
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 20,
+    '2xl': 24,
+    full: 9999,
+  },
+
+  // Spacing — must mirror lightTheme exactly so the same component renders
+  // identically in both modes. Previously '2xl' was 28 here vs 16 in light.
   spacing: {
     xs: 2,
     sm: 6,
     md: 10,
     lg: 14,
     xl: 20,
-    '2xl': 28,
+    '2xl': 24,
     '3xl': 32,
     '4xl': 40,
   },

@@ -1,12 +1,18 @@
 import { useMemo, useState, useRef, useCallback } from 'react';
-import { Alert, Share } from 'react-native';
+import { Alert, Share, LayoutAnimation, Platform, UIManager } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useRoutineContext } from '../../../context/RoutineContext';
 import { usePostContext } from '../../../context/PostContext';
+import useConfirm from '../../../hooks/useConfirm';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 export const useLogData = () => {
   const { completedRoutines, clearCompletedRoutines, removeCompletedRoutine } = useRoutineContext();
   const { addPost } = usePostContext();
+  const confirm = useConfirm();
 
   const [selectedLog, setSelectedLog] = useState(null);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -29,11 +35,21 @@ export const useLogData = () => {
 
   const stats = useMemo(() => {
     const totalWorkouts = completedRoutines.length;
+    // Prefer the actually elapsed wall-clock time (recorded when the workout
+    // ended). Falls back to the planned duration for legacy log entries that
+    // were saved before we started tracking real elapsed time.
     const totalTime = completedRoutines.reduce((sum, routine) => {
-      const duration = routine.rounds * (routine.workSec + routine.restSec);
-      return sum + duration;
+      if (typeof routine.actualDurationSec === 'number' && routine.actualDurationSec >= 0) {
+        return sum + routine.actualDurationSec;
+      }
+      const planned = (routine.rounds || 0) * ((routine.workSec || 0) + (routine.restSec || 0));
+      return sum + planned;
     }, 0);
-    const totalRounds = completedRoutines.reduce((sum, routine) => sum + routine.rounds, 0);
+    // Aborted workouts only count completed rounds; finished workouts count all.
+    const totalRounds = completedRoutines.reduce((sum, routine) => {
+      if (typeof routine.roundsCompleted === 'number') return sum + routine.roundsCompleted;
+      return sum + (routine.rounds || 0);
+    }, 0);
 
     const totalMinutes = Math.floor(totalTime / 60);
     const totalHours = Math.floor(totalMinutes / 60);
@@ -82,23 +98,18 @@ export const useLogData = () => {
 
   const handleClearAll = useCallback(() => {
     if (completedRoutines.length === 0) return;
-
-    Alert.alert(
-      'Clear All Logs',
-      'Are you sure you want to clear all completed routines? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear All',
-          style: 'destructive',
-          onPress: () => {
-            clearCompletedRoutines();
-            setIsEditMode(false);
-          },
-        },
-      ],
-    );
-  }, [completedRoutines.length, clearCompletedRoutines]);
+    confirm({
+      title: 'Clear All Logs',
+      message: 'Are you sure you want to clear all completed routines? This action cannot be undone.',
+      confirmLabel: 'Clear All',
+      destructive: true,
+      onConfirm: () => {
+        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        clearCompletedRoutines();
+        setIsEditMode(false);
+      },
+    });
+  }, [completedRoutines.length, clearCompletedRoutines, confirm]);
 
   const toggleEditMode = useCallback(() => {
     if (!hasLogs && !isEditMode) return;
@@ -107,26 +118,21 @@ export const useLogData = () => {
 
   const handleDeleteLog = useCallback(
     (log) => {
-      Alert.alert(
-        'Delete Entry',
-        `Remove "${log.name}" from your workout log?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Delete',
-            style: 'destructive',
-            onPress: () => {
-              removeCompletedRoutine(log.id, log.completedAt);
-              if (selectedLog && selectedLog.completedAt === log.completedAt) {
-                setSelectedLog(null);
-              }
-            },
-          },
-        ],
-        { cancelable: true },
-      );
+      confirm({
+        title: 'Delete Entry',
+        message: `Remove "${log.name}" from your workout log?`,
+        confirmLabel: 'Delete',
+        destructive: true,
+        onConfirm: () => {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          removeCompletedRoutine(log.id, log.completedAt);
+          if (selectedLog && selectedLog.completedAt === log.completedAt) {
+            setSelectedLog(null);
+          }
+        },
+      });
     },
-    [removeCompletedRoutine, selectedLog],
+    [confirm, removeCompletedRoutine, selectedLog],
   );
 
   const formatTime = useCallback((completed) => {
@@ -185,16 +191,40 @@ export const useLogData = () => {
     Alert.alert('Success', 'Your workout has been published!');
   }, [addPost, publishCaption, publishCategory, selectedLog]);
 
+  // Bounded poll for the off-screen ViewShot refs to mount. Previously this
+  // recursed via setTimeout indefinitely with no cleanup, which could leak
+  // timers if `selectedLog` was cleared mid-wait.
+  const SHARE_REFS_MAX_WAIT_MS = 3000;
+  const SHARE_REFS_POLL_INTERVAL_MS = 50;
+
+  const waitForShareRefs = useCallback(() => {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const tick = () => {
+        if (shareCardRef.current && shareCardTransparentRef.current) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start >= SHARE_REFS_MAX_WAIT_MS) {
+          resolve(false);
+          return;
+        }
+        setTimeout(tick, SHARE_REFS_POLL_INTERVAL_MS);
+      };
+      tick();
+    });
+  }, []);
+
   const generateShareImages = useCallback(async () => {
-    if (!selectedLog || !shareCardRef.current || !shareCardTransparentRef.current) {
-      setTimeout(() => {
-        generateShareImages();
-      }, 100);
-      return;
-    }
+    if (!selectedLog) return;
 
     try {
       setIsGenerating(true);
+
+      const refsReady = await waitForShareRefs();
+      if (!refsReady) {
+        throw new Error('Share preview not ready');
+      }
 
       const [fullImageUri, transparentImageUri] = await Promise.all([
         shareCardRef.current.capture({
@@ -213,15 +243,14 @@ export const useLogData = () => {
         full: fullImageUri,
         transparent: transparentImageUri,
       });
-
-      setIsGenerating(false);
       setShowShareModal(true);
     } catch (error) {
       console.error('Error generating images:', error);
-      setIsGenerating(false);
       Alert.alert('Error', 'Failed to generate images. Please try again.');
+    } finally {
+      setIsGenerating(false);
     }
-  }, [selectedLog]);
+  }, [selectedLog, waitForShareRefs]);
 
   const handleShare = useCallback(async () => {
     if (!selectedLog) return;

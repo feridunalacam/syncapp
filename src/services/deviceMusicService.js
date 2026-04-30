@@ -32,14 +32,14 @@ class DeviceMusicPlayer {
     }
   }
 
-  // Play playlist (for device, this plays tracks sequentially)
-  async playPlaylist(accessToken, playlistId, deviceId = null, shuffle = false) {
-    // Device playlists are not supported in the same way as streaming services
-    // This would require maintaining a queue of tracks
-    // For now, return error
-    return { 
-      success: false, 
-      error: 'Device playlist playback not yet implemented. Please select individual tracks.' 
+  // Device playlists are not supported (we'd need to maintain a queue of
+  // tracks). Callers should fall back to per-round / per-track sources
+  // instead of treating this as a transient failure.
+  async playPlaylist(/* accessToken, playlistId, deviceId, shuffle */) {
+    return {
+      success: false,
+      notSupported: true,
+      error: 'Device playlist playback is not supported. Pick individual tracks per round.',
     };
   }
 

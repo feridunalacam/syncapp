@@ -7,6 +7,8 @@ import { useRoutineContext } from '../../context/RoutineContext';
 import { useTheme } from '../../context/ThemeContext';
 import { createScreenStyles } from '../../styles/screenStyles';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
+import { EmptyState } from '../../components/common/StateViews';
+import { formatTimeAgo } from '../../utils/timeFormatters';
 
 // Generate initials from name
 const getInitials = (name) => {
@@ -153,7 +155,7 @@ function CategoryButton({ category, isSelected, onPress }) {
 
 export default function ExploreScreen({ navigation }) {
   const { posts, searchPosts, upvotePost, downvotePost } = usePostContext();
-  const { addRoutine } = useRoutineContext();
+  const { addRoutine, routines } = useRoutineContext();
   const { theme, isDark } = useTheme();
   const screenStyles = createScreenStyles({ ...theme, isDark });
   const [searchQuery, setSearchQuery] = useState('');
@@ -249,81 +251,95 @@ export default function ExploreScreen({ navigation }) {
     setFilteredPosts(results);
   }, [searchQuery, selectedCategory, posts, searchPosts]);
 
-  const formatTimeAgo = (dateString) => {
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffInSeconds = Math.floor((now - date) / 1000);
-    
-    if (diffInSeconds < 60) return 'just now';
-    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
-    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
-    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
-    return `${Math.floor(diffInSeconds / 604800)}w ago`;
+  /**
+   * Pick a unique routine name when importing from Explore. If the user
+   * already owns a routine with the same name we append "(from <author>)" or
+   * a numeric suffix so they can tell the imported copy apart.
+   */
+  const buildImportedName = (routine, post) => {
+    const baseName = (routine?.name || '').trim() || 'Saved routine';
+    const existingNames = new Set((routines || []).map((r) => (r.name || '').trim().toLowerCase()));
+    if (!existingNames.has(baseName.toLowerCase())) return baseName;
+
+    const author = post?.user?.username || post?.user?.name;
+    if (author) {
+      const fromAuthor = `${baseName} (from ${author})`;
+      if (!existingNames.has(fromAuthor.toLowerCase())) return fromAuthor;
+    }
+    let counter = 2;
+    while (existingNames.has(`${baseName} (${counter})`.toLowerCase())) counter += 1;
+    return `${baseName} (${counter})`;
   };
 
   const handleSaveRoutine = (post) => {
-    const routine = post.routine;
-    
-    // Preserve roundsData if it exists and is valid, otherwise create a basic structure
+    const routine = post.routine || {};
+    const importedName = buildImportedName(routine, post);
+
     let roundsData = routine.roundsData;
     if (!roundsData || !Array.isArray(roundsData) || roundsData.length === 0) {
-      // Create basic roundsData structure from routine's basic fields
       const rounds = routine.rounds || 5;
       const workSec = routine.workSec || 60;
       const restSec = routine.restSec || 30;
       roundsData = Array.from({ length: rounds }, (_, i) => ({
         roundNumber: i + 1,
         originalRoundNumber: i + 1,
-        workSec: workSec,
-        restSec: restSec,
+        workSec,
+        restSec,
         workSong: null,
         restSong: null,
         workPlaylistId: null,
         restPlaylistId: null,
       }));
     }
-    
-    // Start with the routine object and override with explicit defaults
-    // This ensures we preserve ALL fields from the routine, including any we might miss
+
     const routineToSave = {
-      // Preserve all existing routine fields first
       ...routine,
-      // Explicitly set key fields to ensure they're always present
-      name: routine.name || 'Custom Routine',
+      name: importedName,
       rounds: routine.rounds || 5,
       workSec: routine.workSec || 60,
       restSec: routine.restSec || 30,
       description: routine.description || '',
-      // Ensure roundsData is always set (either preserved or created)
-      roundsData: roundsData,
-      // Music-related fields with proper defaults
+      roundsData,
       spotifyPlaylist: routine.spotifyPlaylist || null,
       workoutPlaylistId: routine.workoutPlaylistId || null,
       restPlaylistId: routine.restPlaylistId || null,
-      shuffleMode: routine.shuffleMode !== undefined ? routine.shuffleMode : (routine.shuffleWorkMode !== undefined ? routine.shuffleWorkMode : false),
-      shuffleWorkMode: routine.shuffleWorkMode !== undefined ? routine.shuffleWorkMode : (routine.shuffleMode !== undefined ? routine.shuffleMode : false),
+      shuffleMode:
+        routine.shuffleMode !== undefined
+          ? routine.shuffleMode
+          : routine.shuffleWorkMode !== undefined
+            ? routine.shuffleWorkMode
+            : false,
+      shuffleWorkMode:
+        routine.shuffleWorkMode !== undefined
+          ? routine.shuffleWorkMode
+          : routine.shuffleMode !== undefined
+            ? routine.shuffleMode
+            : false,
       shuffleRestMode: routine.shuffleRestMode !== undefined ? routine.shuffleRestMode : false,
       restVolume: routine.restVolume !== undefined ? routine.restVolume : 50,
       restVolumeEnabled: routine.restVolumeEnabled !== undefined ? routine.restVolumeEnabled : true,
       targetDurationMin: routine.targetDurationMin || null,
-      // Voice countdown settings
-      voiceCountdownEnabled: routine.voiceCountdownEnabled !== undefined ? routine.voiceCountdownEnabled : false,
+      voiceCountdownEnabled:
+        routine.voiceCountdownEnabled !== undefined ? routine.voiceCountdownEnabled : false,
       countdownAtStart: routine.countdownAtStart !== undefined ? routine.countdownAtStart : true,
       countdownStartMode: routine.countdownStartMode || 'preroll',
-      countdownAfterWork: routine.countdownAfterWork !== undefined ? routine.countdownAfterWork : false,
-      countdownAfterRest: routine.countdownAfterRest !== undefined ? routine.countdownAfterRest : false,
+      countdownAfterWork:
+        routine.countdownAfterWork !== undefined ? routine.countdownAfterWork : false,
+      countdownAfterRest:
+        routine.countdownAfterRest !== undefined ? routine.countdownAfterRest : false,
       countdownDuration: routine.countdownDuration || 3,
-      // Platform
       platform: routine.platform || null,
-      // Completion notification settings
-      completionNotificationEnabled: routine.completionNotificationEnabled !== undefined ? routine.completionNotificationEnabled : false,
+      completionNotificationEnabled:
+        routine.completionNotificationEnabled !== undefined
+          ? routine.completionNotificationEnabled
+          : false,
       completionNotificationType: routine.completionNotificationType || 'text',
       completionNotificationText: routine.completionNotificationText || '',
       completionNotificationSound: routine.completionNotificationSound || null,
     };
-    
+
     addRoutine(routineToSave);
-    Alert.alert('Success', 'Routine added to your routines!');
+    Alert.alert('Routine saved', `"${importedName}" was added to your routines.`);
   };
 
   const getCategoryColor = (category) => {
@@ -446,17 +462,15 @@ export default function ExploreScreen({ navigation }) {
         )}
 
         {filteredPosts.length === 0 ? (
-          <View style={{ alignItems: 'center', justifyContent: 'center', paddingVertical: theme.spacing['4xl'], paddingHorizontal: theme.spacing.xl }}>
-            <Ionicons name="compass-outline" size={64} color={theme.borderDark} />
-            <Text style={{ fontSize: theme.fontSize.lg, fontWeight: theme.fontWeight.semibold, color: theme.textSecondary, marginTop: theme.spacing.lg }}>
-              {searchQuery || selectedCategory ? 'No routines found' : 'No shared routines yet'}
-            </Text>
-            <Text style={{ fontSize: theme.fontSize.base, color: theme.textTertiary, marginTop: theme.spacing.sm, textAlign: 'center' }}>
-              {searchQuery || selectedCategory 
-                ? 'Try a different search term or category' 
-                : 'Share your first routine to get started!'}
-            </Text>
-          </View>
+          <EmptyState
+            icon="compass-outline"
+            title={searchQuery || selectedCategory ? 'No routines found' : 'No shared routines yet'}
+            description={
+              searchQuery || selectedCategory
+                ? 'Try a different search term or category.'
+                : 'Share your first routine from the Log screen to get started.'
+            }
+          />
         ) : (
           <>
 

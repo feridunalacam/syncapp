@@ -1,21 +1,25 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { usePlatformAccessToken } from './audio/usePlatformAccessToken';
+import { useMusicProgressTimer } from './audio/useMusicProgressTimer';
+import { usePlatformDetection } from './audio/usePlatformDetection';
+import { useStopAllMusic } from './audio/useStopAllMusic';
 
 // Note: Device volume control requires a development build with react-native-volume-manager
 // For now, volume control is disabled in Expo Go
 
 /**
  * Audio Controller Hook - Platform Agnostic Music Controller
- * 
- * Bu hook tüm müzik platformlarıyla konuşan merkezi beyindir.
- * Platform-specific detayları bilmez, sadece standart interface kullanır.
- * 
- * Her platform service şu interface'i implement etmeli:
- * - getCurrentPlayback(accessToken, refreshCallback)
- * - play(accessToken, deviceId?)
- * - pause(accessToken, refreshCallback)
- * - playPlaylist(accessToken, playlistId, deviceId, shuffle)
- * - playTrack(accessToken, trackUri, deviceId)
- * - getActiveDevice(accessToken, refreshCallback)
+ *
+ * Central brain that talks to every music platform. It does not know about
+ * platform-specific details and only relies on a small, common interface.
+ *
+ * Every platform service must implement this interface:
+ *  - getCurrentPlayback(accessToken, refreshCallback)
+ *  - play(accessToken, deviceId?)
+ *  - pause(accessToken, refreshCallback)
+ *  - playPlaylist(accessToken, playlistId, deviceId, shuffle)
+ *  - playTrack(accessToken, trackUri, deviceId)
+ *  - getActiveDevice(accessToken, refreshCallback)
  * 
  * @param {Object} params
  * @param {Object} params.musicPlayer - Platform service instance (implements PlatformMusicService interface)
@@ -36,35 +40,40 @@ export const useAudioController = ({
   countdownSoundPlayer = null, // Optional countdown sound player
 }) => {
   // Platform-agnostic music state
-  const [accessToken, setAccessToken] = useState(null);
   const [track, setTrack] = useState(null);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
   const [musicProgress, setMusicProgress] = useState(0);
   const [isShuffled, setIsShuffled] = useState(false);
   const [isRestShuffled, setIsRestShuffled] = useState(false);
   const [isRepeating, setIsRepeating] = useState(false);
-  const [currentPlayingPlatform, setCurrentPlayingPlatform] = useState(null); // ✅ Track which platform is actually playing
-  
-  const playlistStartedRef = useRef(false);
-  const progressTimerRef = useRef(null);
-  const originalVolumeRef = useRef(null); // Store original device volume for rest phase
+  const [currentPlayingPlatform, setCurrentPlayingPlatform] = useState(null);
 
-  // Initialize Token
+  const playlistStartedRef = useRef(false);
+  const originalVolumeRef = useRef(null);
+
+  // Token resolution + auto-clear of the displayed track when the user
+  // disconnects the active platform.
+  const handlePlatformDisconnect = useCallback(() => setTrack(null), []);
+  const { accessToken, setAccessToken } = usePlatformAccessToken({
+    selectedPlatform,
+    connectedPlatforms,
+    onDisconnect: handlePlatformDisconnect,
+  });
+
+  // Mirror playback state into refs so handlePhaseChange can read the latest
+  // value without listing them in its dependency array. Listing them would
+  // re-create handlePhaseChange every time playback flips, which in turn
+  // would re-run effects in HomeScreen on every tick.
+  const isMusicPlayingRef = useRef(false);
+  const currentPlayingPlatformRef = useRef(null);
   useEffect(() => {
-    // Device platform is always available
-    if (selectedPlatform === 'device') {
-      setAccessToken('device');
-      return;
-    }
-    
-    const platformData = connectedPlatforms?.[selectedPlatform];
-    if (platformData?.connected && platformData?.accessToken) {
-      setAccessToken(platformData.accessToken);
-    } else if (!platformData?.connected) {
-      setAccessToken(null);
-      setTrack(null);
-    }
-  }, [connectedPlatforms, selectedPlatform]);
+    isMusicPlayingRef.current = isMusicPlaying;
+  }, [isMusicPlaying]);
+  useEffect(() => {
+    currentPlayingPlatformRef.current = currentPlayingPlatform;
+  }, [currentPlayingPlatform]);
+
+  const { detectPlatformFromSource, isPlatformReady } = usePlatformDetection({ connectedPlatforms });
 
   // Fetch Playback Status (Platform Agnostic)
   const fetchPlayback = useCallback(async () => {
@@ -111,61 +120,13 @@ export const useAudioController = ({
     }
   }, [accessToken, musicPlayer, refreshToken, selectedPlatform, track, currentPlayingPlatform, services, connectedPlatforms]);
 
-  // Store track duration in a ref to avoid stale closure issues
-  const trackDurationRef = useRef(0);
-  
-  // Update duration ref when track changes
-  useEffect(() => {
-    if (track?.duration) {
-      trackDurationRef.current = track.duration;
-    }
-  }, [track?.duration]);
-
-  // Smooth progress timer - updates every second when music is playing
-  useEffect(() => {
-    if (progressTimerRef.current) {
-      clearInterval(progressTimerRef.current);
-      progressTimerRef.current = null;
-    }
-
-    if (isMusicPlaying) {
-      progressTimerRef.current = setInterval(() => {
-        setMusicProgress((prev) => {
-          const maxDuration = trackDurationRef.current;
-          const newProgress = prev + 1;
-          return (maxDuration > 0 && newProgress >= maxDuration) ? maxDuration : newProgress;
-        });
-      }, 1000);
-    }
-
-    return () => {
-      if (progressTimerRef.current) {
-        clearInterval(progressTimerRef.current);
-        progressTimerRef.current = null;
-      }
-    };
-  }, [isMusicPlaying]);
-
-  // Helper function to detect platform from music source
-  const detectPlatformFromSource = useCallback((source, routine) => {
-    if (source?.platform) return source.platform;
-    if (routine?.platform) return routine.platform;
-    
-    if (source?.uri) {
-      if (source.uri.startsWith('spotify:')) return 'spotify';
-      if (source.uri.startsWith('file:') || source.uri.startsWith('device:')) return 'device';
-    }
-    
-    return null;
-  }, []);
-
-  // Helper function to check if platform is connected and ready
-  const isPlatformReady = useCallback((platformId) => {
-    // Device and voices are always available (local/built-in)
-    if (!platformId || platformId === 'device' || platformId === 'voices') return true;
-    const platformData = connectedPlatforms?.[platformId];
-    return platformData?.connected && platformData?.accessToken;
-  }, [connectedPlatforms]);
+  // Smooth interpolation between platform polls; the timer advances
+  // `musicProgress` once per second while music is playing.
+  useMusicProgressTimer({
+    isMusicPlaying,
+    trackDurationSec: track?.duration || 0,
+    onTick: setMusicProgress,
+  });
 
   // Main Phase Change Logic - Platform Agnostic
   // 
@@ -252,16 +213,19 @@ export const useAudioController = ({
       if (!musicSource) return false;
 
       // *** ALWAYS stop currently playing music before starting new music ***
-      if (isMusicPlaying && currentPlayingPlatform) {
-        console.log(`🔄 Stopping current music on ${currentPlayingPlatform} before starting new music`);
+      // Read from refs so we always see the latest playback state without
+      // adding it to deps (which would invalidate this callback every tick).
+      const playingPlatform = currentPlayingPlatformRef.current;
+      if (isMusicPlayingRef.current && playingPlatform) {
+        console.log(`🔄 Stopping current music on ${playingPlatform} before starting new music`);
         try {
-          if (currentPlayingPlatform === 'voices') {
+          if (playingPlatform === 'voices') {
             await countdownSoundPlayer?.stop();
-          } else if (currentPlayingPlatform === 'device') {
+          } else if (playingPlatform === 'device') {
             await services?.device?.pause('device');
           } else {
-            const token = connectedPlatforms?.[currentPlayingPlatform]?.accessToken;
-            await services?.[currentPlayingPlatform]?.pause(token);
+            const token = connectedPlatforms?.[playingPlatform]?.accessToken;
+            await services?.[playingPlatform]?.pause(token);
           }
         } catch (e) {
           console.log('⚠️ Error stopping current music:', e);
@@ -383,7 +347,9 @@ export const useAudioController = ({
             deviceId,
             shuffleState,
           );
-          if (response && response.success) {
+          if (response?.notSupported) {
+            console.warn(`⚠️ ${detectedPlatform} platform does not support playlist playback; skipping audio for this round.`);
+          } else if (response && response.success) {
             await platformMusicPlayer.setShuffle(platformAccessToken, shuffleState, deviceId);
           }
           playbackTriggered = response?.success !== false;
@@ -410,7 +376,9 @@ export const useAudioController = ({
               deviceId,
               routine.shuffleMode || false,
             );
-            if (response && response.success && routine.shuffleMode) {
+            if (response?.notSupported) {
+              console.warn(`⚠️ ${detectedPlatform} platform does not support playlist playback; routine playlist will not play on this platform.`);
+            } else if (response && response.success && routine.shuffleMode) {
               await platformMusicPlayer.setShuffle(platformAccessToken, true, deviceId);
             }
             playbackTriggered = response?.success !== false;
@@ -448,16 +416,17 @@ export const useAudioController = ({
         return false;
       }
   }, [
-    selectedRoutine, 
+    selectedRoutine,
     connectedPlatforms,
-    refreshToken, 
-    fetchPlayback, 
-    isRestShuffled, 
+    refreshToken,
+    fetchPlayback,
+    isRestShuffled,
     isShuffled,
     selectedPlatform,
     detectPlatformFromSource,
     isPlatformReady,
     services,
+    countdownSoundPlayer,
   ]);
 
   const togglePlayPause = useCallback(async () => {
@@ -562,78 +531,19 @@ export const useAudioController = ({
       }
   }, [accessToken, musicPlayer, isRepeating, selectedPlatform]);
 
-  // Stop and cleanup music completely - stops ALL platforms (platform agnostic)
+  // Multi-platform pause/cleanup is delegated to the dedicated hook so this
+  // file stays focused on orchestration. Local audio-controller state is
+  // reset here on top of the shared stop flow.
+  const stopAll = useStopAllMusic({ services, connectedPlatforms, refreshToken, countdownSoundPlayer });
   const stopMusic = useCallback(async () => {
-      console.log('🛑 stopMusic called');
-      
-      // Get all available platform IDs from services
-      const platformsToStop = Object.keys(services || {});
-      
-      for (const platform of platformsToStop) {
-        const service = services?.[platform];
-        if (!service || !service.pause) continue;
-        
-        // Get token - 'device' platform uses 'device' as token, others use accessToken
-        const isLocalPlatform = platform === 'device';
-        const token = isLocalPlatform ? 'device' : connectedPlatforms?.[platform]?.accessToken;
-        
-        if (!token && !isLocalPlatform) {
-          console.log(`🛑 Skipping ${platform} - no token`);
-          continue;
-        }
-        
-        // Refresh callback only for remote platforms
-        const refreshCb = !isLocalPlatform && refreshToken ? () => refreshToken(platform) : null;
-        
-        try {
-          console.log(`🛑 Stopping ${platform}...`);
-          
-          // If platform supports device targeting, get active device first
-          if (service.getActiveDevice) {
-            const deviceId = await service.getActiveDevice(token, refreshCb);
-            if (deviceId) {
-              const result = await service.pause(token, refreshCb, deviceId);
-              console.log(`🛑 ${platform} pause result:`, result);
-            } else {
-              // No specific device, try regular pause
-              const result = await service.pause(token, refreshCb);
-              console.log(`🛑 ${platform} pause result:`, result);
-            }
-          } else {
-            // Platform doesn't support device targeting
-            const result = await service.pause(token, refreshCb);
-            console.log(`🛑 ${platform} pause result:`, result);
-          }
-          
-          // If platform has cleanup method, call it
-          if (service.cleanup) {
-            await service.cleanup();
-          }
-        } catch (error) {
-          console.error(`🛑 Error stopping ${platform}:`, error);
-        }
-      }
-      
-      // Also stop countdown sound player if it's playing
-      if (countdownSoundPlayer) {
-        try {
-          await countdownSoundPlayer.stop();
-          console.log('🛑 Countdown sound player stopped');
-        } catch (error) {
-          console.error('🛑 Error stopping countdown player:', error);
-        }
-      }
-      
-      // Reset all state
-      setIsMusicPlaying(false);
-      setTrack(null);
-      setMusicProgress(0);
-      setCurrentPlayingPlatform(null);
-      playlistStartedRef.current = false;
-      originalVolumeRef.current = null;
-      
-      console.log('🛑 stopMusic completed');
-  }, [services, connectedPlatforms, refreshToken, countdownSoundPlayer]);
+    await stopAll();
+    setIsMusicPlaying(false);
+    setTrack(null);
+    setMusicProgress(0);
+    setCurrentPlayingPlatform(null);
+    playlistStartedRef.current = false;
+    originalVolumeRef.current = null;
+  }, [stopAll]);
 
   // Set volume (0-100)
   const setVolume = useCallback(async (volumePercent) => {

@@ -388,10 +388,13 @@ export const createScreenStyles = (theme) => {
     minHeight: 64,
     borderRadius: 0,
   },
+  // Touch targets are sized to satisfy Apple HIG / Material Design minimum
+  // tap area (44x44pt). Visual hit feedback can still be smaller through
+  // child icons.
   controlButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
@@ -405,16 +408,16 @@ export const createScreenStyles = (theme) => {
       ...theme.shadow.md,
   },
   controlButtonSide: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
   },
   controlButtonReset: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: 0,
     backgroundColor: 'transparent',
     alignItems: 'center',
@@ -459,8 +462,11 @@ export const createScreenStyles = (theme) => {
       fontWeight: theme.fontWeight.medium,
   },
   routineDeleteButton: {
-      padding: theme.spacing.xs,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   routineMetaRow: {
     flexDirection: 'row',
@@ -491,9 +497,9 @@ export const createScreenStyles = (theme) => {
     paddingBottom: 60,
   },
   reorderButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
       borderColor: theme.border,
       backgroundColor: theme.cardSecondary,
@@ -578,8 +584,3 @@ export const createScreenStyles = (theme) => {
 });
 };
 
-// Backward compatibility - create default styles with light theme
-// This will be replaced by components using useTheme hook
-import { lightTheme } from '../themes/lightTheme';
-const defaultScreenStyles = createScreenStyles({ ...lightTheme, isDark: false });
-export const screenStyles = defaultScreenStyles;

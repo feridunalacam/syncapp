@@ -1,6 +1,22 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Alert } from 'react-native';
 
+const ROUTINE_NAME_MAX_LENGTH = 60;
+
+/**
+ * Validate the routine name and return an error message string, or null if
+ * the name is valid. Centralized so the input change handler and the save
+ * handler agree on the rules.
+ */
+const validateRoutineName = (rawName) => {
+  const trimmed = (rawName || '').trim();
+  if (!trimmed) return 'Please enter a routine name.';
+  if (trimmed.length > ROUTINE_NAME_MAX_LENGTH) {
+    return `Routine name must be ${ROUTINE_NAME_MAX_LENGTH} characters or fewer.`;
+  }
+  return null;
+};
+
 /**
  * Custom hook for managing routine form state and handlers
  * Extracts all state management logic from CreateRoutineScreen
@@ -107,7 +123,16 @@ export const useRoutineForm = ({
   }, [templateRoutine]);
 
   // Core routine state
-  const [name, setName] = useState(initialValues.name);
+  const [name, setNameRaw] = useState(initialValues.name);
+  const [nameError, setNameError] = useState(null);
+
+  // Wrap the name setter so the inline error clears as soon as the user
+  // starts fixing the input.
+  const setName = useCallback((next) => {
+    setNameRaw(next);
+    if (nameError) setNameError(null);
+  }, [nameError]);
+
   const [numberOfRounds, setNumberOfRounds] = useState(initialValues.numberOfRounds);
   const [roundsOrder, setRoundsOrder] = useState(initialValues.roundsOrder);
   const [workSec, setWorkSec] = useState(initialValues.workSec);
@@ -122,9 +147,10 @@ export const useRoutineForm = ({
   const [roundWorkPlaylists, setRoundWorkPlaylists] = useState(initialValues.roundWorkPlaylists);
   const [roundRestPlaylists, setRoundRestPlaylists] = useState(initialValues.roundRestPlaylists);
   
-  // Playlist IDs for shuffle
-  const [workoutPlaylistId, setWorkoutPlaylistId] = useState(null);
-  const [restPlaylistId, setRestPlaylistId] = useState(null);
+  // Playlist IDs for shuffle. Hydrate from template so editing an existing
+  // routine doesn't silently drop its attached playlists.
+  const [workoutPlaylistId, setWorkoutPlaylistId] = useState(templateRoutine?.workoutPlaylistId ?? null);
+  const [restPlaylistId, setRestPlaylistId] = useState(templateRoutine?.restPlaylistId ?? null);
   
   // Advanced Settings State
   const [restVolume, setRestVolume] = useState(templateRoutine?.restVolume ?? 100);
@@ -297,16 +323,18 @@ export const useRoutineForm = ({
   }, []);
 
   const handleSaveRoutine = useCallback(() => {
-    if (!name.trim()) {
-      Alert.alert('Error', 'Please enter a routine name');
+    const nameValidation = validateRoutineName(name);
+    if (nameValidation) {
+      setNameError(nameValidation);
       return;
     }
-    
+
     const rounds = parseInt(numberOfRounds, 10);
     if (isNaN(rounds) || rounds < 1) {
-      Alert.alert('Error', 'Please add at least one round');
+      Alert.alert('Cannot save', 'You must have at least one round.');
       return;
     }
+    const trimmedName = name.trim();
     
     const roundsData = roundsOrder.slice(0, rounds).map(roundNum => ({
       roundNumber: roundNum,
@@ -327,7 +355,7 @@ export const useRoutineForm = ({
     }));
     
     const routineData = {
-      name,
+      name: trimmedName,
       rounds,
       workSec: parseInt(workSec),
       restSec: parseInt(restSec),
@@ -380,6 +408,7 @@ export const useRoutineForm = ({
   return {
     // Core state
     name, setName,
+    nameError, setNameError,
     numberOfRounds, setNumberOfRounds,
     roundsOrder, setRoundsOrder,
     workSec, setWorkSec,

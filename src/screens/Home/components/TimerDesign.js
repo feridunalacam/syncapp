@@ -600,9 +600,13 @@ export const TimerDesign = ({
             ))
           }
         </Svg>
-        <Animated.Text style={[screenStyles.timerValue, { 
-          transform: [{ scale: timerScaleAnim }],
-        }]}>
+        <Animated.Text
+          style={[screenStyles.timerValue, {
+            transform: [{ scale: timerScaleAnim }],
+          }]}
+          allowFontScaling={false}
+          accessibilityLabel={`Timer ${formattedTime}`}
+        >
           {formattedTime}
         </Animated.Text>
       </View>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { BlurView } from 'expo-blur';
@@ -9,14 +9,24 @@ import RoutineStackScreen from './RoutineStackNavigator';
 import ExploreScreen from '../screens/Explore/ExploreScreen';
 import LogScreen from '../screens/Log/LogScreen';
 import ProfileScreen from '../screens/Profile/ProfileScreen';
+import { useTheme } from '../context/ThemeContext';
 
 const Tab = createBottomTabNavigator();
 
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
+  const { theme, isDark } = useTheme();
+
   const bottomInset = Math.max(insets.bottom, 8);
-  const iconPadding = Math.max(bottomInset * 0.3, 4); // reduced padding
-  const tabBarHeight = 73 + iconPadding; // reduced further to minimize top space
+  const iconPadding = Math.max(bottomInset * 0.3, 4);
+  const tabBarHeight = 73 + iconPadding;
+
+  // Pick blur tint + scrim based on theme so the tab bar feels native in
+  // both modes instead of being permanently dark-tinted glass.
+  const blurTint = isDark ? 'dark' : 'light';
+  const scrimColor = isDark ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.55)';
+  const fallbackColor = isDark ? 'rgba(0, 0, 0, 0.9)' : 'rgba(255, 255, 255, 0.9)';
+  const hairlineColor = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.08)';
 
   return (
     <Tab.Navigator
@@ -25,15 +35,15 @@ export default function TabNavigator() {
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarShowLabel: false,
-        tabBarActiveTintColor: '#ffffff',
-        tabBarInactiveTintColor: '#ffffff',
+        tabBarActiveTintColor: theme.accent,
+        tabBarInactiveTintColor: theme.iconSecondary,
         tabBarSafeAreaInsets: { bottom: iconPadding },
         tabBarBackground: () => (
           <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}>
             <BlurView
               intensity={30}
-              tint="dark"
-              reducedTransparencyFallbackColor="rgba(0, 0, 0, 0.9)"
+              tint={blurTint}
+              reducedTransparencyFallbackColor={fallbackColor}
               style={{
                 position: 'absolute',
                 top: 0,
@@ -48,7 +58,7 @@ export default function TabNavigator() {
               left: 0,
               right: 0,
               bottom: 0,
-              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+              backgroundColor: scrimColor,
             }} />
             <View style={{
               position: 'absolute',
@@ -56,7 +66,7 @@ export default function TabNavigator() {
               left: 0,
               right: 0,
               height: 0.5,
-              backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              backgroundColor: hairlineColor,
             }} />
           </View>
         ),

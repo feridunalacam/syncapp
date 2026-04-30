@@ -1,8 +1,8 @@
 import { Alert } from 'react-native';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { spotifyAPI } from '../utils/spotifyAPI';
-import spotifyService from '../services/spotifyService';
+import storage, { STORAGE_KEYS } from '../lib/storage';
+import spotifyService from '../services/spotify';
+import { computeAccessTokenExpiresAt } from '../services/spotify/auth';
 import deviceMusicService from '../services/deviceMusicService';
 
 export const PLATFORMS = {
@@ -18,17 +18,6 @@ export const PLATFORMS = {
     color: '#6366f1',
     icon: 'musical-notes',
   },
-};
-
-const TOKEN_REFRESH_BUFFER_SECONDS = 60; // Refresh 1 minute before expiry
-const DEFAULT_TOKEN_TTL_SECONDS = 3600;
-
-const computeExpiresAt = (expiresInSeconds) => {
-  const ttl =
-    typeof expiresInSeconds === 'number' && expiresInSeconds > TOKEN_REFRESH_BUFFER_SECONDS
-      ? expiresInSeconds
-      : DEFAULT_TOKEN_TTL_SECONDS;
-  return Date.now() + (ttl - TOKEN_REFRESH_BUFFER_SECONDS) * 1000;
 };
 
 const PlatformContext = createContext({
@@ -62,28 +51,28 @@ export const PlatformProvider = ({ children }) => {
   const [musicPlayer, setMusicPlayer] = useState(null);
 
   useEffect(() => {
-    const loadPlatformData = async () => {
-      try {
-        const storedPlatforms = await AsyncStorage.getItem('connectedPlatforms');
-        const storedSelected = await AsyncStorage.getItem('selectedPlatform');
+    let cancelled = false;
+    (async () => {
+      const [parsedPlatforms, storedSelected] = await Promise.all([
+        storage.getJSON(STORAGE_KEYS.CONNECTED_PLATFORMS, null),
+        storage.getString(STORAGE_KEYS.SELECTED_PLATFORM),
+      ]);
+      if (cancelled) return;
 
-        let parsedPlatforms = {};
-        if (storedPlatforms) {
-          parsedPlatforms = JSON.parse(storedPlatforms);
-          setConnectedPlatforms(parsedPlatforms);
-        }
-        if (storedSelected) {
-          setSelectedPlatform(storedSelected);
-          if (services[storedSelected] && parsedPlatforms[storedSelected]?.connected) {
-            setMusicPlayer(() => services[storedSelected]);
-          }
-        }
-      } catch (error) {
-        console.error('Error loading platform data:', error);
+      if (parsedPlatforms && typeof parsedPlatforms === 'object') {
+        setConnectedPlatforms(parsedPlatforms);
       }
+      if (storedSelected) {
+        setSelectedPlatform(storedSelected);
+        const candidate = services[storedSelected];
+        if (candidate && parsedPlatforms?.[storedSelected]?.connected) {
+          setMusicPlayer(() => candidate);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
-
-    loadPlatformData();
   }, []);
 
   useEffect(() => {
@@ -100,18 +89,9 @@ export const PlatformProvider = ({ children }) => {
     }
   }, [selectedPlatform, connectedPlatforms]);
 
-  // Memoize savePlatformData to avoid recreating on every render
   const savePlatformData = useCallback(async (platforms, selected) => {
-    try {
-      await AsyncStorage.setItem('connectedPlatforms', JSON.stringify(platforms));
-      if (selected) {
-        await AsyncStorage.setItem('selectedPlatform', selected);
-      } else {
-        await AsyncStorage.removeItem('selectedPlatform');
-      }
-    } catch (error) {
-      console.error('Error saving platform data:', error);
-    }
+    await storage.setJSON(STORAGE_KEYS.CONNECTED_PLATFORMS, platforms);
+    await storage.setString(STORAGE_KEYS.SELECTED_PLATFORM, selected || null);
   }, []);
 
   const connectPlatform = useCallback(
@@ -122,7 +102,7 @@ export const PlatformProvider = ({ children }) => {
           data.refreshToken !== undefined ? data.refreshToken : existing.refreshToken || null;
         const expiresAt =
           data.expiresAt ||
-          (data.expiresIn ? computeExpiresAt(data.expiresIn) : existing.expiresAt || null);
+          (data.expiresIn ? computeAccessTokenExpiresAt(data.expiresIn) : existing.expiresAt || null);
 
         const updated = {
           ...prev,
@@ -200,7 +180,7 @@ export const PlatformProvider = ({ children }) => {
     try {
       const tokenResult = await service.getAccessToken(platform.refreshToken);
       if (tokenResult?.accessToken) {
-        const expiresAt = computeExpiresAt(tokenResult.expiresIn);
+        const expiresAt = computeAccessTokenExpiresAt(tokenResult.expiresIn);
         // Update the stored access token
         setConnectedPlatforms((prev) => {
           const updated = {

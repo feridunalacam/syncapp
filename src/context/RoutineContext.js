@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import storage, { STORAGE_KEYS } from '../lib/storage';
 
 export const defaultRoutines = [
   { id: 'deneme', name: 'deneme', rounds: 3, workSec: 60, restSec: 30 },
@@ -19,7 +19,9 @@ const RoutineContext = createContext({
   clearCompletedRoutines: () => {},
 });
 
-// Memoize example completed routines to avoid recreating on every render
+// Seed the Log screen with two example completed entries so a brand-new
+// install isn't entirely empty. Real completions overwrite these on first
+// hydrate.
 const getExampleCompletedRoutines = () => {
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 30);
@@ -37,156 +39,89 @@ export const RoutineProvider = ({ children }) => {
   const [routines, setRoutines] = useState(defaultRoutines);
   const [completedRoutines, setCompletedRoutines] = useState(initialCompletedRoutines);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [completedHydrated, setCompletedHydrated] = useState(false);
 
-  // Load routines from AsyncStorage on mount
   useEffect(() => {
-    const loadRoutines = async () => {
-      try {
-        // One-time reset to clear old routines and set the new default.
-        const hasBeenReset = await AsyncStorage.getItem('routines-reset-deneme-v1');
-        if (!hasBeenReset) {
-          await AsyncStorage.removeItem('routines');
-          await AsyncStorage.setItem('routines-reset-deneme-v1', 'true');
-          // Explicitly set to default routines after reset
+    let cancelled = false;
+    (async () => {
+      // One-time reset to clear old routines and set the new default.
+      const hasBeenReset = await storage.getString(STORAGE_KEYS.ROUTINES_RESET_FLAG);
+      if (!hasBeenReset) {
+        await storage.remove(STORAGE_KEYS.ROUTINES);
+        await storage.setString(STORAGE_KEYS.ROUTINES_RESET_FLAG, 'true');
+        if (!cancelled) {
           setRoutines(defaultRoutines);
           setIsLoaded(true);
-          return;
         }
-
-        const storedRoutines = await AsyncStorage.getItem('routines');
-        if (storedRoutines) {
-          const parsed = JSON.parse(storedRoutines);
-          // Only use stored routines if they exist
-          if (parsed.length > 0) {
-            setRoutines(parsed);
-          } else {
-            // If stored but empty, use defaults
-            setRoutines(defaultRoutines);
-          }
-        } else {
-          // No stored routines, use defaults
-          setRoutines(defaultRoutines);
-        }
-      } catch (error) {
-        console.error('Error loading routines:', error);
-        // On error, fall back to defaults
-        setRoutines(defaultRoutines);
-      } finally {
-        setIsLoaded(true);
+        return;
       }
+
+      const stored = await storage.getJSON(STORAGE_KEYS.ROUTINES, null);
+      if (cancelled) return;
+
+      if (Array.isArray(stored) && stored.length > 0) {
+        setRoutines(stored);
+      } else {
+        setRoutines(defaultRoutines);
+      }
+      setIsLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
     };
-    loadRoutines();
   }, []);
 
-  // Save routines to AsyncStorage whenever they change
+  // Hydrate completed routines (workout history). Without this, the Log
+  // screen wiped itself on every app restart.
   useEffect(() => {
-    if (isLoaded) {
-      const saveRoutines = async () => {
-        try {
-          await AsyncStorage.setItem('routines', JSON.stringify(routines));
-        } catch (error) {
-          console.error('Error saving routines:', error);
-        }
-      };
-      saveRoutines();
-    }
+    let cancelled = false;
+    (async () => {
+      const stored = await storage.getJSON(STORAGE_KEYS.COMPLETED_ROUTINES, null);
+      if (cancelled) return;
+      if (Array.isArray(stored)) {
+        setCompletedRoutines(stored);
+      }
+      setCompletedHydrated(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    storage.setJSON(STORAGE_KEYS.ROUTINES, routines);
   }, [routines, isLoaded]);
 
+  // Persist workout history. Skip until hydrate completes so we don't
+  // overwrite the user's saved log with the seed list on first render.
+  useEffect(() => {
+    if (!completedHydrated) return;
+    storage.setJSON(STORAGE_KEYS.COMPLETED_ROUTINES, completedRoutines);
+  }, [completedRoutines, completedHydrated]);
+
   const addRoutine = useCallback((routineInput) => {
-    if (!routineInput) {
-      return;
-    }
+    if (!routineInput) return;
 
-    const {
-      name = 'Custom Routine',
-      description = '',
-      rounds = 1,
-      workSec = 60,
-      restSec = 30,
-      spotifyPlaylist = null,
-      targetDurationMin = null,
-      workoutPlaylistId = null,
-      restPlaylistId = null,
-      shuffleMode = false,
-      shuffleWorkMode = false,
-      shuffleRestMode = false,
-      restVolume = 100,
-      restVolumeEnabled = false,
-      voiceCountdownEnabled = false,
-      countdownAtStart = true,
-      countdownStartMode = 'preroll',
-      countdownAfterWork = false,
-      countdownAfterRest = false,
-      countdownDuration = 3,
-      // New countdown settings
-      countdownBeforeStart = false,
-      countdownBeforeStartDuration = 0,
-      countdownBeforeStartSound = null,
-      countdownStartWork = false,
-      countdownStartWorkDuration = 0,
-      countdownStartWorkSound = null,
-      countdownEndWork = false,
-      countdownEndWorkDuration = 0,
-      countdownEndWorkSound = null,
-      countdownEndRest = false,
-      countdownEndRestDuration = 0,
-      countdownEndRestSound = null,
-      roundsData = null,
-      platform = null,
-      completionNotificationEnabled = false,
-      completionNotificationType = 'text',
-      completionNotificationText = '',
-      completionNotificationSound = null,
-    } = routineInput;
-
-    const normalizedName = name.trim() || 'Custom Routine';
-    const slug = normalizedName
+    const rawName = typeof routineInput.name === 'string' ? routineInput.name.trim() : '';
+    const name = rawName || 'Custom Routine';
+    const slug = name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/(^-|-$)/g, '');
     const id = `${slug || 'routine'}-${Date.now()}`;
 
+    // Spread the caller's routine so any new field added to the form / schema
+    // automatically lands in storage. Defaults cover only the "required" core
+    // fields a routine must have to be runnable; identity (id, name) is forced
+    // last so callers can't override it accidentally.
     const routineToStore = {
+      rounds: 1,
+      workSec: 60,
+      restSec: 30,
+      ...routineInput,
       id,
-      name: normalizedName,
-      description,
-      rounds,
-      workSec,
-      restSec,
-      spotifyPlaylist,
-      targetDurationMin,
-      workoutPlaylistId,
-      restPlaylistId,
-      shuffleMode,
-      shuffleWorkMode,
-      shuffleRestMode,
-      restVolume,
-      restVolumeEnabled,
-      voiceCountdownEnabled,
-      countdownAtStart,
-      countdownStartMode,
-      countdownAfterWork,
-      countdownAfterRest,
-      countdownDuration,
-      // New countdown settings
-      countdownBeforeStart,
-      countdownBeforeStartDuration,
-      countdownBeforeStartSound,
-      countdownStartWork,
-      countdownStartWorkDuration,
-      countdownStartWorkSound,
-      countdownEndWork,
-      countdownEndWorkDuration,
-      countdownEndWorkSound,
-      countdownEndRest,
-      countdownEndRestDuration,
-      countdownEndRestSound,
-      roundsData,
-      platform,
-      completionNotificationEnabled,
-      completionNotificationType,
-      completionNotificationText,
-      completionNotificationSound,
+      name,
     };
 
     setRoutines((prev) => [...prev, routineToStore]);
@@ -243,6 +178,13 @@ export const RoutineProvider = ({ children }) => {
     );
   }, []);
 
+  // Reset all routine data back to factory defaults. Used by Logout / "wipe
+  // everything" so the next user starts from a clean slate.
+  const resetRoutinesToDefaults = useCallback(() => {
+    setRoutines(defaultRoutines);
+    setCompletedRoutines([]);
+  }, []);
+
   const value = useMemo(
     () => ({
       routines,
@@ -254,6 +196,7 @@ export const RoutineProvider = ({ children }) => {
       addCompletedRoutine,
       clearCompletedRoutines,
       removeCompletedRoutine,
+      resetRoutinesToDefaults,
     }),
     [
       routines,
@@ -265,6 +208,7 @@ export const RoutineProvider = ({ children }) => {
       addCompletedRoutine,
       clearCompletedRoutines,
       removeCompletedRoutine,
+      resetRoutinesToDefaults,
     ],
   );
 

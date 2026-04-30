@@ -1,4 +1,4 @@
-import { spotifyAPI } from '../utils/spotifyAPI';
+import { spotifyAPI } from './api';
 
 const spotifyService = {
   // Authentication

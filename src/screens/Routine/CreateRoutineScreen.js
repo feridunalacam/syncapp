@@ -5,6 +5,7 @@ import { useRoutineContext } from '../../context/RoutineContext';
 import { useTheme } from '../../context/ThemeContext';
 import { createScreenStyles } from '../../styles/screenStyles';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
+import FormFieldError from '../../components/common/FormFieldError';
 import { MusicSearchModal } from './components/MusicSearchModal';
 import { RoundEditor } from './components/RoundEditor';
 import { RoundConfiguration } from './components/RoundConfiguration';
@@ -113,14 +114,24 @@ export default function CreateRoutineScreen({ navigation, route }) {
           placeholderTextColor={theme.inputPlaceholder}
           value={form.name}
           onChangeText={form.setName}
+          accessibilityLabel="Routine name"
+          accessibilityHint="Enter a name for this routine"
+          maxLength={60}
         />
-                  <TouchableOpacity
+        <TouchableOpacity
           onPress={form.handleSaveRoutine}
           style={screenStyles.addButton}
+          accessibilityRole="button"
+          accessibilityLabel={templateRoutine?.id ? 'Update routine' : 'Save routine'}
         >
           <Text style={screenStyles.addButtonText}>+</Text>
-                      </TouchableOpacity>
-                  </View>
+        </TouchableOpacity>
+      </View>
+      {form.nameError ? (
+        <View style={{ paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing.xs }}>
+          <FormFieldError message={form.nameError} />
+        </View>
+      ) : null}
       
       <ScrollView 
         style={screenStyles.scrollView}

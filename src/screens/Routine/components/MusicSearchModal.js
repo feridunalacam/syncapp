@@ -1,68 +1,29 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  TouchableOpacity, 
-  Modal, 
-  ScrollView, 
-  TextInput, 
-  Image, 
+import React, { useEffect, useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Modal,
+  ScrollView,
+  TextInput,
+  Image,
   ActivityIndicator,
   StyleSheet,
-  Alert,
   Keyboard,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../../../context/ThemeContext';
 import { usePlatformContext } from '../../../context/PlatformContext';
 import { useMusicSearch } from '../../../hooks/useMusicSearch';
 import { PlatformSelector } from '../../../components/common/PlatformSelector';
-
-// === CONSTANTS ===
-const AUDIO_MIME_TYPES = [
-  'audio/mpeg', 'audio/mp4', 'audio/x-m4a', 'audio/aac',
-  'audio/wav', 'audio/x-wav', 'audio/flac', 'audio/ogg', 'audio/webm',
-];
-
-const VIDEO_MIME_TYPES = [
-  'video/mp4', 'video/quicktime', 'video/x-msvideo',
-  'video/x-matroska', 'video/webm', 'video/3gpp',
-];
-
-const BOOKMARK_SITES = [
-  { url: 'https://mixkit.co/free-sound-effects/', name: 'Mixkit', color: '#FF6B35' },
-  { url: 'https://pixabay.com/sound-effects/', name: 'Pixabay', color: '#00AB6C' },
-  { url: 'https://freesound.org/', name: 'Freesound', color: '#1E88E5' },
-  { url: 'https://www.zapsplat.com/', name: 'ZapSplat', color: '#9C27B0' },
-];
-
-const DEFAULT_BROWSER_URL = 'https://mixkit.co/free-sound-effects/';
-
-// Default countdown voice sounds
-const DEFAULT_VOICES = [
-  // Beeps & Tones
-  { id: 'beep_short', name: 'Quick Beep', type: 'voice', platform: 'voices', uri: 'voices://beep_short', duration: 1 },
-  { id: 'beep_long', name: 'Long Beep', type: 'voice', platform: 'voices', uri: 'voices://beep_long', duration: 2 },
-  { id: 'tone_high', name: 'High Tone', type: 'voice', platform: 'voices', uri: 'voices://tone_high', duration: 1 },
-  { id: 'tone_low', name: 'Low Tone', type: 'voice', platform: 'voices', uri: 'voices://tone_low', duration: 1 },
-  // Bells
-  { id: 'bell', name: 'Bell Ding', type: 'voice', platform: 'voices', uri: 'voices://bell', duration: 1 },
-  { id: 'gong', name: 'Gong', type: 'voice', platform: 'voices', uri: 'voices://gong', duration: 2 },
-  { id: 'boxing_bell', name: 'Boxing Bell', type: 'voice', platform: 'voices', uri: 'voices://boxing_bell', duration: 1 },
-  // Alarms
-  { id: 'whistle', name: 'Whistle', type: 'voice', platform: 'voices', uri: 'voices://whistle', duration: 1 },
-  { id: 'buzzer', name: 'Buzzer', type: 'voice', platform: 'voices', uri: 'voices://buzzer', duration: 1 },
-  { id: 'air_horn', name: 'Air Horn', type: 'voice', platform: 'voices', uri: 'voices://air_horn', duration: 2 },
-  // Countdown signals
-  { id: 'countdown_321', name: 'Countdown Beeps', type: 'voice', platform: 'voices', uri: 'voices://countdown_321', duration: 4 },
-  { id: 'countdown_go', name: 'Start Signal', type: 'voice', platform: 'voices', uri: 'voices://countdown_go', duration: 1 },
-  { id: 'countdown_start', name: 'Ready Signal', type: 'voice', platform: 'voices', uri: 'voices://countdown_start', duration: 2 },
-  { id: 'success', name: 'Success Chime', type: 'voice', platform: 'voices', uri: 'voices://success', duration: 1 },
-];
+import {
+  BOOKMARK_SITES,
+  DEFAULT_VOICES,
+  MEDIA_DETECTION_SCRIPT,
+} from './musicSearch/constants';
+import { useDeviceMediaPicker } from './musicSearch/useDeviceMediaPicker';
+import { useMediaWebView } from './musicSearch/useMediaWebView';
 
 export const MusicSearchModal = ({
   visible,
@@ -85,17 +46,20 @@ export const MusicSearchModal = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchCategory, setSearchCategory] = useState('all');
   const [selectedPlatform, setSelectedPlatform] = useState(() => {
-    // Default to voices if for countdown sound, otherwise Spotify/device
     if (isForCountdownSound) return 'voices';
     return connectedPlatforms?.spotify?.connected ? 'spotify' : 'device';
   });
-  
-  // Browser state
-  const [browserUrl, setBrowserUrl] = useState(DEFAULT_BROWSER_URL);
-  const [detectedMedia, setDetectedMedia] = useState([]);
-  const [isDownloading, setIsDownloading] = useState(false);
-  const webViewRef = useRef(null);
-  const scanIntervalRef = useRef(null);
+
+  // Browser state lives in its own hook; the modal only consumes the values.
+  const {
+    webViewRef,
+    scanIntervalRef,
+    browserUrl,
+    setBrowserUrl,
+    detectedMedia,
+    handleWebViewMessage,
+    resetBrowser,
+  } = useMediaWebView({ active: visible });
 
   // Music search hook - handles all music operations
   const {
@@ -174,253 +138,52 @@ export const MusicSearchModal = ({
     setPopularSongs([]);
   };
 
-  const handleSelectSong = (song) => {
-    if (selectedRoundForSong && songType) {
-      attachSongToRound(selectedRoundForSong, song, songType);
-    }
-  };
+  const handleSelectSong = useCallback(
+    (song) => {
+      if (selectedRoundForSong && songType) {
+        attachSongToRound(selectedRoundForSong, song, songType);
+      }
+    },
+    [attachSongToRound, selectedRoundForSong, songType],
+  );
 
-  const handleSelectPlaylist = (playlist) => {
-    if (selectedRoundForSong && songType) {
-      attachPlaylistToRound(selectedRoundForSong, playlist, songType);
-    }
-  };
+  const handleSelectPlaylist = useCallback(
+    (playlist) => {
+      if (selectedRoundForSong && songType) {
+        attachPlaylistToRound(selectedRoundForSong, playlist, songType);
+      }
+    },
+    [attachPlaylistToRound, selectedRoundForSong, songType],
+  );
 
-  // Helper: Create song object
-  const createSongObject = (config) => ({
-    id: config.id || `${config.source}-${Date.now()}`,
-    name: config.name,
-    artist: config.artist || 'Unknown',
-    album: config.album || null,
-    image: config.image || null,
-    duration: config.duration || 0,
-    uri: config.uri,
-    type: config.type || 'track',
-    source: config.source,
-    platform: config.platform || 'device',
-    ...(config.isVideo && { isVideo: true }),
-  });
-
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     setSearchQuery('');
     setSearchResults([]);
-    setBrowserUrl(DEFAULT_BROWSER_URL);
-    setDetectedMedia([]);
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = null;
-    }
+    resetBrowser();
     onClose();
-  };
+  }, [onClose, resetBrowser, setSearchResults]);
 
-  // Media detection script for WebView
-  const mediaDetectionScript = `
-    (function() {
-      const mediaExtensions = ['mp3', 'm4a', 'wav', 'aac', 'ogg', 'flac', 'mp4', 'mov', 'webm', 'avi'];
-      const mediaFiles = [];
-      
-      const isMediaUrl = (url) => {
-        if (!url) return false;
-        const lower = url.toLowerCase();
-        return mediaExtensions.some(ext => lower.includes('.' + ext));
-      };
-      
-      const getCleanName = (url, text) => {
-        let name = text || '';
-        if (!name || name.length < 2) {
-          name = decodeURIComponent(url.split('/').pop().split('?')[0] || 'Audio');
-        }
-        return name.replace(/\\.[^/.]+$/, '').substring(0, 60);
-      };
-      
-      // Find links
-      document.querySelectorAll('a[href]').forEach(link => {
-        if (isMediaUrl(link.href)) {
-          mediaFiles.push({ url: link.href, name: getCleanName(link.href, link.textContent.trim()) });
-        }
-      });
-      
-      // Find audio/video elements
-      document.querySelectorAll('audio, video').forEach(el => {
-        const src = el.src || el.currentSrc;
-        if (src) mediaFiles.push({ url: src, name: getCleanName(src, '') });
-        el.querySelectorAll('source').forEach(s => {
-          if (s.src) mediaFiles.push({ url: s.src, name: getCleanName(s.src, '') });
-        });
-      });
-      
-      // Find download buttons
-      document.querySelectorAll('[download], [data-download], .download').forEach(el => {
-        const href = el.href || el.getAttribute('data-href');
-        if (href && isMediaUrl(href)) {
-          mediaFiles.push({ url: href, name: getCleanName(href, el.textContent.trim()) });
-        }
-      });
-      
-      const unique = [...new Map(mediaFiles.map(item => [item.url, item])).values()];
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'media', data: unique.slice(0, 30) }));
-    })();
-    true;
-  `;
+  // Whenever the device picker hands us a song, attach it and dismiss the
+  // modal. Centralized here so every picker entry point shares the same
+  // post-select behavior.
+  const handleSongFromPicker = useCallback(
+    (song) => {
+      handleSelectSong(song);
+      handleClose();
+    },
+    [handleSelectSong, handleClose],
+  );
 
-  // Handle WebView messages
-  const handleWebViewMessage = (event) => {
-    try {
-      const message = JSON.parse(event.nativeEvent.data);
-      if (message.type === 'media') {
-        setDetectedMedia(message.data || []);
-      }
-    } catch (e) {}
-  };
+  const {
+    isDownloading,
+    handleMediaClick,
+    handlePickFile,
+    handlePickVoiceMemo,
+    handlePickFromCameraRoll,
+  } = useDeviceMediaPicker({ onSongSelected: handleSongFromPicker });
 
-  // Download file from URL
-  const downloadFromUrl = async (url, name) => {
-    try {
-      setIsDownloading(true);
-      const filename = name || url.split('/').pop().split('?')[0] || 'audio';
-      const ext = url.split('.').pop()?.split('?')[0]?.toLowerCase() || 'mp3';
-      const safeFilename = filename.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now() + '.' + ext;
-      const fileUri = FileSystem.cacheDirectory + safeFilename;
-      
-      const result = await FileSystem.downloadAsync(url, fileUri);
-      setIsDownloading(false);
-      
-      if (result?.uri && result.status === 200) {
-        const song = createSongObject({
-          name: filename.replace(/\.[^/.]+$/, ''),
-          artist: 'Downloaded',
-          uri: result.uri,
-          source: 'device',
-        });
-        handleSelectSong(song);
-        handleClose();
-      } else {
-        throw new Error('Download failed');
-      }
-    } catch (error) {
-      setIsDownloading(false);
-      Alert.alert('İndirme Hatası', 'Dosya indirilemedi.');
-    }
-  };
-
-  // Add URL directly (streaming)
-  const addFromUrl = (url, name) => {
-    const filename = name || url.split('/').pop().split('?')[0] || 'Audio';
-    const song = createSongObject({
-      name: filename.replace(/\.[^/.]+$/, ''),
-      artist: 'Web Audio',
-      uri: url,
-      source: 'url',
-    });
-    handleSelectSong(song);
-    handleClose();
-  };
-
-  // Handle detected media click
-  const handleMediaClick = (media) => {
-    Alert.alert(
-      media.name,
-      'Bu dosyayı nasıl eklemek istersiniz?',
-      [
-        { text: 'İptal', style: 'cancel' },
-        { text: 'URL Olarak Çal', onPress: () => addFromUrl(media.url, media.name) },
-        { text: 'İndir', onPress: () => downloadFromUrl(media.url, media.name) },
-      ]
-    );
-  };
-
-  // Pick audio/video file from Files app
-  const handlePickFile = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: [...AUDIO_MIME_TYPES, ...VIDEO_MIME_TYPES],
-        copyToCacheDirectory: true,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const file = result.assets[0];
-        const fileName = file.name || 'Unknown';
-        const extension = fileName.split('.').pop()?.toLowerCase() || '';
-        const isVideo = ['mp4', 'mov', 'avi', 'mkv', 'm4v', 'webm'].includes(extension);
-        
-        const song = createSongObject({
-          name: fileName.replace(/\.[^/.]+$/, ''),
-          artist: isVideo ? 'Video File' : 'Local File',
-          uri: file.uri,
-          source: 'device',
-          isVideo,
-        });
-        handleSelectSong(song);
-        handleClose();
-      }
-    } catch (error) {
-      console.error('Error picking file:', error);
-      Alert.alert('Error', 'Failed to pick file');
-    }
-  };
-
-  // Pick voice memo / audio recording
-  const handlePickVoiceMemo = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: AUDIO_MIME_TYPES,
-        copyToCacheDirectory: true,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const file = result.assets[0];
-        const fileName = file.name || 'Voice Memo';
-        const song = createSongObject({
-          name: fileName.replace(/\.[^/.]+$/, ''),
-          artist: 'Voice Memo',
-          uri: file.uri,
-          source: 'device',
-        });
-        handleSelectSong(song);
-        handleClose();
-      }
-    } catch (error) {
-      console.error('Error picking voice memo:', error);
-      Alert.alert('Error', 'Failed to pick voice memo');
-    }
-  };
-
-  // Pick video from Camera Roll / Photos library
-  const handlePickFromCameraRoll = async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Please allow access to your photo library to select videos.');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-        allowsEditing: false,
-        quality: 1,
-      });
-
-      if (!result.canceled && result.assets && result.assets.length > 0) {
-        const video = result.assets[0];
-        const uriParts = video.uri.split('/');
-        const fileName = uriParts[uriParts.length - 1] || `Video_${Date.now()}`;
-        
-        const song = createSongObject({
-          name: fileName.replace(/\.[^/.]+$/, ''),
-          artist: 'Camera Roll',
-          duration: video.duration ? Math.floor(video.duration / 1000) : 0,
-          uri: video.uri,
-          source: 'device',
-          isVideo: true,
-        });
-        handleSelectSong(song);
-        handleClose();
-      }
-    } catch (error) {
-      console.error('Error picking from camera roll:', error);
-      Alert.alert('Error', 'Failed to pick video from camera roll');
-    }
-  };
+  // Aliased for readability inside the JSX below (the WebView prop name).
+  const mediaDetectionScript = MEDIA_DETECTION_SCRIPT;
 
 
   const isSongAlreadyAttached = (songId) => {
@@ -775,7 +538,7 @@ export const MusicSearchModal = ({
                 {isDownloading && (
                   <View style={styles.downloadingIndicator}>
                     <ActivityIndicator size="small" color={theme.accent} />
-                    <Text style={styles.downloadingText}>İndiriliyor...</Text>
+                    <Text style={styles.downloadingText}>Downloading…</Text>
                   </View>
                 )}
               </View>
