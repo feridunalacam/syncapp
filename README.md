@@ -26,3 +26,4 @@ A simple Expo Go project.
 - Expo Go app on your mobile device (optional, for testing on real device)
 
 
+# syncapp-v2
