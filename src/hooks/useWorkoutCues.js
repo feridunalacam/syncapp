@@ -19,6 +19,7 @@ export default function useWorkoutCues(session) {
     }
     if (
       !session ||
+      session.audioPending ||
       session.status === 'paused' ||
       session.status === 'aborted' ||
       newRun ||

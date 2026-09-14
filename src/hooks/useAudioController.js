@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { resolveRoundAudio } from '../domain/audio.js';
+import { resolveRoundAudio, getPhaseMusicVolume, sameAudioSource } from '../domain/audio.js';
 
 /** One serialized command stream prevents rapid phase changes racing audio loads. */
 export const useAudioController = ({
@@ -10,6 +10,7 @@ export const useAudioController = ({
   selectedRoutine,
   services,
   countdownSoundPlayer,
+  onPlaybackInterrupted,
 }) => {
   const [track, setTrack] = useState(null);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
@@ -23,6 +24,10 @@ export const useAudioController = ({
   const queue = useRef(Promise.resolve());
   const revision = useRef(0);
   const mounted = useRef(true);
+  const commandCount = useRef(0);
+  const loadingVersion = useRef(null);
+  const requestedPhase = useRef(null);
+  const interruption = useRef(null);
   const params = useRef({});
   params.current = {
     selectedPlatform,
@@ -32,6 +37,7 @@ export const useAudioController = ({
     selectedRoutine,
     services,
     countdownSoundPlayer,
+    onPlaybackInterrupted,
     isShuffled,
     isRepeating,
   };
@@ -39,21 +45,47 @@ export const useAudioController = ({
     mounted.current = true;
     return () => {
       mounted.current = false;
+      wantsPaused.current = true;
       revision.current++;
       const p = params.current;
+      const current = active.current;
+      const silence = async (source) => {
+        if (!source || source.platform === 'voices') return;
+        const token =
+          source.platform === 'device'
+            ? 'device'
+            : p.getValidAccessToken
+              ? await p.getValidAccessToken(source.platform)
+              : p.connectedPlatforms?.[source.platform]?.accessToken;
+        await p.services?.[source.platform]?.pause(
+          token,
+          () => p.refreshToken?.(source.platform),
+          source.deviceId,
+        );
+      };
+      silence(current).catch(() => {});
+      p.countdownSoundPlayer?.stop();
       queue.current.then(() =>
         Promise.allSettled([
+          silence(active.current),
           ...Object.values(p.services || {}).map((service) => service.cleanup?.()),
           p.countdownSoundPlayer?.stop(),
         ]),
       );
     };
   }, []);
-  const enqueue = useCallback((operation) => {
+  const enqueue = useCallback((operation, isRelevant = () => true) => {
+    commandCount.current++;
     const result = queue.current.then(operation);
-    queue.current = result.catch((error) => {
-      if (mounted.current) setAudioError(error.message || 'Music could not be played.');
-    });
+    queue.current = result
+      .catch((error) => {
+        if (!isRelevant()) return { success: true, cancelled: true };
+        if (mounted.current) setAudioError(error.message || 'Music could not be played.');
+        return { success: false, error: error.message || 'Music could not be played.' };
+      })
+      .finally(() => {
+        commandCount.current--;
+      });
     return queue.current;
   }, []);
   const connection = useCallback(async (platform) => {
@@ -97,6 +129,7 @@ export const useAudioController = ({
     try {
       const playback = await service?.getCurrentPlayback(token, refresh);
       if (!mounted.current || version !== revision.current) return;
+      check(playback);
       if (
         current.platform === 'spotify' &&
         playback?.device?.id &&
@@ -104,7 +137,21 @@ export const useAudioController = ({
         !playback.device.is_restricted
       ) {
         current.deviceId = playback.device.id;
+        interruption.current = null;
         setAudioError(null);
+      }
+      if (!wantsPaused.current && commandCount.current === 0) {
+        const stopped =
+          !playback?.item || playback.is_playing === false || playback.isPlaying === false;
+        if (stopped) {
+          if (interruption.current == null) interruption.current = Date.now();
+          else if (Date.now() - interruption.current >= 800) {
+            interruption.current = null;
+            params.current.onPlaybackInterrupted?.(
+              'Music stopped or became unavailable. Resume when ready.',
+            );
+          }
+        } else interruption.current = null;
       }
       if (!playback?.item) {
         if (playback && playback.is_playing === false) setIsMusicPlaying(false);
@@ -125,114 +172,172 @@ export const useAudioController = ({
         !wantsPaused.current && (playback.is_playing ?? playback.isPlaying ?? false),
       );
     } catch (error) {
-      if (mounted.current && version === revision.current) setAudioError(error.message);
+      if (mounted.current && version === revision.current) {
+        setAudioError(error.message);
+        if (!wantsPaused.current && commandCount.current === 0)
+          params.current.onPlaybackInterrupted?.(error.message);
+      }
     }
   }, [connection]);
   const handlePhaseChange = useCallback(
     (phase, roundNum, paused = false) => {
       const version = ++revision.current;
+      loadingVersion.current = version;
+      requestedPhase.current = { phase, roundNum };
+      interruption.current = null;
       wantsPaused.current = paused;
       pendingPhase.current = paused ? { phase, roundNum } : null;
-      return enqueue(async () => {
-        if (version !== revision.current) return;
-        const p = params.current;
-        const routine = p.selectedRoutine;
-        if (!routine) return;
-        const resolved = resolveRoundAudio(routine, phase, roundNum, p.selectedPlatform);
-        await stopActive();
-        if (!resolved) {
-          if (mounted.current) {
-            setTrack(null);
-            setIsMusicPlaying(false);
-            setMusicProgress(0);
+      return enqueue(
+        async () => {
+          if (version !== revision.current) return;
+          const p = params.current;
+          const routine = p.selectedRoutine;
+          if (!routine) return;
+          const resolved = resolveRoundAudio(routine, phase, roundNum, p.selectedPlatform);
+          const volume = getPhaseMusicVolume(routine, phase);
+          const current = active.current;
+          // Preparation is the intro of the first Work track, not a separate playback.
+          if (
+            phase === 'work' &&
+            roundNum === 1 &&
+            current?.phase === 'beforeStart' &&
+            current.platform !== 'voices' &&
+            sameAudioSource(current, resolved)
+          ) {
+            current.phase = phase;
+            pendingPhase.current = null;
+            const { service, token, refresh } = await connection(current.platform);
+            if (current.platform === 'spotify') {
+              const target = await service.getActiveDevice?.(token, refresh);
+              if (target) current.deviceId = target;
+            }
+            if (version !== revision.current || !mounted.current) return;
+            if (service?.setVolume) await service.setVolume(token, volume, current.deviceId);
+            if (version !== revision.current || !mounted.current) return;
             setAudioError(null);
+            await fetchPlayback();
+            return;
           }
-          return;
-        }
-        const { source, platform, kind, playlistId } = resolved;
-        const song = kind === 'track';
-        if (version !== revision.current) return;
-        if (wantsPaused.current) {
-          pendingPhase.current = { phase, roundNum };
-          if (mounted.current) {
-            setTrack({
-              title: source.name || 'Audio',
-              artist: source.artist || '',
-              duration: source.duration || 0,
-              coverUrl: source.image || null,
-            });
-            setMusicProgress(0);
-            setIsMusicPlaying(false);
+          await stopActive();
+          if (!resolved) {
+            if (mounted.current) {
+              setTrack(null);
+              setIsMusicPlaying(false);
+              setMusicProgress(0);
+              setAudioError(null);
+            }
+            return;
           }
-          return;
-        }
-        if (platform === 'voices') {
-          if (!paused) await p.countdownSoundPlayer?.play(source.uri);
-          active.current = { platform, phase };
-        } else {
-          const { service, token, refresh } = await connection(platform);
-          if (!service || !token)
-            throw new Error(
-              `Connect ${platform === 'spotify' ? 'Spotify' : 'your music source'} in Profile to play this round.`,
-            );
-          let deviceId =
-            (await service.getActiveDevice?.(token, refresh)) ||
-            (platform === 'device' ? 'device' : null);
-          if (!deviceId)
-            throw new Error('Open Spotify on a playback device, then resume the workout.');
+          const { source, platform, kind, playlistId } = resolved;
+          const song = kind === 'track';
           if (version !== revision.current) return;
           if (wantsPaused.current) {
             pendingPhase.current = { phase, roundNum };
+            if (mounted.current) {
+              setTrack({
+                title: source.name || 'Audio',
+                artist: source.artist || '',
+                duration: source.duration || 0,
+                coverUrl: source.image || null,
+              });
+              setMusicProgress(0);
+              setIsMusicPlaying(false);
+            }
             return;
           }
-          const options = {
-            ...source,
-            name: source.name || source.title,
-            shouldPlay: !wantsPaused.current,
-            refreshCallback: refresh,
-            isCancelled: () =>
-              version !== revision.current || wantsPaused.current || !mounted.current,
-          };
-          const playResult = song
-            ? await service.playTrack(token, source.uri, deviceId, options)
-            : await service.playPlaylist(token, playlistId, deviceId, p.isShuffled, options);
-          check(playResult);
-          deviceId = playResult?.deviceId || deviceId;
-          active.current = { platform, phase, deviceId, kind, source, playlistId, positionMs: 0 };
-          if (wantsPaused.current) check(await service.pause(token, refresh, deviceId));
-          if (service.setVolume && !playResult?.externalChange)
-            await service.setVolume(
-              token,
-              phase === 'rest' ? (routine.restVolume ?? 100) : 100,
-              deviceId,
-            );
-          if (service.setRepeat && !playResult?.externalChange)
-            await service.setRepeat(
-              token,
-              p.isRepeating ? (song ? 'track' : 'context') : 'off',
-              deviceId,
-            );
-        }
-        if (version !== revision.current || !mounted.current) return;
-        setAudioError(null);
-        setTrack({
-          id: source.uri || source.id,
-          title: source.name || (song ? 'Audio' : 'Playlist'),
-          artist: source.artist || '',
-          album: source.album || '',
-          duration: source.duration || 0,
-          coverUrl: source.image || null,
-        });
-        setMusicProgress(0);
-        setIsMusicPlaying(!wantsPaused.current);
-        await fetchPlayback();
+          if (platform === 'voices') {
+            if (!paused) await p.countdownSoundPlayer?.play(source.uri);
+            active.current = { platform, phase };
+          } else {
+            const { service, token, refresh } = await connection(platform);
+            if (!service || !token)
+              throw new Error(
+                `Connect ${platform === 'spotify' ? 'Spotify' : 'your music source'} in Profile to play this round.`,
+              );
+            let deviceId =
+              (await service.getActiveDevice?.(token, refresh)) ||
+              (platform === 'device' ? 'device' : null);
+            if (!deviceId)
+              throw new Error('Open Spotify on a playback device, then resume the workout.');
+            if (version !== revision.current) return;
+            if (wantsPaused.current) {
+              pendingPhase.current = { phase, roundNum };
+              return;
+            }
+            // Spotify volume belongs to the target device; set it before playback.
+            // Local audio receives volume in its initial native loading status.
+            if (platform === 'spotify' && service.setVolume)
+              await service.setVolume(token, volume, deviceId);
+            if (version !== revision.current || wantsPaused.current || !mounted.current) return;
+            const options = {
+              ...source,
+              name: source.name || source.title,
+              shouldPlay: !wantsPaused.current,
+              volumePercent: volume,
+              refreshCallback: refresh,
+              isCancelled: () =>
+                version !== revision.current || wantsPaused.current || !mounted.current,
+            };
+            active.current = { platform, phase, deviceId, kind, source, playlistId, positionMs: 0 };
+            const playResult = song
+              ? await service.playTrack(token, source.uri, deviceId, options)
+              : await service.playPlaylist(token, playlistId, deviceId, p.isShuffled, options);
+            check(playResult);
+            if (playResult?.cancelled) {
+              await service.pause(token, refresh, playResult.deviceId || deviceId);
+              if (platform === 'device') active.current = null; // cancelled native loads already unload
+              return playResult;
+            }
+            deviceId = playResult?.deviceId || deviceId;
+            active.current = { platform, phase, deviceId, kind, source, playlistId, positionMs: 0 };
+            if (wantsPaused.current) check(await service.pause(token, refresh, deviceId));
+            if (version !== revision.current || !mounted.current) return;
+            if (service.setVolume && !playResult?.externalChange)
+              await service.setVolume(token, volume, deviceId);
+            if (service.setRepeat && !playResult?.externalChange)
+              await service.setRepeat(
+                token,
+                p.isRepeating ? (song ? 'track' : 'context') : 'off',
+                deviceId,
+              );
+          }
+          if (version !== revision.current || !mounted.current) return;
+          setAudioError(null);
+          setTrack({
+            id: source.uri || source.id,
+            title: source.name || (song ? 'Audio' : 'Playlist'),
+            artist: source.artist || '',
+            album: source.album || '',
+            duration: source.duration || 0,
+            coverUrl: source.image || null,
+          });
+          setMusicProgress(0);
+          setIsMusicPlaying(!wantsPaused.current);
+          await fetchPlayback();
+        },
+        () => version === revision.current,
+      ).finally(() => {
+        if (loadingVersion.current === version) loadingVersion.current = null;
       });
     },
     [enqueue, connection, stopActive, fetchPlayback],
   );
   const pauseMusic = useCallback(() => {
     wantsPaused.current = true;
+    revision.current++;
+    if (loadingVersion.current != null) pendingPhase.current = requestedPhase.current;
+    // Alerts and an already-playing track must not wait behind a slow network load.
+    const nowPlaying = active.current;
+    const urgent = Promise.allSettled([
+      params.current.countdownSoundPlayer?.stop(),
+      commandCount.current > 0 && nowPlaying && nowPlaying.platform !== 'voices'
+        ? connection(nowPlaying.platform).then(({ service, token, refresh }) =>
+            service?.pause(token, refresh, nowPlaying.deviceId),
+          )
+        : null,
+    ]);
     return enqueue(async () => {
+      await urgent;
       await params.current.countdownSoundPlayer?.stop();
       const current = active.current;
       if (!current) return;
@@ -279,8 +384,15 @@ export const useAudioController = ({
     });
   }, [enqueue, connection, handlePhaseChange]);
   const stopMusic = useCallback(() => {
+    wantsPaused.current = true;
     revision.current++;
     pendingPhase.current = null;
+    params.current.countdownSoundPlayer?.stop();
+    const current = active.current;
+    if (commandCount.current > 0 && current && current.platform !== 'voices')
+      connection(current.platform)
+        .then(({ service, token, refresh }) => service?.pause(token, refresh, current.deviceId))
+        .catch(() => {});
     return enqueue(async () => {
       try {
         await stopActive();
@@ -293,7 +405,7 @@ export const useAudioController = ({
         }
       }
     });
-  }, [enqueue, stopActive]);
+  }, [enqueue, stopActive, connection]);
   const control = useCallback(
     (method, ...args) =>
       enqueue(async () => {

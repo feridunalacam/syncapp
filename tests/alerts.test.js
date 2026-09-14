@@ -13,6 +13,8 @@ import {
   resumeSession,
   skipSession,
   stopSession,
+  holdForAudio,
+  releaseAudioHold,
 } from '../src/domain/workout.js';
 
 const makeSession = (changes = {}) =>
@@ -283,4 +285,22 @@ test('preview is a cancellable three-second plan with configured language and ef
   assert.equal(buildCuePreview(config, 'rest')[0].atMs, 0);
   assert.deepEqual(buildCuePreview(createAlertPreset('silent'), 'rest'), []);
   assert.deepEqual(buildCuePreview(config, 'unknown'), []);
+});
+
+test('countdown and Go wait for audio readiness without losing the entry signal', () => {
+  const first = makeSession();
+  const waiting = holdForAudio(first, 1000, true);
+  assert.deepEqual(planSessionCues(null, waiting), []);
+  const ready = releaseAudioHold(waiting, 3400);
+  assert.equal(onlyCue(waiting, ready).signalKey, 'start');
+  const next = advanceSession(ready, 3500);
+  assert.deepEqual(planSessionCues(ready, next), []);
+});
+
+test('a paused mid-interval resume does not replay the entry command', () => {
+  const first = makeSession();
+  const paused = pauseSession(first, 3000);
+  const waiting = holdForAudio(resumeSession(paused, 6000), 6000);
+  const ready = releaseAudioHold(waiting, 8000);
+  assert.deepEqual(planSessionCues(waiting, ready), []);
 });

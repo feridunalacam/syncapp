@@ -1,9 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, Pressable, ScrollView, TextInput } from 'react-native';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  Pressable,
+  ScrollView,
+  TextInput,
+  StyleSheet,
+} from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRoutineContext } from '../../context/RoutineContext';
 import { useTheme } from '../../context/ThemeContext';
-import { createScreenStyles } from '../../styles/screenStyles';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
 import GlassSurface from '../../components/common/GlassSurface';
 import FormFieldError from '../../components/common/FormFieldError';
@@ -20,10 +27,9 @@ import { useRoutineForm } from './hooks/useRoutineForm';
 
 export default function CreateRoutineScreen({ navigation, route }) {
   const { addRoutine, updateRoutine } = useRoutineContext();
-  const { theme, isDark } = useTheme();
+  const { theme } = useTheme();
   const spotify = useSpotifyConnection();
   const { previewCue, stopPreview, previewing } = useAlertPreview();
-  const screenStyles = createScreenStyles({ ...theme, isDark });
 
   const templateRoutine = route?.params?.templateRoutine || null;
 
@@ -38,6 +44,8 @@ export default function CreateRoutineScreen({ navigation, route }) {
   // Check if any advanced settings were modified (for auto-expanding)
   const hasAdvancedSettingsModified =
     form.audioAlerts != null ||
+    form.preparationVolume !== 50 ||
+    form.workVolume !== 100 ||
     form.restVolume !== 100 ||
     form.countdownBeforeStartSec > 0 ||
     form.countdownBeforeStartSound !== null ||
@@ -60,6 +68,8 @@ export default function CreateRoutineScreen({ navigation, route }) {
     setShowSongPicker(false);
     setShowAdvancedSettings(
       templateRoutine?.audioAlerts != null ||
+        (templateRoutine?.preparationVolume ?? 50) !== 50 ||
+        (templateRoutine?.workVolume ?? 100) !== 100 ||
         (templateRoutine?.restVolume ?? 100) !== 100 ||
         (templateRoutine?.countdownBeforeStartDuration ?? 0) > 0 ||
         templateRoutine?.countdownBeforeStartSound != null ||
@@ -141,7 +151,7 @@ export default function CreateRoutineScreen({ navigation, route }) {
   };
 
   return (
-    <ScreenWrapper style={screenStyles.container}>
+    <ScreenWrapper style={styles.fill}>
       <View
         style={{
           flexDirection: 'row',
@@ -211,7 +221,7 @@ export default function CreateRoutineScreen({ navigation, route }) {
       ) : null}
 
       <ScrollView
-        style={screenStyles.scrollView}
+        style={styles.fill}
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
       >
@@ -367,6 +377,10 @@ export default function CreateRoutineScreen({ navigation, route }) {
             onPreviewCue={previewCue}
             onStopPreview={stopPreview}
             previewing={previewing}
+            preparationVolume={form.preparationVolume}
+            onPreparationVolumeChange={form.setPreparationVolume}
+            workVolume={form.workVolume}
+            onWorkVolumeChange={form.setWorkVolume}
             restVolume={form.restVolume}
             onRestVolumeChange={form.setRestVolume}
             // Before Start - duration picker
@@ -413,3 +427,5 @@ export default function CreateRoutineScreen({ navigation, route }) {
     </ScreenWrapper>
   );
 }
+
+const styles = StyleSheet.create({ fill: { flex: 1 } });

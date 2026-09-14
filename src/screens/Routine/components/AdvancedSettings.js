@@ -65,6 +65,10 @@ export const AdvancedSettings = ({
   onToggle,
   restVolume,
   onRestVolumeChange,
+  preparationVolume = 50,
+  onPreparationVolumeChange,
+  workVolume = 100,
+  onWorkVolumeChange,
   countdownBeforeStartSec,
   onCountdownBeforeStartSecChange,
   countdownBeforeStartSound,
@@ -183,6 +187,15 @@ export const AdvancedSettings = ({
                 onChange={(value) => onCountdownBeforeStartSecChange(Number(value))}
               />
             </View>
+            {countdownBeforeStartSec > 0 && (
+              <>
+                {volume('Preparation music volume', preparationVolume, onPreparationVolumeChange)}
+                <Text style={[styles.note, { color: theme.textSecondary }]}>
+                  Your first Work track starts during preparation and continues into Work.
+                </Text>
+              </>
+            )}
+            {volume('Work music volume', workVolume, onWorkVolumeChange)}
             {volume('Rest music volume', restVolume, onRestVolumeChange)}
             <View style={[styles.section, { borderColor: theme.border }]}>
               {title('Workout cues')}
@@ -350,7 +363,12 @@ export const AdvancedSettings = ({
                   {(config.countdown.mode === 'voice' ||
                     SIGNALS.some(({ id }) => config.signals[id]?.uri?.startsWith('speech://'))) && (
                     <View style={styles.settingRow}>
-                      {label('Voice language')}
+                      <View>
+                        {label('Voice language')}
+                        <Text style={[styles.detail, { color: theme.textSecondary }]}>
+                          {config.language === 'en-US' ? 'SyncApp Coach' : 'Device voice'}
+                        </Text>
+                      </View>
                       <View style={styles.inlineSegments}>
                         <Segments
                           label="Voice language"

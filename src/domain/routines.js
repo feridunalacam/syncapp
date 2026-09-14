@@ -15,6 +15,8 @@ export const normalizeRoutine = (input = {}) => {
     restSec,
     countdownBeforeStartDuration: seconds(input.countdownBeforeStartDuration, 0),
     restVolume: Math.min(100, seconds(input.restVolume, 100)),
+    preparationVolume: Math.min(100, seconds(input.preparationVolume, 50)),
+    workVolume: Math.min(100, seconds(input.workVolume, 100)),
     roundsData: Array.from({ length: rounds }, (_, index) => {
       const round = input.roundsData?.[index] ?? {};
       return {

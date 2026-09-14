@@ -1,22 +1,6 @@
 import { useMemo } from 'react';
 import { Audio } from 'expo-av';
-import { CUE_ASSETS } from '../services/alerts/assets';
-const SOUNDS = {
-  beep_short: require('../../assets/sounds/beep_short.mp3'),
-  beep_long: require('../../assets/sounds/beep_long.mp3'),
-  tone_high: require('../../assets/sounds/beep_short.mp3'),
-  tone_low: require('../../assets/sounds/beep_long.mp3'),
-  bell: require('../../assets/sounds/bell.mp3'),
-  gong: require('../../assets/sounds/gong.mp3'),
-  boxing_bell: require('../../assets/sounds/boxing_bell.mp3'),
-  whistle: require('../../assets/sounds/whistle.mp3'),
-  buzzer: require('../../assets/sounds/buzzer.mp3'),
-  air_horn: require('../../assets/sounds/air_horn.mp3'),
-  countdown_321: require('../../assets/sounds/countdown_321.mp3'),
-  countdown_go: require('../../assets/sounds/voice_go.mp3'),
-  countdown_start: require('../../assets/sounds/voice_ready.mp3'),
-  success: require('../../assets/sounds/chime.mp3'),
-};
+import { CUE_ASSETS, LEGACY_CUE_ASSETS } from '../services/alerts/assets';
 class CountdownSoundPlayer {
   constructor() {
     this.sound = null;
@@ -43,7 +27,7 @@ class CountdownSoundPlayer {
     }
     if (revision !== this.revision) return;
     const source = uri.startsWith('voices://')
-      ? CUE_ASSETS[uri] || SOUNDS[uri.slice(9)] || SOUNDS.beep_short
+      ? CUE_ASSETS[uri] || LEGACY_CUE_ASSETS[uri] || LEGACY_CUE_ASSETS['voices://beep_short']
       : { uri };
     try {
       await Audio.setAudioModeAsync({ playsInSilentModeIOS: true, shouldDuckAndroid: true });

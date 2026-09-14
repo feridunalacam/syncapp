@@ -18,6 +18,8 @@ class DeviceMusicPlayer {
       const trackOptions = {
         positionMs: options.positionMs || 0,
         shouldPlay: options.shouldPlay !== false,
+        volumePercent: options.volumePercent,
+        isCancelled: options.isCancelled,
         name: options.name || 'Device Track',
         artist: options.artist || 'Unknown Artist',
         album: options.album || 'Unknown Album',

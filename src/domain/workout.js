@@ -20,7 +20,7 @@ export const createSession = (routine, now) => {
 
 /** Consume elapsed time across all boundaries, including return from background. */
 export const advanceSession = (session, now) => {
-  if (!session || session.status !== 'running') return session;
+  if (!session || session.status !== 'running' || session.audioPending) return session;
   let delta = Math.max(0, now - session.updatedAt);
   let { index, remainingMs, elapsedMs, roundsCompleted } = session;
   const completedWorkIndices = [...(session.completedWorkIndices || [])];
@@ -62,6 +62,24 @@ export const pauseSession = (session, now) => {
 };
 export const resumeSession = (session, now) =>
   session?.status === 'paused' ? { ...session, status: 'running', updatedAt: now } : session;
+
+/** Loading time is excluded from the workout, without inventing fixed extra seconds. */
+export const holdForAudio = (session, now, phaseStart = false) => {
+  if (!session || session.status !== 'running') return session;
+  const duration = session.timeline[session.index].durationSec * 1000;
+  const consumed = phaseStart ? duration - session.remainingMs : 0;
+  return {
+    ...session,
+    audioPending: true,
+    updatedAt: now,
+    remainingMs: session.remainingMs + consumed,
+    elapsedMs: Math.max(0, session.elapsedMs - consumed),
+  };
+};
+export const releaseAudioHold = (session, now) =>
+  session?.status === 'running' && session.audioPending
+    ? { ...session, audioPending: false, updatedAt: now }
+    : session;
 export const stopSession = (session, now) => {
   const next = advanceSession(session, now);
   if (!next || !['running', 'paused'].includes(next.status)) return next;
@@ -83,6 +101,7 @@ export const skipSession = (session, direction, now) => {
   return {
     ...current,
     index,
+    audioPending: false,
     remainingMs: current.timeline[index].durationSec * 1000,
     updatedAt: now,
     skippedPhases: current.skippedPhases + 1,

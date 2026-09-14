@@ -129,6 +129,7 @@ export default function HomeScreen({ navigation, route }) {
           style={[styles.timerCard, { backgroundColor: theme.card, borderColor: theme.border }]}
         >
           <TimerDesign
+            isAudioSyncing={workout.isAudioSyncing}
             {...{
               timeRemaining,
               currentPhase,

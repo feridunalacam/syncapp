@@ -9,6 +9,7 @@ export const TimerDesign = ({
   selectedRoutine,
   isWorkoutRunning,
   isPaused,
+  isAudioSyncing = false,
   progress = 0,
 }) => {
   const { theme } = useTheme();
@@ -18,11 +19,13 @@ export const TimerDesign = ({
   const seconds = String(timeRemaining % 60).padStart(2, '0');
   const phase = isPaused
     ? 'Paused'
-    : currentPhase === 'beforeStart'
-      ? 'Get ready'
-      : rest
-        ? 'Rest'
-        : 'Work';
+    : isAudioSyncing
+      ? 'Preparing audio'
+      : currentPhase === 'beforeStart'
+        ? 'Get ready'
+        : rest
+          ? 'Rest'
+          : 'Work';
   return (
     <View style={styles.container}>
       <View style={styles.top}>

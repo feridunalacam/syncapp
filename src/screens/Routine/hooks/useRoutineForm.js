@@ -162,6 +162,10 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
   // Null keeps existing routines on their legacy alerts until the user opts in.
   const [audioAlerts, setAudioAlerts] = useState(templateRoutine?.audioAlerts ?? null);
   const [restVolume, setRestVolume] = useState(templateRoutine?.restVolume ?? 100);
+  const [preparationVolume, setPreparationVolume] = useState(
+    templateRoutine?.preparationVolume ?? 50,
+  );
+  const [workVolume, setWorkVolume] = useState(templateRoutine?.workVolume ?? 100);
   // Before Start countdown - has duration
   const [countdownBeforeStartSec, setCountdownBeforeStartSec] = useState(
     templateRoutine?.countdownBeforeStartDuration ?? 0,
@@ -203,6 +207,8 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     setRestPlaylistId(templateRoutine?.restPlaylistId ?? null);
     setAudioAlerts(templateRoutine?.audioAlerts ?? null);
     setRestVolume(templateRoutine?.restVolume ?? 100);
+    setPreparationVolume(templateRoutine?.preparationVolume ?? 50);
+    setWorkVolume(templateRoutine?.workVolume ?? 100);
     setCountdownBeforeStartSec(templateRoutine?.countdownBeforeStartDuration ?? 0);
     setCountdownBeforeStartSound(templateRoutine?.countdownBeforeStartSound ?? null);
     setEndWorkSound(templateRoutine?.endWorkSound ?? null);
@@ -416,6 +422,8 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
       workoutPlaylistId: workoutPlaylistId || null,
       restPlaylistId: restPlaylistId || null,
       restVolume: restVolume,
+      preparationVolume,
+      workVolume,
       restVolumeEnabled: restVolume < 100,
       audioAlerts: audioAlerts == null ? null : normalizeAlertConfig(audioAlerts),
       // Before Start countdown - has duration
@@ -460,6 +468,8 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     workoutPlaylistId,
     restPlaylistId,
     restVolume,
+    preparationVolume,
+    workVolume,
     audioAlerts,
     countdownBeforeStartSec,
     countdownBeforeStartSound,
@@ -507,6 +517,10 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     setAudioAlerts,
     restVolume,
     setRestVolume,
+    preparationVolume,
+    setPreparationVolume,
+    workVolume,
+    setWorkVolume,
     countdownBeforeStartSec,
     setCountdownBeforeStartSec,
     countdownBeforeStartSound,

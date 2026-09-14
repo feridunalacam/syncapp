@@ -22,8 +22,12 @@ const adapterSource = readFileSync(
 )
   .replace(/^import[\s\S]*?;\n/gm, '')
   .replace(/^export /gm, '');
+const assetSource = readFileSync(
+  new URL('../src/services/alerts/assets.js', import.meta.url),
+  'utf8',
+).replace(/^export /gm, '');
 const adapterScript = new Script(
-  `${adapterSource}\nglobalThis.api = { prepareWorkoutCues, playWorkoutCue, stopWorkoutCues, previewWorkoutCue, stopCuePreview };`,
+  `${assetSource}\n${adapterSource}\nglobalThis.api = { prepareWorkoutCues, playWorkoutCue, stopWorkoutCues, previewWorkoutCue, stopCuePreview };`,
   { filename: 'native-alert-player.js' },
 );
 
@@ -110,7 +114,7 @@ function harness(options = {}) {
     Speech: speech,
     InterruptionModeIOS: { MixWithOthers: 0 },
     InterruptionModeAndroid: { DuckOthers: 1 },
-    CUE_ASSETS: {},
+    COACH_CUES: options.coachCues || {},
     buildCuePreview,
     createCueController: (parameters) => createCueController({ ...parameters, ...time }),
     setTimeout: time.schedule,
@@ -251,6 +255,23 @@ test('stale file completion and errors cannot settle the next file', async () =>
   assert.equal(h.sounds[1].unloads, 1);
 });
 
+test('saved legacy cues and current cues keep their original sounds', async () => {
+  const h = harness();
+  for (const [uri, asset] of [
+    ['voices://boxing_bell', '../../../assets/sounds/boxing_bell.mp3'],
+    ['voices://cue_boxing_bell', '../../../assets/sounds/cues/boxing-bell.wav'],
+  ]) {
+    const playing = h.api.playWorkoutCue(cue(uri));
+    await settle();
+    const sound = h.sounds.at(-1);
+    assert.equal(sound.source, asset);
+    assert.equal(sound.plays, 1);
+    sound.callback({ didJustFinish: true });
+    assert.equal((await playing).completed, true);
+  }
+  assert.equal(h.utterances.length, 0);
+});
+
 test('a synchronous speech exception clears its watchdog and permits retry', async () => {
   let fail = true;
   const h = harness({
@@ -288,4 +309,76 @@ test('readiness timeout releases the cache so a later request can initialize aga
   stuck.resolve([]);
   await settle();
   assert.equal(h.utterances.length, 1);
+});
+
+function recordedCoachCues() {
+  const body = readFileSync(
+    new URL('../src/services/alerts/coachVoice.js', import.meta.url),
+    'utf8',
+  ).replace(/^export /gm, '');
+  const context = {
+    require: (asset) => new URL(`../src/services/alerts/${asset}`, import.meta.url).pathname,
+  };
+  new Script(`${body}\nglobalThis.cues = COACH_CUES;`).runInNewContext(context);
+  return context.cues;
+}
+
+test('all English counts and commands play bundled coach recordings without native TTS', async () => {
+  const coachCues = recordedCoachCues();
+  const expected = [
+    ...Array.from({ length: 10 }, (_, i) => `speech://count/${i + 1}`),
+    'speech://go',
+    'speech://rest',
+    'speech://start',
+    'speech://complete',
+  ];
+  assert.equal(Object.keys(coachCues).length, expected.length);
+  const h = harness({
+    coachCues,
+    voices: () => {
+      throw new Error('No installed voice');
+    },
+  });
+  for (const uri of expected) {
+    const recording = coachCues[uri];
+    assert.ok(recording, uri);
+    const wav = readFileSync(recording.asset);
+    assert.equal(wav.toString('ascii', 0, 4), 'RIFF');
+    assert.equal(wav.toString('ascii', 8, 12), 'WAVE');
+    const duration = wav.readUInt32LE(40) / wav.readUInt32LE(28);
+    assert.ok(Math.abs(duration - recording.duration) < 0.002);
+    if (uri.includes('/count/')) assert.ok(duration < 0.95, `${uri} must fit in one second`);
+    const playing = h.api.playWorkoutCue(cue(uri));
+    await settle();
+    const sound = h.sounds.at(-1);
+    assert.equal(sound.source, recording.asset);
+    assert.equal(sound.plays, 1);
+    sound.callback({ didJustFinish: true });
+    assert.equal((await playing).completed, true);
+  }
+  assert.equal(h.utterances.length, 0);
+  assert.equal(h.voiceRequests, 0);
+});
+
+test('Turkish cues retain Turkish speech instead of playing the English coach', async () => {
+  const h = harness({ coachCues: recordedCoachCues() });
+  const playing = h.api.playWorkoutCue(cue('speech://rest', { language: 'tr-TR' }));
+  await settle();
+  assert.equal(h.sounds.length, 0);
+  assert.equal(h.utterances[0].text, 'Dinlen');
+  assert.equal(h.utterances[0].options.voice, 'turkish-voice');
+  h.utterances[0].options.onDone();
+  assert.equal((await playing).completed, true);
+});
+
+test('stopping while a coach recording loads prevents late playback', async () => {
+  const load = deferred();
+  const h = harness({ coachCues: recordedCoachCues(), load: () => load.promise });
+  const playing = h.api.playWorkoutCue(cue('speech://count/3'));
+  await settle();
+  await h.api.stopWorkoutCues();
+  load.resolve();
+  assert.equal((await playing).cancelled, true);
+  assert.equal(h.sounds[0].plays, 0);
+  assert.equal(h.sounds[0].unloads, 1);
 });

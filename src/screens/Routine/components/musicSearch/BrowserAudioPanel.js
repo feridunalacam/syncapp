@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Keyboard, StyleSheet } from 'react-native';
+import { View, Text, Pressable, ScrollView, Keyboard } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { WebView } from 'react-native-webview';
 import { useTheme } from '../../../../context/ThemeContext';

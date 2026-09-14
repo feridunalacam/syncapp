@@ -53,6 +53,7 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
       services: { device: service, spotify: service },
       connectedPlatforms: { spotify: { connected: true, accessToken: 'test-token' } },
       countdownSoundPlayer: { stop: async () => {}, play: async () => {} },
+      onPlaybackInterrupted: configuration.onPlaybackInterrupted,
     });
     return null;
   }
@@ -119,15 +120,19 @@ test('stopping during a pending load leaves playback stopped and metadata cleare
     const play = h.audio.handlePhaseChange('work', 1);
     await started.promise;
     const stop = h.audio.stopMusic();
+    await new Promise(setImmediate);
+    assert.ok(events.includes('pause'), 'stop must reach the player before loading finishes');
     loaded.resolve();
     await Promise.all([play, stop]);
   });
-  assert.deepEqual(events, ['play', 'pause']);
+  assert.equal(events[0], 'play');
+  assert.ok(events.slice(1).every((event) => event === 'pause'));
+  assert.ok(events.length >= 2);
   assert.equal(h.audio.track, null);
   assert.equal(h.audio.isMusicPlaying, false);
 });
 
-test('returning to preparation stops the previous interval music', async (t) => {
+test('returning to preparation starts the first Work track as a new intro', async (t) => {
   const h = await mountAudio(t);
   await act(async () => {
     await h.audio.handlePhaseChange('work', 1);
@@ -136,7 +141,8 @@ test('returning to preparation stops the previous interval music', async (t) => 
     await h.audio.handlePhaseChange('beforeStart', 0);
   });
   assert.ok(h.calls.some((c) => c[0] === 'pause'));
-  assert.equal(h.audio.track, null);
+  assert.equal(h.audio.track.title, 'One');
+  assert.equal(h.calls.filter((c) => c[0] === 'play').length, 2);
 });
 
 test('a failed source does not block later audio commands', async (t) => {
@@ -249,4 +255,231 @@ test('an old playing response cannot undo a requested pause', async (t) => {
     await poll;
   });
   assert.equal(h.audio.isMusicPlaying, false);
+});
+
+test('preparation starts quietly and Work raises volume without restarting the song', async (t) => {
+  const events = [];
+  const h = await mountAudio(
+    t,
+    {
+      playTrack: async (_token, uri, _device, options) => {
+        events.push(['play', uri, options.volumePercent]);
+        return success;
+      },
+      setVolume: async (_token, volume) => {
+        events.push(['volume', volume]);
+        return success;
+      },
+      getCurrentPlayback: async () => ({
+        item: { uri: 'file:///one.mp3', name: 'One' },
+        progress_ms: 4300,
+        is_playing: true,
+      }),
+    },
+    {
+      routine: {
+        preparationVolume: 50,
+        workVolume: 80,
+        roundsData: [{ workSong: { uri: 'file:///one.mp3', name: 'One' } }],
+      },
+    },
+  );
+  await act(async () => {
+    await h.audio.handlePhaseChange('beforeStart', 0);
+  });
+  await act(async () => {
+    await h.audio.handlePhaseChange('work', 1);
+  });
+  assert.deepEqual(events, [
+    ['play', 'file:///one.mp3', 50],
+    ['volume', 50],
+    ['volume', 80],
+  ]);
+  assert.equal(h.calls.filter((c) => c[0] === 'pause' || c[0] === 'cleanup').length, 0);
+  assert.equal(h.audio.musicProgress, 4.3);
+  assert.equal(h.audio.isMusicPlaying, true);
+});
+
+test('a paused preparation-to-Work transition keeps the same loaded track for resume', async (t) => {
+  const h = await mountAudio(t);
+  await act(async () => {
+    await h.audio.handlePhaseChange('beforeStart', 0);
+  });
+  await act(async () => {
+    await h.audio.pauseMusic();
+  });
+  await act(async () => {
+    await h.audio.handlePhaseChange('work', 1, true);
+  });
+  assert.equal(h.audio.isMusicPlaying, false);
+  await act(async () => {
+    await h.audio.resumeMusic();
+  });
+  assert.equal(h.calls.filter((c) => c[0] === 'play').length, 1);
+  assert.equal(h.calls.filter((c) => c[0] === 'resume').length, 1);
+});
+
+test('Spotify gets the preparation level before playback and preserves the playlist at Work', async (t) => {
+  const events = [];
+  const h = await mountAudio(
+    t,
+    {
+      setVolume: async (_token, volume) => {
+        events.push(['volume', volume]);
+        return success;
+      },
+      playPlaylist: async () => {
+        events.push(['playlist']);
+        return success;
+      },
+    },
+    { routine: { workoutPlaylistId: 'playlist', platform: 'spotify', preparationVolume: 35 } },
+  );
+  await act(async () => {
+    await h.audio.handlePhaseChange('beforeStart', 0);
+  });
+  await act(async () => {
+    await h.audio.handlePhaseChange('work', 1);
+  });
+  assert.deepEqual(events, [['volume', 35], ['playlist'], ['volume', 35], ['volume', 100]]);
+  assert.equal(h.audio.audioError, null);
+});
+
+test('Spotify devices without volume support still continue the same track', async (t) => {
+  const h = await mountAudio(
+    t,
+    {
+      setVolume: async () => ({ success: true, skipped: true }),
+    },
+    { routine: { roundsData: [{ workSong: { uri: 'spotify:track:chosen' } }] } },
+  );
+  await act(async () => {
+    await h.audio.handlePhaseChange('beforeStart', 0);
+  });
+  await act(async () => {
+    await h.audio.handlePhaseChange('work', 1);
+  });
+  assert.equal(h.calls.filter((c) => c[0] === 'play').length, 1);
+  assert.equal(h.audio.audioError, null);
+});
+
+test('a queued preparation request cannot replace a newer Work request', async (t) => {
+  const h = await mountAudio(t);
+  await act(async () => {
+    await Promise.all([
+      h.audio.handlePhaseChange('beforeStart', 0),
+      h.audio.handlePhaseChange('work', 1),
+    ]);
+  });
+  assert.equal(h.calls.filter((c) => c[0] === 'play').length, 1);
+});
+
+test('confirmed external pause notifies the workout while a brief handoff gap does not', async (t) => {
+  let now = 1000;
+  t.mock.method(Date, 'now', () => now);
+  let playback = { item: { uri: 'file:///one.mp3' }, is_playing: true };
+  const notices = [];
+  const h = await mountAudio(
+    t,
+    { getCurrentPlayback: async () => playback },
+    {
+      onPlaybackInterrupted: (reason) => notices.push(reason),
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  playback = null;
+  await act(async () => h.audio.fetchPlayback());
+  playback = { item: { uri: 'file:///one.mp3' }, is_playing: true };
+  now = 2000;
+  await act(async () => h.audio.fetchPlayback());
+  assert.equal(notices.length, 0);
+  playback = { item: { uri: 'file:///one.mp3' }, is_playing: false };
+  await act(async () => h.audio.fetchPlayback());
+  now = 3000;
+  await act(async () => h.audio.fetchPlayback());
+  assert.equal(notices.length, 1);
+});
+
+test('an unavailable audio source reports interruption instead of silently advancing', async (t) => {
+  let failed = false;
+  const notices = [];
+  const h = await mountAudio(
+    t,
+    {
+      getCurrentPlayback: async () =>
+        failed
+          ? { success: false, error: 'Connection lost' }
+          : { item: { uri: 'file:///one.mp3' }, is_playing: true },
+    },
+    {
+      onPlaybackInterrupted: (reason) => notices.push(reason),
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  failed = true;
+  await act(async () => h.audio.fetchPlayback());
+  assert.deepEqual(notices, ['Connection lost']);
+});
+
+test('manual pause is not mistaken for an external playback interruption', async (t) => {
+  const notices = [];
+  const h = await mountAudio(
+    t,
+    { getCurrentPlayback: async () => null },
+    {
+      onPlaybackInterrupted: (reason) => notices.push(reason),
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  await act(async () => h.audio.pauseMusic());
+  await act(async () => h.audio.fetchPlayback());
+  assert.equal(notices.length, 0);
+});
+
+test('cancelling a native load does not show a spurious no-track pause error', async (t) => {
+  const loaded = deferred();
+  const started = deferred();
+  let loading = true;
+  const h = await mountAudio(t, {
+    playTrack: async (token, uri, device, options) => {
+      started.resolve();
+      await loaded.promise;
+      loading = false;
+      return { success: true, cancelled: options.isCancelled() };
+    },
+    pause: async () => (loading ? success : { success: false, error: 'No track loaded' }),
+  });
+  await act(async () => {
+    const play = h.audio.handlePhaseChange('work', 1);
+    await started.promise;
+    const pause = h.audio.pauseMusic();
+    loaded.resolve();
+    await Promise.all([play, pause]);
+  });
+  assert.equal(h.audio.audioError, null);
+  assert.equal(h.audio.isMusicPlaying, false);
+});
+
+test('an obsolete failed load cannot replace the next interval with an error', async (t) => {
+  const first = deferred();
+  const started = deferred();
+  const h = await mountAudio(t, {
+    playTrack: async (token, uri) => {
+      if (uri === 'file:///one.mp3') {
+        started.resolve();
+        await first.promise;
+        throw new Error('Old source failed');
+      }
+      return success;
+    },
+  });
+  await act(async () => {
+    const one = h.audio.handlePhaseChange('work', 1);
+    await started.promise;
+    const two = h.audio.handlePhaseChange('work', 2);
+    first.resolve();
+    await Promise.all([one, two]);
+  });
+  assert.equal(h.audio.audioError, null);
+  assert.equal(h.audio.track.title, 'Two');
 });

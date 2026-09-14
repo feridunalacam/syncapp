@@ -14,6 +14,7 @@ import { useAudioController } from '../hooks/useAudioController';
 import { useCountdownSoundPlayer } from '../utils/countdownSoundPlayer';
 import { normalizeRoutine, buildTimeline } from '../domain/routines';
 import { sessionToLog } from '../domain/workout';
+import { resolveRoundAudio } from '../domain/audio';
 import useWorkoutCues from '../hooks/useWorkoutCues';
 import { stopWorkoutCues, stopCuePreview, prepareWorkoutCues } from '../services/alerts/player';
 
@@ -33,10 +34,17 @@ export const WorkoutProvider = ({ children }) => {
     if (selectedRoutine?.audioAlerts?.enabled) prepareWorkoutCues().catch(() => {});
   }, [selectedRoutine?.id, selectedRoutine?.audioAlerts?.enabled]);
   const countdownSoundPlayer = useCountdownSoundPlayer();
+  const timerRef = useRef(null);
+  const [interruptionReason, setInterruptionReason] = useState(null);
   const audio = useAudioController({
     ...platform,
     selectedRoutine: activeRoutine,
     countdownSoundPlayer,
+    onPlaybackInterrupted: (reason) => {
+      if (timerRef.current?.session?.status !== 'running') return;
+      setInterruptionReason(reason);
+      timerRef.current.pause();
+    },
   });
   const audioRef = useRef(audio);
   audioRef.current = audio;
@@ -48,7 +56,6 @@ export const WorkoutProvider = ({ children }) => {
         recorded.current.add(log.sessionId);
         addCompletedRoutine(log);
       }
-      audioRef.current.stopMusic();
     },
     [addCompletedRoutine],
   );
@@ -56,7 +63,28 @@ export const WorkoutProvider = ({ children }) => {
     routine: activeRoutine,
     onPhaseChange: audio.handlePhaseChange,
     onComplete: finish,
+    requiresAudio: (routine, phase) =>
+      !!resolveRoundAudio(routine, phase.phase, phase.round, platform.selectedPlatform),
+    onResumeAudio: (session) => {
+      if (audioRef.current.audioError) {
+        const phase = session.timeline[session.index];
+        return audioRef.current.handlePhaseChange(phase.phase, phase.round);
+      }
+      return audioRef.current.resumeMusic();
+    },
+    onStateChange: (next, previous) => {
+      if (next?.status === 'paused') {
+        stopWorkoutCues().catch(() => {});
+        audioRef.current.pauseMusic();
+      } else if ((!next || next.status === 'aborted') && previous) {
+        stopWorkoutCues().catch(() => {});
+        audioRef.current.stopMusic();
+      } else if (next?.status === 'completed') {
+        audioRef.current.stopMusic();
+      }
+    },
   });
+  timerRef.current = timer;
   const { alertError } = useWorkoutCues(timer.session);
   const running = timer.session?.status === 'running';
   const paused = timer.session?.status === 'paused';
@@ -82,7 +110,7 @@ export const WorkoutProvider = ({ children }) => {
   const alertKey = useRef(null);
   useEffect(() => {
     const s = timer.session;
-    if (!running || !s || s.routine.audioAlerts != null) return;
+    if (!running || !s || s.audioPending || s.routine.audioAlerts != null) return;
     const phase = s.timeline[s.index];
     const key =
       phase.phase === 'beforeStart'
@@ -121,17 +149,11 @@ export const WorkoutProvider = ({ children }) => {
     [active, stop, timer.reset],
   );
   const toggle = useCallback(async () => {
+    setInterruptionReason(null);
     if (paused) {
       timer.resume();
-      if (audio.audioError) {
-        const s = timer.session;
-        const p = s.timeline[s.index];
-        await audio.handlePhaseChange(p.phase, p.round);
-      } else await audio.resumeMusic();
     } else if (running) {
-      stopWorkoutCues().catch(() => {});
-      const s = timer.pause();
-      if (s?.status === 'paused') await audio.pauseMusic();
+      timer.pause();
     } else if (selectedRoutine) {
       await stopCuePreview();
       setSnapshot(JSON.parse(JSON.stringify(selectedRoutine)));
@@ -149,6 +171,7 @@ export const WorkoutProvider = ({ children }) => {
     alertError,
     isWorkoutRunning: active,
     isPaused: paused,
+    isAudioSyncing: running && !!timer.session?.audioPending,
     currentPhase: phase.phase,
     currentRound: phase.round || 1,
     timeRemaining: active ? Math.ceil(timer.session.remainingMs / 1000) : phase.durationSec,
@@ -159,6 +182,7 @@ export const WorkoutProvider = ({ children }) => {
     skipForward: () => timer.skip(1),
     skipBackward: () => timer.skip(-1),
     ...audio,
+    audioError: timer.syncError || audio.audioError || interruptionReason,
   };
   return <WorkoutContext.Provider value={value}>{children}</WorkoutContext.Provider>;
 };

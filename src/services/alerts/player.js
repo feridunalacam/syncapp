@@ -1,6 +1,7 @@
 import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 import * as Speech from 'expo-speech';
-import { CUE_ASSETS } from './assets';
+import { CUE_ASSETS, LEGACY_CUE_ASSETS } from './assets';
+import { COACH_CUES } from './coachVoice';
 import { createCueController } from './controller';
 import { buildCuePreview } from '../../domain/alerts';
 
@@ -31,22 +32,6 @@ const words = {
     complete: 'Antrenman tamamlandı',
     numbers: ['Sıfır', 'Bir', 'İki', 'Üç', 'Dört', 'Beş', 'Altı', 'Yedi', 'Sekiz', 'Dokuz', 'On'],
   },
-};
-const legacyEffects = {
-  'voices://beep_short': require('../../../assets/sounds/beep_short.mp3'),
-  'voices://beep_long': require('../../../assets/sounds/beep_long.mp3'),
-  'voices://tone_high': require('../../../assets/sounds/beep_short.mp3'),
-  'voices://tone_low': require('../../../assets/sounds/beep_long.mp3'),
-  'voices://bell': require('../../../assets/sounds/bell.mp3'),
-  'voices://gong': require('../../../assets/sounds/gong.mp3'),
-  'voices://boxing_bell': require('../../../assets/sounds/boxing_bell.mp3'),
-  'voices://whistle': require('../../../assets/sounds/whistle.mp3'),
-  'voices://buzzer': require('../../../assets/sounds/buzzer.mp3'),
-  'voices://air_horn': require('../../../assets/sounds/air_horn.mp3'),
-  'voices://countdown_321': require('../../../assets/sounds/countdown_321.mp3'),
-  'voices://countdown_go': require('../../../assets/sounds/voice_go.mp3'),
-  'voices://countdown_start': require('../../../assets/sounds/voice_ready.mp3'),
-  'voices://success': require('../../../assets/sounds/chime.mp3'),
 };
 let availableVoices;
 const prepareSpeech = () => {
@@ -90,6 +75,7 @@ const output = {
   async play(cue, cancelled) {
     const uri = cue.sound?.uri;
     if (!uri || cue.volume === 0) return { completed: true };
+    const coachCue = cue.language !== 'tr-TR' ? COACH_CUES[uri] : null;
     const volume = Math.max(0, Math.min(100, cue.volume ?? 80)) / 100;
     await Audio.setAudioModeAsync({
       playsInSilentModeIOS: true,
@@ -98,7 +84,7 @@ const output = {
       shouldDuckAndroid: true,
     });
     if (cancelled()) return { cancelled: true };
-    if (uri.startsWith('speech://')) {
+    if (uri.startsWith('speech://') && !coachCue) {
       const language = words[cue.language] ? cue.language : 'en-US';
       const voices = await prepareSpeech();
       if (cancelled()) return { cancelled: true };
@@ -166,7 +152,7 @@ const output = {
         }
       });
     }
-    const asset = CUE_ASSETS[uri] || legacyEffects[uri];
+    const asset = coachCue?.asset || CUE_ASSETS[uri] || LEGACY_CUE_ASSETS[uri];
     if (!asset && !/^(file|https?|content|asset):\/\//i.test(uri))
       throw new Error('Choose a sound file or a built-in cue.');
     const { sound } = await Audio.Sound.createAsync(asset || { uri }, {
@@ -190,7 +176,10 @@ const output = {
       // Custom cues are intentionally bounded; they cannot outlive an entire short workout.
       fallback = setTimeout(
         finish,
-        Math.min(15000, Math.max(2000, (cue.sound.duration || 4) * 1000 + 1000)),
+        Math.min(
+          15000,
+          Math.max(2000, (coachCue?.duration || cue.sound.duration || 4) * 1000 + 1000),
+        ),
       );
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.didJustFinish) finish();

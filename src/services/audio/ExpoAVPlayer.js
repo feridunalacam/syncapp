@@ -60,10 +60,16 @@ class ExpoAVPlayer {
       const { sound } = await Audio.Sound.createAsync(
         { uri },
         {
-          shouldPlay: options.shouldPlay !== false,
+          shouldPlay: false,
           positionMillis: options.positionMs || 0,
+          volume: Math.max(0, Math.min(100, options.volumePercent ?? 100)) / 100,
         },
       );
+
+      if (options.isCancelled?.()) {
+        await sound.unloadAsync();
+        return { success: true, cancelled: true };
+      }
 
       this.sound = sound;
       this.currentTrack = {
@@ -80,8 +86,31 @@ class ExpoAVPlayer {
         this._handleStatusUpdate(status);
       });
 
+      if (options.shouldPlay !== false) {
+        let status = await sound.playAsync();
+        const deadline = Date.now() + 8000;
+        // playAsync can resolve while a web file is still buffering.
+        while (status?.isLoaded && (!status.isPlaying || status.isBuffering)) {
+          if (options.isCancelled?.()) {
+            await this.unload();
+            return { success: true, cancelled: true };
+          }
+          if (Date.now() >= deadline)
+            throw new Error('Audio is still buffering. Check the source and resume.');
+          await new Promise((resolve) => setTimeout(resolve, 50));
+          status = await sound.getStatusAsync();
+        }
+        if (status?.isLoaded === false)
+          throw new Error(status.error || 'Audio could not be loaded.');
+        if (options.isCancelled?.()) {
+          await this.unload();
+          return { success: true, cancelled: true };
+        }
+      }
+
       return { success: true };
     } catch (error) {
+      await this.unload();
       console.error('❌ Error loading audio:', error);
       return { success: false, error: error.message };
     }

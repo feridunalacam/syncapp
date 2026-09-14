@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRoundAudio } from '../src/domain/audio.js';
+import { resolveRoundAudio, getPhaseMusicVolume } from '../src/domain/audio.js';
 
 test('a per-round track takes precedence over both playlists', () => {
   const routine = {
@@ -48,7 +48,21 @@ test('web audio is played by the device audio service', () => {
     'device',
   );
 });
-test('preparation and empty rounds have no music source', () => {
-  assert.equal(resolveRoundAudio({ workoutPlaylistId: 'focus' }, 'beforeStart', 0), null);
+test('preparation uses the first Work source and empty rounds remain silent', () => {
+  assert.equal(
+    resolveRoundAudio({ workoutPlaylistId: 'focus' }, 'beforeStart', 0).playlistId,
+    'focus',
+  );
+  assert.equal(resolveRoundAudio({}, 'beforeStart', 0), null);
   assert.equal(resolveRoundAudio({ roundsData: [{}] }, 'rest', 1), null);
+});
+
+test('phase volumes preserve zero and clamp invalid values', () => {
+  assert.equal(getPhaseMusicVolume({}, 'beforeStart'), 50);
+  assert.equal(getPhaseMusicVolume({}, 'work'), 100);
+  assert.equal(getPhaseMusicVolume({ preparationVolume: 0 }, 'beforeStart'), 0);
+  assert.equal(getPhaseMusicVolume({ workVolume: 70 }, 'work'), 70);
+  assert.equal(getPhaseMusicVolume({ restVolume: 20 }, 'rest'), 20);
+  assert.equal(getPhaseMusicVolume({ preparationVolume: -10 }, 'beforeStart'), 0);
+  assert.equal(getPhaseMusicVolume({ workVolume: Infinity }, 'work'), 100);
 });

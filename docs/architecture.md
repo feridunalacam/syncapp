@@ -4,7 +4,9 @@ The application has three distinct models: a reusable routine, a live session an
 
 A single normalized timeline drives duration labels and timer transitions. React updates the display approximately ten times per second, while elapsed time is computed from timestamps rather than the number of ticks. This avoids drift when ticks arrive late. The timer advances over every crossed interval and emits only the current phase's audio request when catching up; it does not replay every missed song.
 
-Audio side effects are serialized separately from timing. Newer phase requests supersede older queued requests. A stop waits for an in-flight load and then pauses/unloads it. Selecting a phase while paused defers playback until resume. A missing track reports an error without preventing the timer or later commands from working. Service failures are visible in the soundtrack panel.
+Audio side effects are serialized separately from timing. Newer phase requests supersede older queued requests. When a phase has music, its clock waits for playback readiness, with a bounded timeout that pauses the session on failure. Phases without music start immediately. Preparation can start the first work song at a lower volume; entering work keeps that song playing and changes its volume. Selecting a phase while paused defers playback until resume. Pausing or leaving the foreground pauses the session and its music, cancels pending playback, and stops cues; returning to the foreground does not resume automatically. Service failures are visible in the soundtrack panel.
+
+Workout cues and round music have separate playback ownership so a cue cannot stop a song. Their built-in effect files share one registry in `services/alerts/assets.js`. Legacy sound IDs remain supported because saved routines can reference them; these compatibility mappings are not unused code.
 
 Do not put authentication, billing or feed networking directly inside screen components. When these features are added, introduce service/repository boundaries and migrate local records deliberately. The existing local feed is an explicit preview; it is not presented as an online community.
 

@@ -156,11 +156,20 @@ export const planSessionCues = (previous, next) => {
       }),
     ];
   }
-  if (next.status !== 'running' || !Number.isFinite(next.remainingMs) || next.remainingMs <= 0)
+  if (
+    next.audioPending ||
+    next.status !== 'running' ||
+    !Number.isFinite(next.remainingMs) ||
+    next.remainingMs <= 0
+  )
     return [];
   const phase = next.timeline[next.index];
   if (!phase || !['beforeStart', 'work', 'rest'].includes(phase.phase)) return [];
-  const entered = !same || previous.index !== next.index || skipped;
+  const entered =
+    !same ||
+    previous.index !== next.index ||
+    skipped ||
+    (previous.audioPending && !next.audioPending && phaseAgeMs(next, phase) === 0);
   const age = phaseAgeMs(next, phase);
   if (entered && age >= 0 && age <= cueWindowMs && phase.phase !== 'beforeStart') {
     const firstWorkIndex = next.timeline.findIndex((item) => item.phase === 'work');
