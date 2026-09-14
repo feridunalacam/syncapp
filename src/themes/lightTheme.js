@@ -1,39 +1,39 @@
 export const lightTheme = {
   // Backgrounds
-  background: '#ffffff',
+  background: '#F2F3EF',
   surface: '#f6f7fb',
   card: '#ffffff',
-  cardSecondary: '#f9fafb',
-  
+  cardSecondary: '#F0F2ED',
+
   // Text
-  text: '#1f2937',
+  text: '#191D17',
   textSecondary: '#6b7280',
   textTertiary: '#9ca3af',
   textInverse: '#ffffff',
-  
+
   // Borders
-  border: '#e5e7eb',
+  border: '#E3E6DE',
   borderLight: '#f3f4f6',
   borderDark: '#d1d5db',
-  
+
   // Buttons
-  buttonPrimary: '#0d6efd',
+  buttonPrimary: '#42661E',
   buttonSecondary: '#f3f4f6',
   buttonDisabled: '#f9fafb',
   buttonText: '#ffffff',
   buttonTextSecondary: '#1f2937',
-  
+
   // Special
-  routineSelector: '#212123',
-  routineSelectorText: '#ffffff',
+  routineSelector: '#FFFFFF',
+  routineSelectorText: '#182738',
   divider: '#9ca3af',
-  
+
   // Status
   success: '#10b981',
   error: '#ef4444',
   warning: '#f59e0b',
   info: '#3b82f6',
-  
+
   // Typography
   fontSize: {
     xs: 10,
@@ -54,7 +54,7 @@ export const lightTheme = {
     bold: '700',
     extrabold: '800',
   },
-  
+
   // Icon size scale. Use these instead of raw numbers so the same concept
   // (e.g. "delete", "back") gets the same visual weight everywhere.
   iconSize: {
@@ -92,7 +92,7 @@ export const lightTheme = {
     '3xl': 32,
     '4xl': 40,
   },
-  
+
   // Shadows
   shadow: {
     sm: {
@@ -117,29 +117,29 @@ export const lightTheme = {
       elevation: 4,
     },
   },
-  
+
   // Input
-  inputBackground: '#ffffff',
+  inputBackground: '#F0F2ED',
   inputBorder: '#d1d5db',
   inputText: '#1f2937',
   inputPlaceholder: '#9ca3af',
-  
+
   // Modal
   modalBackground: '#ffffff',
-  modalOverlay: 'rgba(0, 0, 0, 0.5)',
-  
+  modalOverlay: 'rgba(0, 0, 0, 0.3)',
+
   // Icon colors
   iconPrimary: '#1f2937',
   iconSecondary: '#6b7280',
   iconTertiary: '#9ca3af',
-  
+
   // Special colors
-  accent: '#06b6d4',
-  accentLight: '#ecfeff',
+  accent: '#42661E',
+  accentText: '#FFFFFF',
+  accentLight: '#E6EECF',
   roundBadge: '#ff6b35',
   roundBadgeBg: '#fff7ed',
   roundBadgeBorder: '#fed7aa',
   timerText: '#1f2937',
   workoutDetailBg: '#f0f9ff',
 };
-

@@ -1,29 +1,90 @@
 # SyncApp
 
-A simple Expo Go project.
+An Expo interval timer that coordinates work/rest rounds with local audio or Spotify playback. Routines, profile, posts and activity are stored on the device; there is no cloud account or subscription backend in this version.
 
-## Getting Started
+## Run
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+Use Node.js 22.13 or newer (Node 24 recommended), then:
 
-2. Start the development server:
-   ```bash
-   npm start
-   ```
+```sh
+npm ci
+npm start
+```
 
-3. Scan the QR code with Expo Go app on your phone, or press:
-   - `i` for iOS simulator
-   - `a` for Android emulator
-   - `w` for web browser
+Use an Expo Go client compatible with **SDK 54**. Native Liquid Glass requires iOS 26 and a compatible client/build. Older systems and Reduce Transparency use the readable fallback. iOS and Android dependencies are aligned with SDK 54.
 
-## Requirements
+```sh
+npm test
+npx expo install --check
+npx expo export --platform ios --platform android --output-dir dist
+```
 
-- Node.js (v14 or higher)
-- npm or yarn
-- Expo Go app on your mobile device (optional, for testing on real device)
+The export command verifies JavaScript/native-platform bundle generation; it does not build or sign an App Store/Play Store binary. A native development build is needed to validate device-specific permissions and production OAuth redirects.
 
+## Architecture
 
-# syncapp-v2
+- `src/domain/routines.js`: routine normalization, validation and the shared interval timeline.
+- `src/domain/workout.js`: pure session state transitions, pause/resume, skipping, elapsed time and history records.
+- `src/domain/audio.js`: one music source per interval, including legacy metadata handling.
+- `src/context/WorkoutContext.js`: owns the active session above the tab navigator. Screens consume actions and state.
+- `src/screens/Home/TimerLogic.js`: React timer adapter and foreground catch-up. Timing rules stay in the domain.
+- `src/hooks/useAudioController.js`: serialized playback commands with stale-command protection and deferred playback while paused.
+- `src/services`: Spotify and device audio adapters.
+- `src/lib/platformStorage.js`: secure native credential persistence and migration from the previous plaintext record. Other local content uses the existing storage keys.
+- `src/components/common/GlassSurface.js`, `Surface.js`, `ScreenHeader.js`, `Sheet.js`: shared visual components. Glass is reserved for floating navigation and utility controls; opaque surfaces distinguish content cards, inputs and sheets.
+
+## Navigation and interface
+
+The four tabs are Timer, Training, Discover and Profile. Training opens the routine library directly; its Activity button pushes history onto the same stack. The back button returns to routines. Opening a routine in Timer selects it without starting playback; switching away from an active routine requires confirmation.
+
+The interface uses graphite surfaces with lime accents in dark mode and an olive accent in light mode. The surface hierarchy is shared across Timer, Training, Discover, Activity and Profile. Content cards use solid graphite or white; fields use a quiet inset fill; modal sheets have an opaque background. Glass remains on floating navigation and utility controls. Lime/olive accents identify actions, selections and interval progress rather than tinting whole content panels. Profile and activity summaries are unboxed, and compact playlist/round layouts are retained. This follows Apple’s distinction between [content surfaces and the Liquid Glass control layer](https://developer.apple.com/design/human-interface-guidelines/materials). Work/rest strips visualize real interval proportions; individual durations are edited in a minute/second sheet. Playlists appear as a horizontally swipeable strip directly inside the routine editor, with Work/Rest targeting and a Shuffle action on each card; and advanced audio controls expand inside the editor. Discover reserves a compact, explicitly labeled ad placeholder; no advertising SDK or live ad is connected.
+
+## Behavior
+
+Every round can have its own timing and music. Changing the global work/rest picker applies timing to all rounds; customize individual rounds afterwards. A zero-length rest is valid. The final round has no trailing rest. Preparation time, if configured, is included in the planned and elapsed session time; paused time is excluded.
+
+Starting a session snapshots the routine so edits cannot mutate the running session. Switching tabs preserves the active session. Ending early saves actual progress; cancelling during preparation does not create a workout. A replayed round counts only once toward completed rounds. Skipped intervals are recorded explicitly.
+
+Existing saved content is retained. Empty routine lists remain empty after restart. New installations do not receive fabricated workout history. Legacy history without actual duration uses its planned duration as a fallback, since past real elapsed time cannot be reconstructed.
+
+Discover contains clearly marked sample routines and locally saved posts. Share images/text can be exported using the device clipboard/share sheet. Saving to Discover is not online publishing.
+
+## Spotify and media
+
+Spotify uses Authorization Code + PKCE with a fresh verifier/state for each attempt and the stable `syncapp://spotify-callback` redirect. This URI has been registered in the owner’s Spotify dashboard. Expo Go does not support this login flow; use `npm run ios` for a native development build (Xcode and CocoaPods required). The iOS bundle identifier is `com.feridun.syncapp`. A public client ID may be supplied through `EXPO_PUBLIC_SPOTIFY_CLIENT_ID`; no client secret belongs in the app. Playback controls require an eligible Spotify account and an available playback device. Device selection rejects restricted or unidentified devices, preserves the active-device choice, and never treats a failed transfer as successful activation. Authentication and real playback must be tested with the owner's account; simulated service tests do not prove account eligibility.
+
+Native tokens are stored with Expo SecureStore. Refresh requests are deduplicated, rotated refresh tokens are saved, and a late refresh cannot restore a disconnected or replaced account. Expiration is checked before requests and when the app returns to the foreground. Plaintext legacy tokens are removed only after a successful secure write. Web credentials are kept only in memory. Disconnecting music leaves routines and history intact.
+
+Playlist items use Spotify’s current `/items` endpoint with pagination. Development-mode permissions can restrict access to playlists the user does not own or collaborate on. The picker distinguishes empty libraries from access/network errors. Searches and playlist loads ignore stale results after closing or changing source.
+
+The routine editor uses compact, horizontally scrollable playlist rows with small covers and separate accessible shuffle controls. Work/Rest assignment remains available; tapping a playlist opens its tracks. Playlist search is always visible without an extra reveal button. The library refreshes automatically on screen entry, on returning to the foreground, and 60 seconds after each completed refresh while the editor is focused and the app is active. Requests never overlap; existing rows stay visible during refresh or transient failure. There is no permanent manual refresh button.
+
+Device, Spotify and Browser sources are always visible in the music picker. Device-library permission is requested only after the user chooses Browse; Files remains available if permission is denied.
+
+Imported media and profile photos are copied to the app document directory instead of leaving saved references in the disposable cache. Files saved by older versions may still point to a cache location; reselect them if the operating system has removed them. Built-in alerts are bundled with the app. Spotify playback cannot be used as an independent overlay alert.
+
+## Validation and remaining device checks
+
+The automated suite covers 81 regression cases across timing, source selection and asynchronous audio commands. It includes per-round timing, zero rest, long foreground catch-up, pause duration, early stop, duplicate round counting, snapshot isolation, rapid changes, deferred playback and stopping during an audio load. Audio-controller tests use simulated service responses, not live Spotify.
+
+Native dark Liquid Glass and the routine editor were visually checked on the iPhone 17 simulator. The local iOS development binary was built and installed successfully; Spotify authorization and secure persistence passed a real-account restart test; playlists loaded and Work/Rest track assignments were saved. With Spotify active on a physical iPhone, the simulator-controlled workout started the assigned Rest track, paused and resumed playback, advanced to the final Work track, and stopped playback at completion. The Mac client accepted bare track-list commands but returned an empty, stopped player. An isolated album-context command successfully started the same track. Track playback now checks full player state after acceptance and recovers this specific empty-player state on any controllable device using the album and exact track offset. A confirmed recovery is remembered for that device during the app process. Assigned-song repeat uses track mode, and pause/stop commands follow the current controllable Spotify device. Album-context recovery retains Spotify album continuation when repeat is off and the song ends before its round; this long-round case needs a separate product decision and device test. The final Mac workout also passed start, pause/resume, automatic Rest-to-Work transition and stop-at-completion checks. The phone test controlled Spotify on the phone; it did not run SyncApp on the physical phone. Physical-device background/lock-screen audio, Android media-library permissions, share-sheet destinations and cold-start deep links still need device testing. The timer catches up when the app resumes, but JavaScript suspension can delay audio commands; force-quitting does not restore an active session.
+
+The Timer and Profile include a shared Spotify playback-device picker whenever Spotify is connected, including mixed-source routines so the next Spotify device can be chosen in advance. It lists devices returned by Spotify, identifies the current device, disables restricted/unidentified devices and preserves paused versus playing state. Selection is verified against playback state rather than treating HTTP acceptance as completion. An accepted transfer that leaves the original song on its original device, or an empty selected player, can restore that song once at the last observed position. A newer third-device choice, a different song, a pause, missing state or restriction prevents recovery. Device selection and workout mutations share a single queue; external device changes are adopted without resetting the workout. Resume preserves the Spotify context, and unsupported volume controls are skipped. No OS/model-name branching is used for transport behavior.
+
+Live selector checks passed Mac-to-iPhone during a workout, pause on iPhone, paused transfer to Mac and resume on Mac with the same track and retained position. iPhone-to-Mac selection while playing also started playback on Mac. A subsequent user-operated transfer in Spotify itself was observed by SyncApp as iPhone playback; the workout countdown and track progress continued across consecutive observations without a visible error. The second Work track was subsequently observed progressing while iPhone remained selected. The latest code exports successfully for iOS and Android. These are Spotify player-control checks from the iOS simulator, not native SyncApp tests on Windows, Android, iPad or CarPlay. The repository has no Windows desktop target. CarPlay is not guaranteed to appear as a separate Connect device; the picker only exposes what Spotify makes available.
+
+The local dependency audit was reduced from 39 findings (including one critical) to 28 (19 moderate, 9 high), including the development-client dependencies using compatible updates. Remaining findings include upstream navigation decoding and Expo/Metro build-tool dependencies. No major SDK upgrade or forced dependency override was applied. Review these before a production release. Expo AV and the test renderer also emit deprecation notices; plan their replacement in the next SDK migration.
+
+## Working on the code
+
+Use a feature branch, keep domain changes independently testable, run the regression suite, then check the affected screens. `npm run format` applies the shared Prettier configuration. See `docs/architecture.md` for the design decisions and extension points.
+
+### Simulator Keychain requirement
+
+Spotify login must persist credentials in iOS Keychain. Do not build the simulator app with `CODE_SIGNING_ALLOWED=NO`: this omits the simulator entitlements and Keychain returns OSStatus -34018. Use Xcode simulator signing so the application identifier is embedded as simulated entitlements. Manually attaching iOS Keychain entitlements with `codesign` is not equivalent and can prevent the simulator app from launching. On machines where Documents is cloud-managed, put build products in a local temporary directory to avoid Finder metadata causing signing failures. Physical-device builds need normal Apple development signing.
+
+## Timer transitions and navigation finish
+
+Timer intervals retain the current phase and the next two phases, including the final phase, with a Now/Paused marker. Stable per-routine phase keys use short entering, exiting and layout transitions instead of removing the entire section during the final round. Animation behavior respects the system reduced-motion setting through Reanimated's [layout transitions](https://docs.swmansion.com/react-native-reanimated/docs/layout-animations/layout-transitions/).
+
+The custom tab bar keeps the existing palette. Its GlassSurface uses native GlassView on supported iOS devices when reduced transparency is off; other configurations use the existing fallback. A subtle accent tint, neutral highlights and a moving selected-tab highlight make the material more legible. This is a custom tab bar using native glass surfaces, not the system UITabBar or a claim of native liquid morphing on every platform.

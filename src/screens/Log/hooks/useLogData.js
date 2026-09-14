@@ -3,6 +3,7 @@ import { Alert, Share, LayoutAnimation, Platform, UIManager } from 'react-native
 import * as Clipboard from 'expo-clipboard';
 import { useRoutineContext } from '../../../context/RoutineContext';
 import { usePostContext } from '../../../context/PostContext';
+import { getLogDuration, getLogRounds } from '../../../domain/routines';
 import useConfirm from '../../../hooks/useConfirm';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -38,18 +39,8 @@ export const useLogData = () => {
     // Prefer the actually elapsed wall-clock time (recorded when the workout
     // ended). Falls back to the planned duration for legacy log entries that
     // were saved before we started tracking real elapsed time.
-    const totalTime = completedRoutines.reduce((sum, routine) => {
-      if (typeof routine.actualDurationSec === 'number' && routine.actualDurationSec >= 0) {
-        return sum + routine.actualDurationSec;
-      }
-      const planned = (routine.rounds || 0) * ((routine.workSec || 0) + (routine.restSec || 0));
-      return sum + planned;
-    }, 0);
-    // Aborted workouts only count completed rounds; finished workouts count all.
-    const totalRounds = completedRoutines.reduce((sum, routine) => {
-      if (typeof routine.roundsCompleted === 'number') return sum + routine.roundsCompleted;
-      return sum + (routine.rounds || 0);
-    }, 0);
+    const totalTime = completedRoutines.reduce((sum, item) => sum + getLogDuration(item), 0);
+    const totalRounds = completedRoutines.reduce((sum, item) => sum + getLogRounds(item), 0);
 
     const totalMinutes = Math.floor(totalTime / 60);
     const totalHours = Math.floor(totalMinutes / 60);
@@ -100,7 +91,8 @@ export const useLogData = () => {
     if (completedRoutines.length === 0) return;
     confirm({
       title: 'Clear All Logs',
-      message: 'Are you sure you want to clear all completed routines? This action cannot be undone.',
+      message:
+        'Are you sure you want to clear all completed routines? This action cannot be undone.',
       confirmLabel: 'Clear All',
       destructive: true,
       onConfirm: () => {
@@ -162,19 +154,10 @@ export const useLogData = () => {
       id: `post-${Date.now()}`,
       authorId: 'current-user',
       authorName: 'You',
-      routine: {
-        id: selectedLog.id,
-        name: selectedLog.name,
-        rounds: selectedLog.rounds,
-        workSec: selectedLog.workSec,
-        restSec: selectedLog.restSec,
-        description: selectedLog.description || '',
-        workoutPlaylistId: selectedLog.workoutPlaylistId,
-        restPlaylistId: selectedLog.restPlaylistId,
-      },
-      type: 'completed',
+      routine: { ...selectedLog },
+      type: selectedLog.status === 'aborted' ? 'session' : 'completed',
       category: publishCategory,
-      caption: publishCaption.trim() || `Just completed ${selectedLog.name}! 💪`,
+      caption: publishCaption.trim() || `My ${selectedLog.name} session 💪`,
       createdAt: new Date().toISOString(),
       likes: 0,
       liked: false,
@@ -188,7 +171,10 @@ export const useLogData = () => {
     setSelectedLog(null);
     setPublishCaption('');
     setPublishCategory('sport');
-    Alert.alert('Success', 'Your workout has been published!');
+    Alert.alert(
+      'Saved on this device',
+      'Your session is now in Discover. Online publishing is not connected yet.',
+    );
   }, [addPost, publishCaption, publishCategory, selectedLog]);
 
   // Bounded poll for the off-screen ViewShot refs to mount. Previously this
@@ -296,7 +282,7 @@ export const useLogData = () => {
 
         if (platform === 'native') {
           await Share.share({
-            message: `Just completed ${selectedLog.name}! 💪`,
+            message: `My ${selectedLog.name} session 💪`,
             title: `Workout: ${selectedLog.name}`,
           });
         } else if (platform === 'instagram-story' || platform === 'instagram-messages') {
@@ -306,7 +292,7 @@ export const useLogData = () => {
           await Clipboard.setImageAsync(base64);
           Alert.alert('Copied!', 'Image copied to clipboard. Open the app and paste it!');
         } else if (platform === 'copy-link') {
-          const workoutText = `Just completed ${selectedLog.name}! 💪\n${selectedLog.rounds} rounds • ${selectedLog.workSec}s work / ${selectedLog.restSec}s rest`;
+          const workoutText = `My ${selectedLog.name} session 💪\n${selectedLog.rounds} rounds • ${selectedLog.workSec}s work / ${selectedLog.restSec}s rest`;
           await Clipboard.setStringAsync(workoutText);
           Alert.alert('Copied!', 'Workout details copied to clipboard!');
         }
@@ -367,4 +353,3 @@ export const useLogData = () => {
     },
   };
 };
-

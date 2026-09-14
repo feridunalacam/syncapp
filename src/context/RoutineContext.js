@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
+import { normalizeRoutine } from '../domain/routines';
 import storage, { STORAGE_KEYS } from '../lib/storage';
 
 export const defaultRoutines = [
@@ -19,48 +20,20 @@ const RoutineContext = createContext({
   clearCompletedRoutines: () => {},
 });
 
-// Seed the Log screen with two example completed entries so a brand-new
-// install isn't entirely empty. Real completions overwrite these on first
-// hydrate.
-const getExampleCompletedRoutines = () => {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 8, 30);
-  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 18, 15);
-
-  return [
-    { ...defaultRoutines[0], completedAt: today.toISOString() },
-    { ...defaultRoutines[0], completedAt: yesterday.toISOString() },
-  ];
-};
-
-const initialCompletedRoutines = getExampleCompletedRoutines();
-
 export const RoutineProvider = ({ children }) => {
   const [routines, setRoutines] = useState(defaultRoutines);
-  const [completedRoutines, setCompletedRoutines] = useState(initialCompletedRoutines);
+  const [completedRoutines, setCompletedRoutines] = useState([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [completedHydrated, setCompletedHydrated] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // One-time reset to clear old routines and set the new default.
-      const hasBeenReset = await storage.getString(STORAGE_KEYS.ROUTINES_RESET_FLAG);
-      if (!hasBeenReset) {
-        await storage.remove(STORAGE_KEYS.ROUTINES);
-        await storage.setString(STORAGE_KEYS.ROUTINES_RESET_FLAG, 'true');
-        if (!cancelled) {
-          setRoutines(defaultRoutines);
-          setIsLoaded(true);
-        }
-        return;
-      }
-
       const stored = await storage.getJSON(STORAGE_KEYS.ROUTINES, null);
       if (cancelled) return;
 
-      if (Array.isArray(stored) && stored.length > 0) {
-        setRoutines(stored);
+      if (Array.isArray(stored)) {
+        setRoutines(stored.map(normalizeRoutine));
       } else {
         setRoutines(defaultRoutines);
       }
@@ -124,12 +97,16 @@ export const RoutineProvider = ({ children }) => {
       name,
     };
 
-    setRoutines((prev) => [...prev, routineToStore]);
+    setRoutines((prev) => [...prev, normalizeRoutine(routineToStore)]);
   }, []);
 
   const updateRoutine = useCallback((updatedRoutine) => {
     setRoutines((prev) =>
-      prev.map((routine) => (routine.id === updatedRoutine.id ? { ...routine, ...updatedRoutine } : routine)),
+      prev.map((routine) =>
+        routine.id === updatedRoutine.id
+          ? normalizeRoutine({ ...routine, ...updatedRoutine })
+          : routine,
+      ),
     );
   }, []);
 
@@ -157,6 +134,8 @@ export const RoutineProvider = ({ children }) => {
 
   const addCompletedRoutine = useCallback((routine) => {
     setCompletedRoutines((prev) => {
+      if (routine.sessionId && prev.some((item) => item.sessionId === routine.sessionId))
+        return prev;
       const updated = [routine, ...prev];
       // Keep only the last 100 completed routines to prevent memory bloat
       return updated.slice(0, 100);
@@ -188,6 +167,7 @@ export const RoutineProvider = ({ children }) => {
   const value = useMemo(
     () => ({
       routines,
+      isLoaded: isLoaded && completedHydrated,
       addRoutine,
       updateRoutine,
       reorderRoutines,
@@ -199,6 +179,8 @@ export const RoutineProvider = ({ children }) => {
       resetRoutinesToDefaults,
     }),
     [
+      isLoaded,
+      completedHydrated,
       routines,
       addRoutine,
       updateRoutine,
@@ -216,5 +198,3 @@ export const RoutineProvider = ({ children }) => {
 };
 
 export const useRoutineContext = () => useContext(RoutineContext);
-
-

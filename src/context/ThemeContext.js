@@ -1,3 +1,4 @@
+import { Appearance } from 'react-native';
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { lightTheme } from '../themes/lightTheme';
 import { darkTheme } from '../themes/darkTheme';
@@ -33,6 +34,10 @@ export const ThemeProvider = ({ children }) => {
     };
   }, []);
 
+  useEffect(() => {
+    Appearance.setColorScheme(themeMode);
+  }, [themeMode]);
+
   const setTheme = useCallback(async (mode) => {
     if (mode !== 'light' && mode !== 'dark') return;
     setThemeMode(mode);
@@ -56,9 +61,5 @@ export const ThemeProvider = ({ children }) => {
     };
   }, [themeMode, toggleTheme, setTheme, isLoading]);
 
-  return (
-    <ThemeContext.Provider value={value}>
-      {children}
-    </ThemeContext.Provider>
-  );
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 };

@@ -1,523 +1,464 @@
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Alert } from 'react-native';
+import Surface from '../../components/common/Surface';
+import SpotifyDevicePicker from '../../components/common/SpotifyDevicePicker';
+import React, { useState, useEffect } from 'react';
+import { View, Text, Pressable, ScrollView, StyleSheet, Alert } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { useRoutineContext } from '../../context/RoutineContext';
-import { usePlatformContext } from '../../context/PlatformContext';
+import Animated, {
+  FadeInDown,
+  FadeOutUp,
+  LinearTransition,
+  ReduceMotion,
+} from 'react-native-reanimated';
 import { useTheme } from '../../context/ThemeContext';
-import { createScreenStyles } from '../../styles/screenStyles';
-import ScreenWrapper from '../../components/common/ScreenWrapper';
-import { useTimerLogic } from './TimerLogic';
-import { useAudioController } from '../../hooks/useAudioController';
-import { useCountdownSoundPlayer } from '../../utils/countdownSoundPlayer';
+import { useRoutineContext } from '../../context/RoutineContext';
+import { useWorkout } from '../../context/WorkoutContext';
+import { getRoutineDuration, buildTimeline } from '../../domain/routines';
+import { formatTime } from '../../utils/timeFormatters';
 import { navigateToCreateRoutine } from '../../navigation/navigationHelpers';
-import { MusicPlayerPreview } from './components/MusicPlayerPreview';
-import { AudioControllerUI } from './components/AudioControllerUI';
+import ScreenWrapper from '../../components/common/ScreenWrapper';
+import GlassSurface from '../../components/common/GlassSurface';
+import Sheet from '../../components/common/Sheet';
 import { TimerDesign } from './components/TimerDesign';
+import { MusicPlayerPreview } from './components/MusicPlayerPreview';
 
-const DEFAULT_ROUTINE_KEY = 'deneme';
+const intervalLayout = LinearTransition.duration(240).reduceMotion(ReduceMotion.System);
+const intervalEnter = FadeInDown.duration(220).reduceMotion(ReduceMotion.System);
+const intervalExit = FadeOutUp.duration(180).reduceMotion(ReduceMotion.System);
 
-function HomeScreen({ navigation }) {
-  const { routines, addCompletedRoutine } = useRoutineContext();
-  const { theme, isDark } = useTheme();
-  const screenStyles = createScreenStyles({ ...theme, isDark });
-  
-  const { 
-    selectedPlatform, 
-    connectedPlatforms, 
-    refreshToken,
-    musicPlayer,
-    services
-  } = usePlatformContext();
-  
-  const [selectedRoutineId, setSelectedRoutineId] = useState(DEFAULT_ROUTINE_KEY);
-  const [isWorkoutRunning, setIsWorkoutRunning] = useState(false);
-  const [showRoutineDropdown, setShowRoutineDropdown] = useState(false);
-  // Wall-clock timestamp of when the active workout started. Used for true
-  // elapsed-time logging instead of relying on the planned routine duration
-  // (which over-reports if the user pauses or cuts the workout short).
-  const workoutStartedAtRef = useRef(null);
-
-  const selectedRoutine = useMemo(
-    () => routines.find((routine) => routine.id === selectedRoutineId) ?? null,
-    [routines, selectedRoutineId],
-  );
-
-  // Countdown sound player
-  const countdownSoundPlayer = useCountdownSoundPlayer();
-
-  // Audio Controller Hook - Manages all music playback
-  // All music controls (play, pause, shuffle, next, previous, repeat) are handled here
-  // Phase changes automatically trigger music changes
-  const {
-      accessToken,
-      track,
-      isMusicPlaying,
-      musicProgress,
-      isShuffled,
-      isRepeating,
-      handlePhaseChange,
-      togglePlayPause,
-      pauseMusic,
-      resumeMusic,
-      skipNext,
-      skipPrevious,
-      toggleShuffle,
-      toggleRepeat,
-      stopMusic,
-      setVolume,
-      applyRestVolume,
-      resetVolume,
-      playCountdownSound,
-      fetchPlayback,
-  } = useAudioController({
-      musicPlayer,
-      selectedPlatform,
-      connectedPlatforms,
-      refreshToken,
-      selectedRoutine,
-      services,
-      countdownSoundPlayer,
-  });
-
-  const handleWorkoutComplete = useCallback(async () => {
-    setIsWorkoutRunning(false);
-    await stopMusic();
-    const startedAtMs = workoutStartedAtRef.current;
-    const completedAt = new Date();
-    const actualDurationSec = startedAtMs
-      ? Math.max(0, Math.round((completedAt.getTime() - startedAtMs) / 1000))
-      : null;
-    addCompletedRoutine({
-      ...selectedRoutine,
-      startedAt: startedAtMs ? new Date(startedAtMs).toISOString() : null,
-      completedAt: completedAt.toISOString(),
-      actualDurationSec,
-      status: 'completed',
-      roundsCompleted: selectedRoutine?.rounds ?? null,
-      totalRounds: selectedRoutine?.rounds ?? null,
-    });
-    workoutStartedAtRef.current = null;
-  }, [selectedRoutine, addCompletedRoutine, stopMusic]);
-
-  // Handle countdown start - play music for beforeStart phase (like a round)
-  const handleCountdownStart = useCallback(async (countdownType, duration) => {
-    console.log(`Countdown started: ${countdownType}, duration: ${duration}s`);
-    
-    if (countdownType === 'beforeStart' && duration > 0) {
-      // Treat beforeStart like a round - use handlePhaseChange to play music
-      console.log('🎵 Starting beforeStart music via handlePhaseChange');
-      await handlePhaseChange('beforeStart', 0);
-    }
-  }, [handlePhaseChange]);
-
-  // Track which sounds have been played this phase (to avoid replaying)
-  const [playedSoundsThisPhase, setPlayedSoundsThisPhase] = useState({
-    beforeStart: false,
-    endWork: false,
-    endRest: false,
-  });
-
-  // Handle phase change with volume control (sounds are now triggered by time-based useEffect)
-  const handlePhaseChangeWithVolume = useCallback(async (phase, round) => {
-    console.log('📍 handlePhaseChangeWithVolume:', phase, round);
-    
-    // Reset played sounds flags when phase changes
-    setPlayedSoundsThisPhase({ beforeStart: false, endWork: false, endRest: false });
-    
-    if (phase === 'work') {
-      // Work phase starting
-      if (round === 1) {
-        console.log('📍 Round 1 work starting - initializing music');
-      }
-      // Notify audio controller about phase changes
-      await handlePhaseChange(phase, round);
-      // Reset volume to 100%
-      await resetVolume();
-    } else if (phase === 'rest') {
-      // Apply rest volume
-      if (selectedRoutine?.restVolume !== undefined && selectedRoutine.restVolume < 100) {
-        console.log('📍 Applying rest volume:', selectedRoutine.restVolume);
-        await applyRestVolume(selectedRoutine.restVolume);
-      }
-      // Notify audio controller about phase changes so music can sync
-      await handlePhaseChange(phase, round);
-    } else {
-      // Other phases (beforeStart, etc.)
-      await handlePhaseChange(phase, round);
-    }
-  }, [handlePhaseChange, applyRestVolume, resetVolume, selectedRoutine]);
-
-  const {
-    timeRemaining,
-    currentPhase,
-    currentRound,
-    isActive: isTimerActive,
-    isPaused,
-    isCountdownPhase,
-    start: startTimer,
-    pause: pauseTimer,
-    resume: resumeTimer,
-    stop: stopTimer,
-    skipPhase,
-    setPhase,
-  } = useTimerLogic({
-    workSec: selectedRoutine ? (selectedRoutine.workSec || 60) : 60,
-    restSec: selectedRoutine ? (selectedRoutine.restSec || 30) : 30,
-    rounds: selectedRoutine ? (selectedRoutine.rounds || 5) : 5,
-    // Only beforeStart has a countdown - other sounds play at phase transitions
-    countdownBeforeStartSec: selectedRoutine?.countdownBeforeStartDuration || 0,
-    onPhaseChange: handlePhaseChangeWithVolume,
-    onCountdownStart: handleCountdownStart,
-    onComplete: handleWorkoutComplete,
-  });
-
-  // Time-based sound triggers: Play sounds X seconds before phase ends (X = sound duration)
-  useEffect(() => {
-    if (!isWorkoutRunning || isPaused || !selectedRoutine) return;
-
-    // Helper to get sound duration in seconds
-    const getSoundDurationSec = (sound) => {
-      if (!sound || !sound.duration) return 0;
-      // Duration is already in seconds (from MusicSearchModal DEFAULT_VOICES)
-      return sound.duration;
-    };
-
-    // Before Start phase - play countdownBeforeStartSound
-    if (currentPhase === 'beforeStart' && !playedSoundsThisPhase.beforeStart) {
-      const soundDurationSec = getSoundDurationSec(selectedRoutine.countdownBeforeStartSound);
-      if (soundDurationSec > 0 && timeRemaining === soundDurationSec) {
-        console.log(`🔔 Before Start: ${timeRemaining}s remaining, playing sound (duration: ${soundDurationSec}s)`);
-        playCountdownSound('beforeStart');
-        setPlayedSoundsThisPhase(prev => ({ ...prev, beforeStart: true }));
-      }
-    }
-
-    // Work phase - play endWorkSound before work ends
-    if (currentPhase === 'work' && !playedSoundsThisPhase.endWork) {
-      const soundDurationSec = getSoundDurationSec(selectedRoutine.endWorkSound);
-      if (soundDurationSec > 0 && timeRemaining === soundDurationSec) {
-        console.log(`🔔 Work phase: ${timeRemaining}s remaining, playing endWorkSound (duration: ${soundDurationSec}s)`);
-        playCountdownSound('endWork');
-        setPlayedSoundsThisPhase(prev => ({ ...prev, endWork: true }));
-      }
-    }
-
-    // Rest phase - play endRestSound before rest ends
-    if (currentPhase === 'rest' && !playedSoundsThisPhase.endRest) {
-      const soundDurationSec = getSoundDurationSec(selectedRoutine.endRestSound);
-      if (soundDurationSec > 0 && timeRemaining === soundDurationSec) {
-        console.log(`🔔 Rest phase: ${timeRemaining}s remaining, playing endRestSound (duration: ${soundDurationSec}s)`);
-        playCountdownSound('endRest');
-        setPlayedSoundsThisPhase(prev => ({ ...prev, endRest: true }));
-      }
-    }
-  }, [timeRemaining, currentPhase, isWorkoutRunning, isPaused, selectedRoutine, playedSoundsThisPhase, playCountdownSound]);
-
-  // Sync playback status with the music platform once per second while a
-  // workout is running. Phase/round/countdown state is read through refs so
-  // the interval isn't torn down and re-created on every timer tick.
-  const phaseStateRef = useRef({ phase: currentPhase, round: currentRound, isCountdown: isCountdownPhase });
-  useEffect(() => {
-    phaseStateRef.current = { phase: currentPhase, round: currentRound, isCountdown: isCountdownPhase };
-  }, [currentPhase, currentRound, isCountdownPhase]);
-
-  useEffect(() => {
-    if (!selectedPlatform || !isWorkoutRunning || !musicPlayer) return;
-
-    const inActivePhase = () => {
-      const { phase, isCountdown } = phaseStateRef.current;
-      return !isCountdown && phase !== 'beforeStart';
-    };
-
-    const hasBeforeStartCountdown = (selectedRoutine?.countdownBeforeStartDuration || 0) > 0;
-
-    let initialFetchTimeout = null;
-    if (hasBeforeStartCountdown) {
-      // Give the beforeStart phase ~1s to settle before polling starts.
-      initialFetchTimeout = setTimeout(() => {
-        if (inActivePhase()) fetchPlayback();
-      }, 1000);
-    } else {
-      fetchPlayback();
-    }
-
-    const interval = setInterval(() => {
-      if (inActivePhase()) fetchPlayback();
-    }, 1000);
-
-    return () => {
-      if (initialFetchTimeout) clearTimeout(initialFetchTimeout);
-      clearInterval(interval);
-    };
-  }, [selectedPlatform, isWorkoutRunning, musicPlayer, fetchPlayback, selectedRoutine?.countdownBeforeStartDuration]);
-
-  // Reset timer when routine changes (if not running)
-  useEffect(() => {
-    if (!isWorkoutRunning && selectedRoutine) {
-      setPhase('work', 1);
-    }
-  }, [selectedRoutineId, isWorkoutRunning, selectedRoutine, setPhase]);
-
-  // Workout Handlers
-  const startWorkoutFlow = useCallback(async () => {
-    if (!selectedRoutine) {
-      Alert.alert('No Routine Selected', 'Please choose a routine before starting.');
-      return false;
-    }
-    if (isWorkoutRunning || isTimerActive) {
-      return false;
-    }
-
-    // Preload countdown sounds for instant playback
-    const soundsToPreload = [];
-    if (selectedRoutine.countdownBeforeStartSound?.uri) {
-      soundsToPreload.push(selectedRoutine.countdownBeforeStartSound.uri);
-    }
-    if (selectedRoutine.endWorkSound?.uri) {
-      soundsToPreload.push(selectedRoutine.endWorkSound.uri);
-    }
-    if (selectedRoutine.endRestSound?.uri) {
-      soundsToPreload.push(selectedRoutine.endRestSound.uri);
-    }
-    if (soundsToPreload.length > 0) {
-      countdownSoundPlayer.preload(soundsToPreload);
-    }
-
-    if (__DEV__) {
-      console.log('🚀 Starting workout:', selectedRoutine.name, {
-        restVolume: selectedRoutine.restVolume,
-        beforeStart: {
-          dur: selectedRoutine.countdownBeforeStartDuration,
-          sound: selectedRoutine.countdownBeforeStartSound?.name,
-        },
-        endWorkSound: selectedRoutine.endWorkSound?.name,
-        endRestSound: selectedRoutine.endRestSound?.name,
-      });
-    }
-
-    setPhase('work', 1);
-    setIsWorkoutRunning(true);
-    workoutStartedAtRef.current = Date.now();
-    startTimer();
-
-    // Check if we have a beforeStart countdown
-    const hasBeforeStartCountdown = (selectedRoutine?.countdownBeforeStartDuration || 0) > 0;
-    console.log('🚀 hasBeforeStartCountdown:', hasBeforeStartCountdown);
-    
-    // Only start music immediately if there's no countdown
-    // Otherwise, music will start when countdown ends and work phase begins
-    if (!hasBeforeStartCountdown) {
-      console.log('🚀 No countdown, starting music immediately');
-      await handlePhaseChange('work', 1);
-    } else {
-      console.log('🚀 Has countdown, music will start after countdown');
-    }
-
-    return true;
-  }, [
-    isTimerActive,
-    isWorkoutRunning,
-    selectedRoutine,
-    setPhase,
-    startTimer,
-    handlePhaseChange,
-  ]);
-
-  const handlePauseResume = useCallback(async () => {
-    if (!selectedRoutine) {
-      Alert.alert('No Routine Selected', 'Please choose a routine before starting.');
-      return;
-    }
-
-    if (!isWorkoutRunning) {
-      await startWorkoutFlow();
-      return;
-    }
-
-    if (isPaused) {
-      resumeTimer();
-      await resumeMusic();
-    } else {
-      pauseTimer();
-      await pauseMusic();
-    }
-  }, [
-    isPaused,
-    isWorkoutRunning,
-    pauseTimer,
-    resumeTimer,
-    selectedRoutine,
-    startWorkoutFlow,
-    pauseMusic,
-    resumeMusic,
-  ]);
-
-  const handleStopWorkout = useCallback(async () => {
-    // Capture phase/round BEFORE stopping the timer so we can log it as
-    // an "aborted" entry if the user got at least one work phase in.
-    const phaseAtStop = currentPhase;
-    const roundAtStop = currentRound;
-
-    stopTimer();
-    setIsWorkoutRunning(false);
-    await stopMusic();
-
-    // Don't log a workout that never actually started (still in beforeStart
-    // countdown or never moved past round 1's work clock).
-    const startedRealPhase = phaseAtStop !== 'beforeStart' && roundAtStop >= 1;
-    if (startedRealPhase && selectedRoutine) {
-      const roundsCompleted = phaseAtStop === 'rest' ? roundAtStop : roundAtStop - 1;
-      const startedAtMs = workoutStartedAtRef.current;
-      const completedAt = new Date();
-      const actualDurationSec = startedAtMs
-        ? Math.max(0, Math.round((completedAt.getTime() - startedAtMs) / 1000))
-        : null;
-      addCompletedRoutine({
-        ...selectedRoutine,
-        startedAt: startedAtMs ? new Date(startedAtMs).toISOString() : null,
-        completedAt: completedAt.toISOString(),
-        actualDurationSec,
-        status: 'aborted',
-        roundsCompleted: Math.max(0, roundsCompleted),
-        totalRounds: selectedRoutine.rounds,
-      });
-    }
-
-    workoutStartedAtRef.current = null;
-    setPhase('work', 1);
-  }, [
-    stopTimer,
-    setPhase,
-    stopMusic,
-    currentPhase,
-    currentRound,
-    selectedRoutine,
-    addCompletedRoutine,
-  ]);
-
-  const handleSkipBackward = useCallback(() => {
-    if (!selectedRoutine || !isWorkoutRunning) return;
-    let targetPhase = currentPhase;
-    let targetRound = currentRound;
-    
-    if (currentPhase === 'rest') {
-        targetPhase = 'work';
-    } else if (currentRound > 1) {
-        targetRound = currentRound - 1;
-        targetPhase = 'rest';
-    }
-
-    if (targetPhase !== currentPhase || targetRound !== currentRound) {
-         setPhase(targetPhase, targetRound);
-         // Notify audio controller about manual phase change
-         handlePhaseChange(targetPhase, targetRound);
-    }
-  }, [selectedRoutine, isWorkoutRunning, currentPhase, currentRound, setPhase, handlePhaseChange]);
-
-  const handleSkipForward = useCallback(() => {
-    if (!selectedRoutine || !isWorkoutRunning) return;
-    skipPhase();
-    // Note: skipPhase will trigger onPhaseChange callback which notifies audio controller
-  }, [selectedRoutine, isWorkoutRunning, skipPhase]);
-
+function IconButton({ icon, label, onPress, disabled = false, selected = false }) {
+  const { theme } = useTheme();
   return (
-    <ScreenWrapper style={screenStyles.container} backgroundColor={theme.background}>
-    <View style={screenStyles.flexContainer}>
-      {/* Header - Same structure as Routine screen */}
-      <View style={screenStyles.pageHeader}>
-        <View style={[screenStyles.pageHeaderContent, { marginBottom: theme.spacing.sm }]}>
-          <View style={screenStyles.routineSelectorBar}>
-            <TouchableOpacity style={screenStyles.routineSelectorTextContainer} onPress={() => setShowRoutineDropdown(!showRoutineDropdown)} activeOpacity={0.7}>
-            <Text style={screenStyles.routineSelectorTitle} numberOfLines={1}>
-              {selectedRoutine ? selectedRoutine.name : 'No routine selected'}
-            </Text>
-            {selectedRoutine && (
-              <TouchableOpacity 
-                onPress={(e) => {
-                  e.stopPropagation();
-                  navigateToCreateRoutine(navigation, selectedRoutine);
-                }}
-                style={screenStyles.routineSelectorEditIcon}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="create-outline" size={18} color={theme.accent} />
-              </TouchableOpacity>
-            )}
-            <Ionicons name="chevron-down" size={20} color={theme.accent} />
-          </TouchableOpacity>
-          {showRoutineDropdown && (
-            <>
-              <TouchableOpacity style={screenStyles.dropdownOverlay} onPress={() => setShowRoutineDropdown(false)} activeOpacity={1} />
-              <View style={screenStyles.routineDropdownMenu} pointerEvents="box-none">
-                <View pointerEvents="auto">
-                <ScrollView>
-                  <TouchableOpacity style={[screenStyles.routineDropdownItem, routines.length === 0 && screenStyles.routineDropdownItemLast]} onPress={() => { setSelectedRoutineId(null); setShowRoutineDropdown(false); if (isWorkoutRunning) handleStopWorkout(); }} activeOpacity={0.7}>
-                    <Text style={[screenStyles.routineDropdownItemText, !selectedRoutineId && screenStyles.routineDropdownItemTextSelected]}>No routine selected</Text>
-                  </TouchableOpacity>
-                  {routines.map((routine, index) => (
-                    <TouchableOpacity key={routine.id} style={[screenStyles.routineDropdownItem, index === routines.length - 1 && screenStyles.routineDropdownItemLast]} onPress={() => { setSelectedRoutineId(routine.id); setShowRoutineDropdown(false); if (isWorkoutRunning) handleStopWorkout(); }} activeOpacity={0.7}>
-                      <Text style={[screenStyles.routineDropdownItemText, routine.id === selectedRoutineId && screenStyles.routineDropdownItemTextSelected]}>{routine.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-                </View>
-              </View>
-              </>
-            )}
-          </View>
-          <TouchableOpacity style={screenStyles.addButton} onPress={() => navigateToCreateRoutine(navigation)}>
-            <Text style={screenStyles.addButtonText}>+</Text>
-          </TouchableOpacity>
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ disabled, selected }}
+    >
+      <GlassSurface interactive style={styles.iconButton}>
+        <Ionicons
+          name={icon}
+          size={20}
+          color={disabled ? theme.textTertiary : selected ? theme.accent : theme.text}
+        />
+      </GlassSurface>
+    </Pressable>
+  );
+}
+export default function HomeScreen({ navigation, route }) {
+  const { theme } = useTheme();
+  const { routines } = useRoutineContext();
+  const workout = useWorkout();
+  const [picker, setPicker] = useState(false);
+  const {
+    selectedRoutine,
+    isWorkoutRunning,
+    isPaused,
+    currentPhase,
+    currentRound,
+    timeRemaining,
+    phaseProgress,
+    track,
+    musicProgress,
+    isMusicPlaying,
+  } = workout;
+  useEffect(() => {
+    const id = route?.params?.routineId;
+    if (!id) return;
+    if (routines.some((r) => r.id === id)) workout.selectRoutine(id);
+    else Alert.alert('Routine not found', 'This routine may have been deleted.');
+    navigation.setParams({ routineId: undefined });
+  }, [route?.params?.routineId]);
+  const edit = () => navigateToCreateRoutine(navigation, selectedRoutine);
+  const stop = () =>
+    Alert.alert('End session?', 'Your progress will be saved.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'End session', onPress: workout.stop },
+    ]);
+  const choose = (id) => {
+    const select = () => {
+      workout.selectRoutine(id);
+      setPicker(false);
+    };
+    if (isWorkoutRunning)
+      Alert.alert('Switch routine?', 'Your current session will end and be saved.', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Switch', onPress: select },
+      ]);
+    else select();
+  };
+  const timeline = selectedRoutine ? buildTimeline(selectedRoutine) : [];
+  const index = isWorkoutRunning ? workout.session.index : -1;
+  const upcoming = timeline.slice(Math.max(0, index), Math.max(0, index) + 3);
+  const round = selectedRoutine?.roundsData?.[currentRound - 1];
+  return (
+    <ScreenWrapper>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: theme.text }]}>
+            Sync<Text style={{ color: theme.accent }}>.</Text>
+          </Text>
+          <IconButton
+            icon="add"
+            label="Create routine"
+            onPress={() => navigateToCreateRoutine(navigation)}
+          />
         </View>
-      </View>
-
-      <ScrollView style={screenStyles.contentContainer} contentContainerStyle={{ flexGrow: 1, paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing['2xl'], paddingBottom: theme.spacing['4xl'] }} showsVerticalScrollIndicator={false}>
-      
-      {/* Timer Circle */}
-      <TimerDesign
-        isWorkoutRunning={isWorkoutRunning}
-        isPaused={isPaused}
-        timeRemaining={timeRemaining}
-        currentPhase={currentPhase}
-        currentRound={currentRound}
-        selectedRoutine={selectedRoutine}
-        isCountdownActive={isCountdownPhase}
-        countdownTime={isCountdownPhase ? timeRemaining : null}
-      />
-
-      <View style={screenStyles.divider} />
-
-        <AudioControllerUI
-          screenStyles={screenStyles}
-          theme={theme}
-          isShuffled={isShuffled}
-          isWorkoutRunning={isWorkoutRunning}
-          isPaused={isPaused}
-          isRepeating={isRepeating}
-          onSkipBackward={handleSkipBackward}
-          onToggleShuffle={toggleShuffle}
-          onSkipPrevious={skipPrevious}
-          onPauseResume={handlePauseResume}
-          onStop={handleStopWorkout}
-          onSkipNext={skipNext}
-          onToggleRepeat={toggleRepeat}
-          onSkipForward={handleSkipForward}
-        />
-
-        {/* Player UI - Shows what's playing from routine or background */}
-        <MusicPlayerPreview 
-          track={track}
-          musicProgress={musicProgress}
-          selectedRoutine={selectedRoutine}
-          currentRound={currentRound}
-          currentPhase={currentPhase}
-          isWorkoutRunning={isWorkoutRunning}
-          isPaused={isPaused}
-        />
+        <Pressable
+          onPress={() => setPicker(true)}
+          accessibilityLabel="Choose routine"
+          style={styles.selection}
+        >
+          <View style={{ flex: 1 }}>
+            <Text
+              numberOfLines={1}
+              style={{ color: theme.text, fontSize: 22, fontWeight: '600', letterSpacing: -0.6 }}
+            >
+              {selectedRoutine?.name || 'Choose a routine'}
+            </Text>
+            <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 5 }}>
+              {selectedRoutine
+                ? `${selectedRoutine.rounds} rounds · ${formatTime(getRoutineDuration(selectedRoutine))}`
+                : 'Create or select a routine to start'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-down" size={20} color={theme.textSecondary} />
+        </Pressable>
+        <Surface
+          variant="card"
+          style={[styles.timerCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+        >
+          <TimerDesign
+            {...{
+              timeRemaining,
+              currentPhase,
+              currentRound,
+              selectedRoutine,
+              isWorkoutRunning,
+              isPaused,
+            }}
+            progress={phaseProgress}
+          />
+          <View style={[styles.intervalMeta, { borderColor: theme.border }]}>
+            <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+              Work{' '}
+              <Text style={{ color: theme.text, fontWeight: '600' }}>
+                {formatTime(round?.workSec || selectedRoutine?.workSec || 0)}
+              </Text>
+            </Text>
+            <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+              Rest{' '}
+              <Text style={{ color: theme.text, fontWeight: '600' }}>
+                {formatTime(round?.restSec ?? selectedRoutine?.restSec ?? 0)}
+              </Text>
+            </Text>
+            <Pressable
+              onPress={edit}
+              disabled={!selectedRoutine}
+              accessibilityLabel="Edit current routine"
+            >
+              <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>Edit</Text>
+            </Pressable>
+          </View>
+        </Surface>
+        <View style={styles.controls}>
+          <IconButton
+            icon="play-skip-back"
+            label="Previous phase"
+            onPress={workout.skipBackward}
+            disabled={!isWorkoutRunning}
+          />
+          <Pressable
+            onPress={workout.toggle}
+            disabled={!selectedRoutine}
+            accessibilityRole="button"
+            accessibilityLabel={
+              isPaused ? 'Resume session' : isWorkoutRunning ? 'Pause session' : 'Start session'
+            }
+            style={[
+              styles.start,
+              { backgroundColor: selectedRoutine ? theme.accent : theme.cardSecondary },
+            ]}
+          >
+            <Ionicons
+              name={isWorkoutRunning && !isPaused ? 'pause' : 'play'}
+              size={20}
+              color={selectedRoutine ? theme.accentText : theme.textTertiary}
+            />
+            <Text
+              style={{
+                color: selectedRoutine ? theme.accentText : theme.textTertiary,
+                fontWeight: '700',
+                fontSize: 16,
+              }}
+            >
+              {isPaused ? 'Resume' : isWorkoutRunning ? 'Pause' : 'Start session'}
+            </Text>
+          </Pressable>
+          <IconButton
+            icon="play-skip-forward"
+            label="Next phase"
+            onPress={workout.skipForward}
+            disabled={!isWorkoutRunning}
+          />
+        </View>
+        {isWorkoutRunning && (
+          <Pressable onPress={stop} accessibilityLabel="End session" style={styles.end}>
+            <Text style={{ color: theme.textSecondary, fontSize: 12 }}>End session</Text>
+          </Pressable>
+        )}
+        <Surface
+          variant="card"
+          style={[styles.music, { backgroundColor: theme.card, borderColor: theme.border }]}
+        >
+          <View style={styles.musicTop}>
+            <MusicPlayerPreview
+              {...{
+                track,
+                musicProgress,
+                isMusicPlaying: isMusicPlaying && isWorkoutRunning && !isPaused,
+                isWorkoutRunning,
+                selectedRoutine,
+                currentRound,
+                currentPhase,
+              }}
+            />
+            <Pressable
+              onPress={edit}
+              disabled={!selectedRoutine}
+              accessibilityLabel="Edit routine audio"
+              style={{ padding: 8 }}
+            >
+              <Ionicons name="ellipsis-horizontal" size={20} color={theme.textSecondary} />
+            </Pressable>
+          </View>
+          <SpotifyDevicePicker />
+          {track && (
+            <View style={[styles.musicControls, { borderColor: theme.border }]}>
+              {[
+                {
+                  icon: 'shuffle',
+                  label: 'Shuffle music',
+                  action: workout.toggleShuffle,
+                  selected: workout.isShuffled,
+                },
+                {
+                  icon: 'play-skip-back-outline',
+                  label: 'Previous track',
+                  action: workout.skipPrevious,
+                },
+                {
+                  icon: 'play-skip-forward-outline',
+                  label: 'Next track',
+                  action: workout.skipNext,
+                },
+                {
+                  icon: 'repeat',
+                  label: 'Repeat music',
+                  action: workout.toggleRepeat,
+                  selected: workout.isRepeating,
+                },
+              ].map((item) => (
+                <Pressable
+                  key={item.label}
+                  onPress={item.action}
+                  accessibilityLabel={item.label}
+                  style={{ padding: 8 }}
+                >
+                  <Ionicons
+                    name={item.icon}
+                    size={18}
+                    color={item.selected ? theme.accent : theme.textSecondary}
+                  />
+                </Pressable>
+              ))}
+            </View>
+          )}
+          {(workout.audioError || workout.alertError) && (
+            <Text
+              accessibilityLiveRegion="polite"
+              style={{ color: theme.error, fontSize: 12, lineHeight: 18, marginTop: 10 }}
+            >
+              {workout.audioError || workout.alertError}
+            </Text>
+          )}
+        </Surface>
+        {upcoming.length > 0 && (
+          <Animated.View layout={intervalLayout} collapsable={false}>
+            <View style={styles.sectionRow}>
+              <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>Intervals</Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+                {timeline.length} intervals
+              </Text>
+            </View>
+            {upcoming.map((item, n) => (
+              <Animated.View
+                key={`${selectedRoutine?.id}-${item.round}-${item.phase}`}
+                entering={intervalEnter}
+                exiting={intervalExit}
+                layout={intervalLayout}
+                style={[styles.intervalRow, { borderColor: theme.border }]}
+              >
+                <View
+                  style={[
+                    styles.intervalIcon,
+                    {
+                      backgroundColor:
+                        item.phase === 'rest' ? theme.cardSecondary : theme.accentLight,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      item.phase === 'rest'
+                        ? 'pause-outline'
+                        : item.phase === 'beforeStart'
+                          ? 'hourglass-outline'
+                          : 'flash-outline'
+                    }
+                    size={16}
+                    color={item.phase === 'rest' ? theme.textSecondary : theme.accent}
+                  />
+                </View>
+                <Text style={{ color: theme.text, fontSize: 13, flex: 1 }}>
+                  {item.phase === 'beforeStart' ? 'Preparation' : `Round ${item.round}`}
+                  <Text style={{ color: theme.textSecondary }}>
+                    {' '}
+                    {item.phase === 'work' ? 'Work' : item.phase === 'rest' ? 'Rest' : ''}
+                  </Text>
+                </Text>
+                {isWorkoutRunning && n === 0 && (
+                  <Text
+                    style={{
+                      color: theme.accent,
+                      fontSize: 10,
+                      fontWeight: '600',
+                      marginRight: 10,
+                    }}
+                  >
+                    {isPaused ? 'Paused' : 'Now'}
+                  </Text>
+                )}
+                <Text
+                  style={{
+                    color: theme.text,
+                    fontSize: 14,
+                    fontWeight: '500',
+                    fontVariant: ['tabular-nums'],
+                  }}
+                >
+                  {formatTime(item.durationSec)}
+                </Text>
+              </Animated.View>
+            ))}
+          </Animated.View>
+        )}
       </ScrollView>
+      <Sheet visible={picker} title="Routines" onClose={() => setPicker(false)}>
+        <ScrollView>
+          {routines.map((r) => (
+            <Pressable
+              key={r.id}
+              onPress={() => choose(r.id)}
+              style={[styles.option, { borderColor: theme.border }]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>{r.name}</Text>
+                <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 5 }}>
+                  {r.rounds} rounds · {formatTime(getRoutineDuration(r))}
+                </Text>
               </View>
+              <Ionicons
+                name={r.id === selectedRoutine?.id ? 'checkmark-circle' : 'chevron-forward'}
+                size={21}
+                color={r.id === selectedRoutine?.id ? theme.accent : theme.textSecondary}
+              />
+            </Pressable>
+          ))}
+          {!routines.length && (
+            <Text style={{ color: theme.textSecondary, marginBottom: 20 }}>No saved routines.</Text>
+          )}
+        </ScrollView>
+      </Sheet>
     </ScreenWrapper>
   );
 }
-
-export default HomeScreen;
+const styles = StyleSheet.create({
+  content: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 18 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  title: { fontSize: 30, fontWeight: '800', letterSpacing: -1.5 },
+  iconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selection: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  timerCard: { borderRadius: 25, borderWidth: StyleSheet.hairlineWidth, overflow: 'hidden' },
+  intervalMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  controls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 14,
+    marginBottom: 16,
+  },
+  start: {
+    flex: 1,
+    height: 50,
+    borderRadius: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  end: { alignSelf: 'center', paddingHorizontal: 16, paddingBottom: 14 },
+  music: { padding: 14, borderRadius: 21, borderWidth: StyleSheet.hairlineWidth, marginBottom: 18 },
+  musicTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  musicControls: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    marginTop: 12,
+    paddingTop: 8,
+  },
+  sectionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  intervalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  intervalIcon: {
+    width: 29,
+    height: 29,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  option: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+});

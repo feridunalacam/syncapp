@@ -1,28 +1,28 @@
 export const darkTheme = {
   // Backgrounds
-  background: '#000000',
+  background: '#111214',
   surface: '#1a1a1a',
-  card: '#1a1a1a',
-  cardSecondary: '#2a2a2a',
-  
+  card: '#1C1E20',
+  cardSecondary: '#272A2C',
+
   // Text
   text: '#ffffff',
-  textSecondary: '#d1d5db',
+  textSecondary: '#A4A8AC',
   textTertiary: '#9ca3af',
   textInverse: '#000000',
-  
+
   // Borders
-  border: '#333333',
-  borderLight: '#2a2a2a',
+  border: '#2A2D30',
+  borderLight: '#25272A',
   borderDark: '#404040',
-  
+
   // Buttons
-  buttonPrimary: '#0d6efd',
+  buttonPrimary: '#D3F569',
   buttonSecondary: '#1a1a1a',
   buttonDisabled: '#2a2a2a',
-  buttonText: '#ffffff',
+  buttonText: '#1B240A',
   buttonTextSecondary: '#ffffff',
-  
+
   // Special
   // In light theme this chip stays dark (so it pops against a white surface).
   // In dark theme we use a slightly lifted neutral so the chip stays readable
@@ -30,13 +30,13 @@ export const darkTheme = {
   routineSelector: '#3a3a3c',
   routineSelectorText: '#ffffff',
   divider: '#333333',
-  
+
   // Status
   success: '#10b981',
   error: '#ef4444',
   warning: '#f59e0b',
   info: '#3b82f6',
-  
+
   // Typography
   fontSize: {
     xs: 10,
@@ -57,7 +57,7 @@ export const darkTheme = {
     bold: '700',
     extrabold: '800',
   },
-  
+
   // Icon size scale (mirrors lightTheme).
   iconSize: {
     xs: 12,
@@ -91,7 +91,7 @@ export const darkTheme = {
     '3xl': 32,
     '4xl': 40,
   },
-  
+
   // Shadows
   shadow: {
     sm: {
@@ -116,29 +116,29 @@ export const darkTheme = {
       elevation: 4,
     },
   },
-  
+
   // Input
-  inputBackground: '#1a1a1a',
+  inputBackground: '#26292C',
   inputBorder: '#333333',
   inputText: '#ffffff',
   inputPlaceholder: '#9ca3af',
-  
+
   // Modal
-  modalBackground: '#1a1a1a',
-  modalOverlay: 'rgba(0, 0, 0, 0.7)',
-  
+  modalBackground: '#1A1C1F',
+  modalOverlay: 'rgba(0, 0, 0, 0.5)',
+
   // Icon colors
   iconPrimary: '#ffffff',
   iconSecondary: '#9ca3af',
   iconTertiary: '#6b7280',
-  
+
   // Special colors
-  accent: '#06b6d4',
-  accentLight: '#0a4a5a',
+  accent: '#D3F569',
+  accentText: '#1B240A',
+  accentLight: '#2C3421',
   roundBadge: '#ff6b35',
   roundBadgeBg: '#2a1a0f',
   roundBadgeBorder: '#4a2a1a',
   timerText: '#ffffff',
   workoutDetailBg: 'rgba(59, 130, 246, 0.15)',
 };
-

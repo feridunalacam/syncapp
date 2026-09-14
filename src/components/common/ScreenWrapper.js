@@ -1,26 +1,8 @@
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '../../context/ThemeContext';
-
-/**
- * Screen-level container that paints the themed background and respects the
- * device safe-area insets via `react-native-safe-area-context`.
- *
- * Props:
- * - `edges`             — array of edges to inset (default: all four).
- * - `includeTopInset`   — convenience flag; pass `false` if a sibling header
- *                         already takes care of the top inset.
- * - `topOffset`         — extra padding to add on top after the safe-area inset.
- * - `backgroundColor`   — override for the themed background.
- *
- * Note: previously this component dynamically `require()`d safe-area-context
- * and added a hard-coded 55px top padding when the module wasn't found. That
- * codepath added ~55px of extra padding on top of an already-correct
- * SafeAreaView, which made every screen sit further from the status bar than
- * intended. The dynamic guard is no longer needed because the dependency is
- * declared in package.json and Expo guarantees its presence.
- */
 export default function ScreenWrapper({
   children,
   style,
@@ -29,32 +11,29 @@ export default function ScreenWrapper({
   includeTopInset = true,
   topOffset = 0,
 }) {
-  const { theme } = useTheme();
-
-  const baseEdges = edges ?? ['top', 'left', 'right', 'bottom'];
-  const effectiveEdges = includeTopInset
-    ? baseEdges.includes('top')
-      ? baseEdges
-      : [...baseEdges, 'top']
-    : baseEdges.filter((edge) => edge !== 'top');
-
+  const { theme, isDark } = useTheme();
+  const effectiveEdges = (edges || ['top', 'left', 'right']).filter(
+    (edge) => includeTopInset || edge !== 'top',
+  );
   return (
-    <SafeAreaView
-      edges={effectiveEdges}
-      style={[
-        styles.safeArea,
-        { backgroundColor: backgroundColor || theme.background },
-        topOffset ? { paddingTop: topOffset } : null,
-        style,
-      ]}
-    >
-      {children}
-    </SafeAreaView>
+    <View style={{ flex: 1, backgroundColor: backgroundColor || theme.background }}>
+      <LinearGradient
+        pointerEvents="none"
+        colors={isDark ? ['#141517', '#111214', '#111214'] : ['#F6F7F3', '#F2F3EF', '#F2F3EF']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={StyleSheet.absoluteFill}
+      />
+      <SafeAreaView
+        edges={effectiveEdges}
+        style={[
+          { flex: 1, paddingTop: topOffset, paddingBottom: 100 },
+          style,
+          { backgroundColor: 'transparent' },
+        ]}
+      >
+        {children}
+      </SafeAreaView>
+    </View>
   );
 }
-
-const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-  },
-});

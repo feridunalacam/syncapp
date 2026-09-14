@@ -1,204 +1,71 @@
-import React, { useMemo, useRef, useEffect, useState } from 'react';
-import { View, Text, Image, StyleSheet, Animated } from 'react-native';
+import React from 'react';
+import { View, Text, Image, StyleSheet } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import PlaybackProgress from './PlaybackProgress';
 import { useTheme } from '../../../context/ThemeContext';
-import { formatTime } from '../../../utils/timeFormatters';
 
-const FALLBACK_TRACK = {
-  title: 'Ready to play',
-  artist: 'No music selected',
-  album: 'Sync App',
-  duration: 0,
-  coverUrl: 'https://via.placeholder.com/85/1f2937/ffffff?text=Music',
-};
-
-export const MusicPlayerPreview = ({ 
-  track, 
-  musicProgress = 0, 
-  selectedRoutine, 
-  currentRound, 
-  currentPhase,
+export const MusicPlayerPreview = ({
+  track,
+  musicProgress = 0,
+  isMusicPlaying = false,
   isWorkoutRunning = false,
-  isPaused = false,
+  selectedRoutine,
+  currentRound,
+  currentPhase,
 }) => {
   const { theme } = useTheme();
-  const styles = createStyles(theme);
-  
-  // Smooth progress animation
-  const [smoothProgress, setSmoothProgress] = useState(0);
-  const lastProgressRef = useRef(0);
-  const progressStartTimeRef = useRef(null);
-  const rafIdRef = useRef(null);
-
-  const displayTrack = useMemo(() => {
-    if (track) return track;
-
-    if (selectedRoutine && currentRound && currentPhase) {
-      const roundData = selectedRoutine.roundsData?.[currentRound - 1];
-      if (!roundData) return FALLBACK_TRACK;
-
-      const phaseSong = currentPhase === 'work' ? roundData.workSong : roundData.restSong;
-      if (phaseSong) {
-        return {
-          title: phaseSong.name || phaseSong.title || 'Unknown Song',
-          artist: phaseSong.artist || 'Unknown Artist',
-          album: phaseSong.album || 'Unknown Album',
-          duration: phaseSong.duration || 0,
-          coverUrl: phaseSong.image || phaseSong.coverUrl || null,
-        };
-      }
-    }
-
-    return FALLBACK_TRACK;
-  }, [track, selectedRoutine, currentRound, currentPhase]);
-
-  const duration = displayTrack.duration || 0;
-  const coverUrl = displayTrack.coverUrl || 'https://via.placeholder.com/85/1f2937/ffffff?text=Music';
-
-  // Smooth progress animation using requestAnimationFrame
-  useEffect(() => {
-    // When musicProgress changes (from API), sync and start smooth animation
-    const now = Date.now();
-    
-    // If progress jumped backward or to a very different value, reset immediately
-    if (Math.abs(musicProgress - lastProgressRef.current) > 2) {
-      setSmoothProgress(musicProgress);
-      lastProgressRef.current = musicProgress;
-      progressStartTimeRef.current = now;
-    } else if (musicProgress !== lastProgressRef.current) {
-      // Normal progress update - sync to API value
-      lastProgressRef.current = musicProgress;
-      progressStartTimeRef.current = now;
-    }
-
-    // Cancel any existing animation
-    if (rafIdRef.current) {
-      cancelAnimationFrame(rafIdRef.current);
-    }
-
-    // Don't animate if paused or not running
-    if (isPaused || !isWorkoutRunning || duration <= 0) {
-      setSmoothProgress(musicProgress);
-      return;
-    }
-
-    const animate = () => {
-      if (!progressStartTimeRef.current) {
-        progressStartTimeRef.current = Date.now();
-      }
-
-      const elapsed = (Date.now() - progressStartTimeRef.current) / 1000;
-      const newProgress = lastProgressRef.current + elapsed;
-      
-      // Don't exceed duration
-      if (newProgress <= duration) {
-        setSmoothProgress(newProgress);
-        rafIdRef.current = requestAnimationFrame(animate);
-      } else {
-        setSmoothProgress(duration);
-      }
-    };
-
-    rafIdRef.current = requestAnimationFrame(animate);
-
-    return () => {
-      if (rafIdRef.current) {
-        cancelAnimationFrame(rafIdRef.current);
-      }
-    };
-  }, [musicProgress, isPaused, isWorkoutRunning, duration]);
-
-  // Progress bar percentage using smooth progress
-  const percentage = duration > 0 ? Math.min(100, (smoothProgress / duration) * 100) : 0;
-
-  const formatTimeDisplay = (seconds) => {
-    if (!seconds || seconds < 0) return '0:00';
-    return formatTime(Math.floor(seconds));
-  };
-
+  const round = selectedRoutine?.roundsData?.[currentRound - 1];
+  const song = currentPhase === 'rest' ? round?.restSong : round?.workSong;
+  const name = track?.title || song?.name || song?.title;
+  const artist = track?.artist || song?.artist;
+  const artwork = track?.coverUrl || song?.image;
+  const duration = track?.duration || song?.duration || 0;
   return (
-    <View style={styles.musicPlayer}>
-      <View style={styles.musicAlbumArt}>
-        <Image
-          source={{ uri: coverUrl }}
-          style={{ width: '100%', height: '100%', borderRadius: 14 }}
-          resizeMode="cover"
-        />
+    <View style={styles.row}>
+      <View style={[styles.artwork, { backgroundColor: theme.cardSecondary }]}>
+        {artwork ? (
+          <Image source={{ uri: artwork }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+        ) : (
+          <Ionicons name="musical-notes-outline" size={22} color={theme.textSecondary} />
+        )}
       </View>
-      <View style={styles.musicTrackInfo}>
-        <Text style={styles.musicTrackTitle} numberOfLines={1}>{displayTrack.title}</Text>
-        <Text style={styles.musicTrackArtist} numberOfLines={1}>{displayTrack.artist}</Text>
-        <Text style={styles.musicTrackAlbum} numberOfLines={1}>{displayTrack.album}</Text>
-        <View style={styles.musicProgressBar}>
-          <View style={[styles.musicProgressFill, { width: `${percentage}%` }]} />
-        </View>
-        <View style={styles.musicTimeInfo}>
-          <Text style={styles.musicTimeText}>{formatTimeDisplay(smoothProgress)}</Text>
-          <Text style={styles.musicTimeText}>{formatTimeDisplay(duration)}</Text>
-        </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text numberOfLines={1} style={{ color: theme.text, fontSize: 14, fontWeight: '600' }}>
+          {name || 'No music selected'}
+        </Text>
+        {artist && (
+          <Text
+            numberOfLines={1}
+            style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}
+          >
+            {artist}
+          </Text>
+        )}
+        {!name && (
+          <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 4 }}>
+            Add audio to this routine
+          </Text>
+        )}
+        {duration > 0 && (
+          <PlaybackProgress
+            position={musicProgress}
+            duration={duration}
+            playing={isMusicPlaying}
+            playbackKey={`${isWorkoutRunning}:${selectedRoutine?.id}:${currentRound}:${currentPhase}:${track?.id || song?.uri || name || ''}`}
+          />
+        )}
       </View>
     </View>
   );
 };
-
-const createStyles = (theme) => StyleSheet.create({
-  musicPlayer: {
-    width: '100%',
-    backgroundColor: 'transparent',
-    borderRadius: 12,
-    padding: theme.spacing.lg,
-    marginTop: 12,
-    marginBottom: theme.spacing['2xl'],
-    flexDirection: 'row',
+const styles = StyleSheet.create({
+  row: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  artwork: {
+    width: 46,
+    height: 46,
+    borderRadius: 13,
+    overflow: 'hidden',
     alignItems: 'center',
-    gap: 14,
-  },
-  musicAlbumArt: {
-    width: 113,
-    height: 113,
-    borderRadius: 14,
-    backgroundColor: theme.cardSecondary,
-    overflow: 'hidden',
-    ...theme.shadow.lg,
-  },
-  musicTrackInfo: {
-    flex: 1,
-  },
-  musicTrackTitle: {
-    fontSize: 19,
-    fontWeight: theme.fontWeight.semibold,
-    color: theme.text,
-    marginBottom: theme.spacing.xs,
-  },
-  musicTrackArtist: {
-    fontSize: 17,
-    color: theme.text,
-    marginBottom: 2,
-  },
-  musicTrackAlbum: {
-    fontSize: theme.fontSize.base,
-    color: theme.text,
-  },
-  musicProgressBar: {
-    height: 4,
-    backgroundColor: theme.border,
-    borderRadius: 2,
-    marginTop: theme.spacing.sm,
-    marginBottom: theme.spacing.xs,
-    width: '100%',
-    overflow: 'hidden',
-  },
-  musicProgressFill: {
-    height: '100%',
-    backgroundColor: theme.success,
-    borderRadius: 2,
-  },
-  musicTimeInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: theme.spacing.xs,
-  },
-  musicTimeText: {
-    fontSize: theme.fontSize.base,
-    color: theme.textSecondary,
+    justifyContent: 'center',
   },
 });

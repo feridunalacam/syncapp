@@ -1,388 +1,338 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, ScrollView, Image, ActivityIndicator, TextInput, Alert } from 'react-native';
+import Surface from '../../../components/common/Surface';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, Pressable, ScrollView, ActivityIndicator, AppState } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../../context/ThemeContext';
 import { usePlatformContext } from '../../../context/PlatformContext';
 import { useMusicSearch } from '../../../hooks/useMusicSearch';
-import { PlatformSelector } from '../../../components/common/PlatformSelector';
-import { createScreenStyles } from '../../../styles/screenStyles';
+import Sheet from '../../../components/common/Sheet';
+import { useFocusEffect } from '@react-navigation/native';
+import { createAutoRefresh } from '../../../lib/autoRefresh';
+import { Artwork, SearchField, MusicRow, PickerState } from './musicSearch/MusicPickerParts';
 
-export const PlaylistCard = ({ 
+function ShuffleAction({ label, accessibilityLabel, onPress, loading, disabled }) {
+  const { theme } = useTheme();
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled || loading}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel || label}
+      accessibilityState={{ disabled: disabled || loading, busy: loading }}
+      style={({ pressed }) => ({
+        minWidth: 44,
+        minHeight: 44,
+        paddingHorizontal: label ? 12 : 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 7,
+        borderRadius: 13,
+        backgroundColor: label ? theme.cardSecondary : 'transparent',
+        opacity: disabled ? 0.35 : pressed ? 0.65 : 1,
+      })}
+    >
+      {loading ? (
+        <ActivityIndicator size="small" color={theme.accent} />
+      ) : (
+        <Ionicons name="shuffle" size={18} color={theme.accent} />
+      )}
+      {!!label && (
+        <Text style={{ color: theme.text, fontSize: 12, fontWeight: '600' }}>{label}</Text>
+      )}
+    </Pressable>
+  );
+}
+
+export const PlaylistCard = ({
   roundsOrder,
   onShuffleForWork,
   onShuffleForRest,
-  embedded = false, // When true, renders without container (for embedding in another card)
+  onConnect,
+  connecting = false,
 }) => {
-  const { theme, isDark } = useTheme();
-  const screenStyles = createScreenStyles({ ...theme, isDark });
-  const { connectedPlatforms, services, refreshToken } = usePlatformContext();
-  const [selectedPlaylistId, setSelectedPlaylistId] = useState(null);
-  const [selectedPlatform, setSelectedPlatform] = useState(() => {
-    // Default to Spotify if connected, otherwise device
-    return connectedPlatforms?.spotify?.connected ? 'spotify' : 'device';
-  });
-  const [searchQuery, setSearchQuery] = useState('');
-  
-  // Local search state (separate from MusicSearchModal)
-  const [localSearchResults, setLocalSearchResults] = useState([]);
-  const [localIsSearching, setLocalIsSearching] = useState(false);
-
-  // Music search hook
-  const {
-    playlists,
-    loadingPlaylists,
-    searchMusic,
-    loadPlaylists,
-    shufflePlaylistForRounds,
-  } = useMusicSearch({ services, connectedPlatforms, refreshToken });
-
-  // Load playlists when component mounts or platform changes
+  const { theme } = useTheme();
+  const platform = usePlatformContext();
+  const music = useMusicSearch(platform);
+  const connected = !!platform.connectedPlatforms.spotify?.connected;
+  const [phase, setPhase] = useState('work');
+  const [query, setQuery] = useState('');
+  const [detail, setDetail] = useState(null);
+  const [busy, setBusy] = useState(null);
+  const [feedback, setFeedback] = useState('');
+  const lock = useRef(false);
+  const version = useRef(0);
+  const loadLibrary = useRef(music.loadPlaylists);
+  loadLibrary.current = music.loadPlaylists;
+  const autoRefresh = useRef(null);
+  if (!autoRefresh.current) {
+    autoRefresh.current = createAutoRefresh(() =>
+      loadLibrary.current('spotify', { preserveItems: true }),
+    );
+  }
   useEffect(() => {
-    if (selectedPlatform !== 'device') {
-      loadPlaylists(selectedPlatform);
-    }
-  }, [selectedPlatform, loadPlaylists]);
-
-  const handlePlatformSelect = (platformId) => {
-    setSelectedPlatform(platformId);
-    setSearchQuery('');
-  };
-
-  // Trigger search when query changes
+    if (!connected) music.reset();
+  }, [connected, music.reset]);
+  useFocusEffect(
+    useCallback(() => {
+      const syncActivity = (state) =>
+        autoRefresh.current.setActive(connected && state === 'active');
+      syncActivity(AppState.currentState);
+      const subscription = AppState.addEventListener('change', syncActivity);
+      return () => {
+        subscription.remove();
+        autoRefresh.current.setActive(false);
+      };
+    }, [connected]),
+  );
   useEffect(() => {
-    if (searchQuery && searchQuery.trim().length >= 3) {
-      const timeoutId = setTimeout(async () => {
-        setLocalIsSearching(true);
-        const results = await searchMusic(searchQuery, selectedPlatform, ['playlist']);
-        // Filter to only playlists
-        const playlistResults = results?.filter(item => item.type === 'playlist') || [];
-        setLocalSearchResults(playlistResults);
-        setLocalIsSearching(false);
-      }, 500);
-      return () => clearTimeout(timeoutId);
-    } else {
-      setLocalSearchResults([]);
-      setLocalIsSearching(false);
-    }
-  }, [searchQuery, selectedPlatform, searchMusic]);
-
-  // Determine which playlists to show: search results if searching, otherwise user playlists
-  const displayPlaylists = searchQuery && searchQuery.trim().length >= 3 
-    ? localSearchResults 
-    : playlists;
-  
-  const displayLoading = searchQuery && searchQuery.trim().length >= 3 
-    ? localIsSearching 
-    : loadingPlaylists;
-
-  const handlePlaylistSelect = (playlistId) => {
-    if (selectedPlaylistId === playlistId) {
-      setSelectedPlaylistId(null);
-    } else {
-      setSelectedPlaylistId(playlistId);
-    }
-  };
-
-  // Find selected playlist from displayPlaylists (works for both user playlists and search results)
-  const selectedPlaylist = displayPlaylists.find(p => p.id === selectedPlaylistId);
-
-  // Handle shuffle for work
-  const handleShuffleWork = async () => {
-    if (!selectedPlaylist || !roundsOrder || roundsOrder.length === 0) return;
-
+    version.current++;
+    return () => {
+      version.current++;
+    };
+  }, [roundsOrder]);
+  useEffect(() => {
+    if (!connected) return;
+    music.clearSearch();
+    const timer = setTimeout(() => music.searchMusic(query, 'spotify', ['playlist']), 300);
+    return () => clearTimeout(timer);
+  }, [query, connected, music.searchMusic, music.clearSearch]);
+  const shuffle = async (playlist) => {
+    if (lock.current) return;
+    const targets = phase === 'rest' ? roundsOrder.slice(0, -1) : roundsOrder;
+    if (!targets.length) return;
+    lock.current = true;
+    setBusy(playlist.id);
+    setFeedback('');
+    const ticket = version.current;
     try {
-      const roundSongs = await shufflePlaylistForRounds(
-        selectedPlaylist.id,
-        selectedPlatform,
-        roundsOrder.length,
-        'work'
-      );
-
-      if (roundSongs && onShuffleForWork) {
-        onShuffleForWork(selectedPlaylist, roundSongs);
+      const songs = await music.shufflePlaylistForRounds(playlist.id, 'spotify', targets);
+      if (ticket !== version.current) return;
+      if (!songs) {
+        setFeedback('No playable tracks loaded. Try again.');
+        return;
       }
-    } catch (error) {
-      console.error('Error shuffling for work:', error);
-      Alert.alert('Error', 'Failed to shuffle playlist for work rounds.');
+      if (phase === 'work') onShuffleForWork(playlist, songs);
+      else onShuffleForRest(playlist, songs);
+      setFeedback(
+        `${playlist.name} · ${targets.length} ${phase} ${targets.length === 1 ? 'round' : 'rounds'} updated`,
+      );
+    } finally {
+      lock.current = false;
+      setBusy(null);
     }
   };
-
-  // Handle shuffle for rest
-  const handleShuffleRest = async () => {
-    if (!selectedPlaylist || !roundsOrder || roundsOrder.length === 0) return;
-
-    try {
-      const roundSongs = await shufflePlaylistForRounds(
-        selectedPlaylist.id,
-        selectedPlatform,
-        roundsOrder.length,
-        'rest'
-      );
-
-      if (roundSongs && onShuffleForRest) {
-        onShuffleForRest(selectedPlaylist, roundSongs);
-      }
-    } catch (error) {
-      console.error('Error shuffling for rest:', error);
-      Alert.alert('Error', 'Failed to shuffle playlist for rest rounds.');
-    }
+  const open = (playlist) => {
+    setDetail(playlist);
+    music.loadPlaylistTracks(playlist.id, 'spotify');
   };
-
-  // Content to render (used in both embedded and standalone modes)
-  const content = (
-    <>
-      {/* Content */}
-      <View style={screenStyles.cardContent}>
-        {/* Search Input with Platform Selector */}
-        <View style={{ 
-          flexDirection: 'row', 
-          alignItems: 'center',
-          gap: theme.spacing.sm,
-          marginBottom: theme.spacing.md,
-        }}>
-          {/* Search Input */}
-          <View style={{ 
-            flex: 1,
-            flexDirection: 'row', 
+  const list = query.trim() ? music.searchResults : music.playlists;
+  const loading = query.trim() ? music.isSearching : music.loadingPlaylists;
+  const error = query.trim() ? music.searchError : music.playlistError;
+  return (
+    <View style={{ marginBottom: 16 }}>
+      {!connected ? (
+        <Surface
+          variant="card"
+          style={{
+            borderRadius: 19,
+            padding: 16,
+            backgroundColor: theme.card,
+            flexDirection: 'row',
+            gap: 12,
             alignItems: 'center',
-            position: 'relative',
-          }}>
-            <Ionicons 
-              name="search-outline" 
-              size={16} 
-              color={theme.iconTertiary} 
-              style={{ position: 'absolute', left: 10, zIndex: 1 }}
-            />
-            <TextInput
-              style={{
-                flex: 1,
-                borderWidth: 1,
-                borderColor: theme.inputBorder,
-                borderRadius: 8,
-                paddingLeft: theme.spacing['3xl'],
-                paddingRight: (searchQuery && searchQuery.length > 0) ? theme.spacing['3xl'] : theme.spacing.md,
-                paddingVertical: theme.spacing.sm,
-                height: 36,
-                fontSize: theme.fontSize.sm,
-                color: theme.inputText,
-                backgroundColor: theme.inputBackground,
-              }}
-              placeholder="Search any playlist..."
-              placeholderTextColor={theme.inputPlaceholder}
-              value={searchQuery || ''}
-              onChangeText={setSearchQuery}
-              returnKeyType="search"
-            />
-            {searchQuery && searchQuery.length > 0 && (
-              <TouchableOpacity
-                onPress={() => {
-                  setSearchQuery('');
-                }}
-                style={{ position: 'absolute', right: theme.spacing.sm, padding: theme.spacing.xs }}
-              >
-                <Ionicons name="close-circle" size={16} color={theme.iconTertiary} />
-              </TouchableOpacity>
-            )}
-          </View>
-          
-          {/* Platform Selector */}
-          <PlatformSelector
-            selectedPlatform={selectedPlatform}
-            onPlatformChange={handlePlatformSelect}
-            connectedPlatforms={connectedPlatforms}
-            includeDevice={false}
-            includeBrowser={false}
-            buttonStyle={{
-              height: 36,
-              minWidth: 90,
-              paddingHorizontal: theme.spacing.md,
-              paddingVertical: theme.spacing.xs,
-              backgroundColor: theme.cardSecondary,
-              borderRadius: 8,
-            }}
-          />
-        </View>
-
-        {/* Playlists */}
-        <View style={{ minHeight: 80 }}>
-        {displayLoading ? (
-          <View style={{ 
-            height: 80,
-            paddingVertical: theme.spacing.md, 
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            <ActivityIndicator size="small" color={theme.textSecondary} />
-          </View>
-        ) : displayPlaylists.length > 0 ? (
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
-            contentContainerStyle={{ gap: theme.spacing.sm, paddingRight: theme.spacing.xs }}
-            style={{ minHeight: 80 }}
-          >
-            {displayPlaylists.map((playlist) => {
-              const isSelected = selectedPlaylistId === playlist.id;
-              return (
-                <DraggablePlaylistItem
-                  key={playlist.id}
-                  playlist={playlist}
-                  isSelected={isSelected}
-                  onSelect={() => handlePlaylistSelect(playlist.id)}
-                  theme={theme}
-                />
-              );
-            })}
-          </ScrollView>
-        ) : (
-          <View style={{ 
-            height: 80,
-            padding: theme.spacing.lg, 
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: theme.cardSecondary, 
-            borderRadius: 8 
-          }}>
-            <Ionicons name="musical-notes-outline" size={24} color={theme.iconTertiary} />
-            <Text style={{ color: theme.textSecondary, marginTop: 6, textAlign: 'center', fontSize: theme.fontSize.sm }}>
-              {connectedPlatforms?.spotify?.connected
-                ? searchQuery && searchQuery.trim().length >= 3
-                  ? 'No playlists found' 
-                  : 'No playlists found'
-                : 'Connect a platform to see your playlists'}
+          }}
+        >
+          <Artwork size={42} icon="albums-outline" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: theme.text, fontSize: 13, fontWeight: '500' }}>
+              Spotify playlists
+            </Text>
+            <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 4 }}>
+              Connect to browse and shuffle
             </Text>
           </View>
-        )}
-      </View>
-
-        {/* Shuffle Buttons - Show when playlist is selected */}
-        {selectedPlaylist && (
-          <View style={{ 
-            flexDirection: 'row', 
-            gap: theme.spacing.sm, 
-            marginTop: theme.spacing.md,
-          }}>
-            <TouchableOpacity
-              onPress={handleShuffleWork}
-              style={{
-                flex: 1,
-                paddingVertical: theme.spacing.sm,
-                paddingHorizontal: theme.spacing.md,
-                backgroundColor: theme.cardSecondary,
-                borderRadius: 8,
-                alignItems: 'center',
-              }}
-            >
-              <Text style={{ fontSize: theme.fontSize.xs, color: theme.textSecondary }}>
-                Shuffle for Work
-              </Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              onPress={handleShuffleRest}
-              style={{
-                flex: 1,
-                paddingVertical: theme.spacing.sm,
-                paddingHorizontal: theme.spacing.md,
-                backgroundColor: theme.cardSecondary,
-                borderRadius: 8,
-                alignItems: 'center',
-              }}
-            >
-              <Text style={{ fontSize: theme.fontSize.xs, color: theme.textSecondary }}>
-                Shuffle for Rest
-              </Text>
-            </TouchableOpacity>
+          <Pressable onPress={onConnect} disabled={connecting} accessibilityRole="button">
+            <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>
+              {connecting ? 'Connecting…' : 'Connect'}
+            </Text>
+          </Pressable>
+        </Surface>
+      ) : (
+        <>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <SearchField
+                compact
+                value={query}
+                onChange={setQuery}
+                placeholder="Search playlists"
+              />
+            </View>
+            <View style={{ flexDirection: 'row' }}>
+              {['work', 'rest'].map((value) => (
+                <Pressable
+                  key={value}
+                  onPress={() => {
+                    setPhase(value);
+                    setFeedback('');
+                  }}
+                  disabled={!!busy}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Assign playlist to ${value} rounds`}
+                  accessibilityState={{ selected: phase === value, disabled: !!busy }}
+                  style={{ minHeight: 44, width: 46, justifyContent: 'center' }}
+                >
+                  <View
+                    style={{
+                      alignItems: 'center',
+                      paddingVertical: 8,
+                      borderRadius: 10,
+                      backgroundColor: phase === value ? theme.cardSecondary : 'transparent',
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: phase === value ? theme.accent : theme.textSecondary,
+                        fontSize: 12,
+                        fontWeight: '600',
+                      }}
+                    >
+                      {value === 'work' ? 'Work' : 'Rest'}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+            </View>
           </View>
-        )}
-      </View>
-    </>
-  );
-
-  // If embedded, return content without container
-  if (embedded) {
-    return content;
-  }
-
-  // Standalone mode with container
-  return (
-    <View style={screenStyles.card}>
-      {content}
-    </View>
-  );
-};
-
-// Playlist Item Component
-const DraggablePlaylistItem = ({ playlist, isSelected, onSelect, theme: themeProp }) => {
-  const { theme } = useTheme();
-  const effectiveTheme = themeProp || theme;
-  
-  return (
-    <View style={{ width: 48, alignItems: 'center' }}>
-      <TouchableOpacity
-        onPress={onSelect}
-        style={{
-          position: 'relative',
-          borderRadius: 4,
-          marginBottom: effectiveTheme.spacing.xs,
-          borderWidth: isSelected ? 1 : 0,
-          borderColor: isSelected ? effectiveTheme.textTertiary : 'transparent',
-          padding: 0,
-        }}
-      >
-          {playlist.image ? (
-            <Image 
-              source={{ uri: playlist.image }} 
-              style={{ width: 48, height: 48, borderRadius: 4 }} 
+          {!list.length ? (
+            <PickerState
+              loading={loading}
+              error={error}
+              title={query ? 'No playlists found' : 'Your Spotify playlists will appear here.'}
+              onRetry={
+                error
+                  ? () =>
+                      query
+                        ? music.searchMusic(query, 'spotify', ['playlist'])
+                        : music.loadPlaylists('spotify')
+                  : undefined
+              }
             />
           ) : (
-            <View style={{
-              width: 48,
-              height: 48,
-              borderRadius: 4,
-              backgroundColor: effectiveTheme.cardSecondary,
-              borderWidth: 1,
-              borderColor: effectiveTheme.borderDark,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <Ionicons name="musical-notes" size={16} color={effectiveTheme.iconTertiary} />
-            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={176}
+              decelerationRate="fast"
+              contentContainerStyle={{ gap: 8, paddingVertical: 2, paddingRight: 10 }}
+            >
+              {list.map((playlist) => (
+                <Surface
+                  variant="card"
+                  key={playlist.id}
+                  style={{
+                    width: 168,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 4,
+                    padding: 6,
+                    borderRadius: 14,
+                    backgroundColor: theme.card,
+                  }}
+                >
+                  <Pressable
+                    onPress={() => open(playlist)}
+                    disabled={!!busy}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View ${playlist.name} tracks`}
+                    style={{
+                      flex: 1,
+                      minHeight: 44,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 7,
+                    }}
+                  >
+                    <Artwork item={playlist} size={28} icon="albums-outline" />
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        numberOfLines={2}
+                        style={{
+                          color: theme.text,
+                          fontSize: 12,
+                          fontWeight: '600',
+                          lineHeight: 16,
+                        }}
+                      >
+                        {playlist.name}
+                      </Text>
+                    </View>
+                  </Pressable>
+                  <ShuffleAction
+                    accessibilityLabel={`Shuffle ${playlist.name} into ${phase} rounds`}
+                    onPress={() => shuffle(playlist)}
+                    loading={busy === playlist.id}
+                    disabled={!!busy || (phase === 'rest' && roundsOrder.length < 2)}
+                  />
+                </Surface>
+              ))}
+            </ScrollView>
           )}
-          {isSelected && (
-            <View style={{
-              position: 'absolute',
-              top: 2,
-              right: 2,
-              width: 14,
-              height: 14,
-              borderRadius: 7,
-              backgroundColor: effectiveTheme.isDark ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.6)',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <Ionicons name="checkmark" size={9} color={effectiveTheme.textInverse} />
-            </View>
+          {!!error && list.length > 0 && (
+            <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 8 }}>
+              Could not update playlists. Retrying automatically.
+            </Text>
           )}
-        </TouchableOpacity>
-        <View style={{ 
-          height: 28,
-          justifyContent: 'center',
-          alignItems: 'center',
-        }}>
-          <Text 
-            style={{ 
-              fontSize: effectiveTheme.fontSize.xs, 
-              fontWeight: effectiveTheme.fontWeight.semibold, 
-              color: effectiveTheme.text,
-              textAlign: 'center',
-              lineHeight: 14,
-            }} 
-            numberOfLines={2}
-          >
-            {playlist.name}
-          </Text>
+          {phase === 'rest' && roundsOrder.length < 2 && (
+            <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 9 }}>
+              Add a second round to use rest music.
+            </Text>
+          )}
+          {!!feedback && (
+            <Text
+              accessibilityLiveRegion="polite"
+              style={{ color: theme.accent, fontSize: 11, lineHeight: 16, marginTop: 10 }}
+            >
+              {feedback}
+            </Text>
+          )}
+        </>
+      )}
+      <Sheet visible={!!detail} title={detail?.name || 'Playlist'} onClose={() => setDetail(null)}>
+        <ScrollView style={{ maxHeight: 320 }}>
+          {music.loadingPlaylistTracks || music.tracksError || !music.playlistTracks.length ? (
+            <PickerState
+              loading={music.loadingPlaylistTracks}
+              error={music.tracksError}
+              title="No playable tracks"
+              onRetry={
+                music.tracksError ? () => music.loadPlaylistTracks(detail.id, 'spotify') : undefined
+              }
+            />
+          ) : (
+            music.playlistTracks.map((track, index) => (
+              <MusicRow
+                key={`${track.id}-${index}`}
+                item={track}
+                disabled
+                actionIcon="musical-note"
+              />
+            ))
+          )}
+        </ScrollView>
+        <View style={{ marginTop: 12, alignItems: 'flex-end' }}>
+          <ShuffleAction
+            label={`Shuffle for ${phase}`}
+            onPress={() => shuffle(detail)}
+            loading={!!busy}
+            disabled={!music.playlistTracks.length || (phase === 'rest' && roundsOrder.length < 2)}
+          />
+          {!!feedback && (
+            <Text style={{ color: theme.accent, fontSize: 12, marginTop: 12 }}>{feedback}</Text>
+          )}
         </View>
+      </Sheet>
     </View>
   );
 };

@@ -9,7 +9,6 @@
 
 export const ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS = 60;
 export const DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 3600;
-const MIN_SAFE_TTL_SECONDS = 60;
 
 /**
  * Convert an OAuth `expires_in` (seconds-from-now) value into a UTC millis
@@ -17,16 +16,15 @@ const MIN_SAFE_TTL_SECONDS = 60;
  *
  * - Falls back to a 1h TTL when the input is missing/invalid.
  * - Subtracts a buffer so we refresh before the real expiry hits.
- * - Floors at MIN_SAFE_TTL_SECONDS so a degenerate `expires_in` (e.g. 30s)
- *   still leaves the app a usable window.
+ * - A token shorter than the safety buffer is immediately due for refresh.
  */
-export const computeAccessTokenExpiresAt = (expiresInSeconds) => {
+export const computeAccessTokenExpiresAt = (expiresInSeconds, now = Date.now()) => {
   const ttl =
     typeof expiresInSeconds === 'number' &&
     Number.isFinite(expiresInSeconds) &&
     expiresInSeconds > 0
       ? expiresInSeconds
       : DEFAULT_ACCESS_TOKEN_TTL_SECONDS;
-  const safeTtl = Math.max(ttl - ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS, MIN_SAFE_TTL_SECONDS);
-  return Date.now() + safeTtl * 1000;
+  const safeTtl = Math.max(ttl - ACCESS_TOKEN_EXPIRY_BUFFER_SECONDS, 0);
+  return now + safeTtl * 1000;
 };

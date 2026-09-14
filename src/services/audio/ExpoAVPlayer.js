@@ -2,7 +2,7 @@ import { Audio } from 'expo-av';
 
 /**
  * ExpoAVPlayer - Reusable Expo AV Audio Player
- * 
+ *
  * Platform-agnostic audio player using Expo AV.
  * Can be used by any service that needs to play audio files:
  * - Device local files
@@ -25,7 +25,7 @@ class ExpoAVPlayer {
    */
   async initialize() {
     if (this.isInitialized) return;
-    
+
     try {
       await Audio.setAudioModeAsync({
         playsInSilentModeIOS: true,
@@ -59,10 +59,10 @@ class ExpoAVPlayer {
       // Load and play new track
       const { sound } = await Audio.Sound.createAsync(
         { uri },
-        { 
+        {
           shouldPlay: options.shouldPlay !== false,
           positionMillis: options.positionMs || 0,
-        }
+        },
       );
 
       this.sound = sound;
@@ -163,13 +163,13 @@ class ExpoAVPlayer {
       }
 
       const status = await this.sound.getStatusAsync();
-      
+
       if (status.isLoaded) {
         return {
           item: {
+            uri: this.currentTrack?.uri,
             name: this.currentTrack?.name || 'Audio Track',
             artist: this.currentTrack?.artist || 'Unknown Artist',
-            album: this.currentTrack?.album || 'Unknown Album',
             duration_ms: status.durationMillis || 0,
             album: {
               name: this.currentTrack?.album || 'Unknown Album',
@@ -177,7 +177,7 @@ class ExpoAVPlayer {
             },
           },
           progress_ms: status.positionMillis || 0,
-          is_playing: status.isPlaying,
+          is_playing: status.isPlaying && !status.isBuffering,
         };
       }
 
@@ -242,17 +242,17 @@ class ExpoAVPlayer {
   _handleStatusUpdate(status) {
     if (status.isLoaded) {
       this.isPlaying = status.isPlaying;
-      
+
       if (this.onStatusUpdate) {
         this.onStatusUpdate({
           item: {
+            uri: this.currentTrack?.uri,
             name: this.currentTrack?.name || 'Audio Track',
             artist: this.currentTrack?.artist || 'Unknown Artist',
-            album: this.currentTrack?.album || 'Unknown Album',
             duration_ms: status.durationMillis || 0,
           },
           progress_ms: status.positionMillis || 0,
-          is_playing: status.isPlaying,
+          is_playing: status.isPlaying && !status.isBuffering,
         });
       }
     }
@@ -295,4 +295,3 @@ class ExpoAVPlayer {
 }
 
 export default ExpoAVPlayer;
-

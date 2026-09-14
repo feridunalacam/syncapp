@@ -11,7 +11,8 @@ export const PlatformSelector = ({
   connectedPlatforms = {},
   includeDevice = true,
   includeBrowser = false,
-  includeVoices = false, // New prop for countdown sounds
+  includeVoices = false,
+  includeStreaming = true, // New prop for countdown sounds
   style,
   buttonStyle,
 }) => {
@@ -21,31 +22,33 @@ export const PlatformSelector = ({
 
   // Build available platforms list
   const availablePlatforms = [
-    ...(includeVoices 
+    ...(includeVoices
       ? [{ id: 'voices', name: 'Default Voices', icon: 'megaphone-outline', color: theme.accent }]
-      : []
-    ),
-    ...(includeDevice 
-      ? [{ id: 'device', name: 'Device', icon: 'phone-portrait-outline', color: theme.textSecondary }]
-      : []
-    ),
-    ...(includeBrowser 
+      : []),
+    ...(includeDevice
+      ? [
+          {
+            id: 'device',
+            name: 'Device',
+            icon: 'phone-portrait-outline',
+            color: theme.textSecondary,
+          },
+        ]
+      : []),
+    ...(includeBrowser
       ? [{ id: 'browser', name: 'Browser', icon: 'globe-outline', color: theme.textSecondary }]
-      : []
-    ),
-    ...(connectedPlatforms?.spotify?.connected 
-      ? [PLATFORMS.spotify] 
-      : []
-    ),
+      : []),
+    ...(includeStreaming && connectedPlatforms?.spotify?.connected ? [PLATFORMS.spotify] : []),
   ];
 
-  const currentPlatform = selectedPlatform === 'device' 
-    ? { id: 'device', name: 'Device', icon: 'phone-portrait-outline', color: theme.textSecondary }
-    : selectedPlatform === 'browser'
-    ? { id: 'browser', name: 'Browser', icon: 'globe-outline', color: theme.textSecondary }
-    : selectedPlatform === 'voices'
-    ? { id: 'voices', name: 'Default Voices', icon: 'megaphone-outline', color: theme.accent }
-    : PLATFORMS[selectedPlatform];
+  const currentPlatform =
+    selectedPlatform === 'device'
+      ? { id: 'device', name: 'Device', icon: 'phone-portrait-outline', color: theme.textSecondary }
+      : selectedPlatform === 'browser'
+        ? { id: 'browser', name: 'Browser', icon: 'globe-outline', color: theme.textSecondary }
+        : selectedPlatform === 'voices'
+          ? { id: 'voices', name: 'Default Voices', icon: 'megaphone-outline', color: theme.accent }
+          : PLATFORMS[selectedPlatform];
 
   const handlePlatformSelect = (platformId) => {
     setShowPlatformDropdown(false);
@@ -69,19 +72,17 @@ export const PlatformSelector = ({
             <SpotifyLogo iconSize={14} size={10} showText={false} style={{ gap: 0 }} />
           </View>
         ) : (
-          <Ionicons 
-            name={currentPlatform?.icon || 'musical-notes'} 
-            size={16} 
-            color={currentPlatform?.color || '#6b7280'} 
+          <Ionicons
+            name={currentPlatform?.icon || 'musical-notes'}
+            size={16}
+            color={currentPlatform?.color || '#6b7280'}
           />
         )}
-        <Text style={styles.platformSelectorText}>
-          {currentPlatform?.name || 'Device'}
-        </Text>
-        <Ionicons 
-          name={showPlatformDropdown ? "chevron-up" : "chevron-down"} 
-          size={12} 
-          color="#6b7280" 
+        <Text style={styles.platformSelectorText}>{currentPlatform?.name || 'Device'}</Text>
+        <Ionicons
+          name={showPlatformDropdown ? 'chevron-up' : 'chevron-down'}
+          size={12}
+          color="#6b7280"
         />
       </TouchableOpacity>
 
@@ -94,7 +95,7 @@ export const PlatformSelector = ({
               style={[
                 styles.platformDropdownItem,
                 selectedPlatform === platform.id && styles.platformDropdownItemSelected,
-                index === availablePlatforms.length - 1 && styles.platformDropdownItemLast
+                index === availablePlatforms.length - 1 && styles.platformDropdownItemLast,
               ]}
             >
               {platform.id === 'spotify' ? (
@@ -102,16 +103,14 @@ export const PlatformSelector = ({
                   <SpotifyLogo iconSize={16} size={12} showText={false} style={{ gap: 0 }} />
                 </View>
               ) : (
-                <Ionicons 
-                  name={platform.icon} 
-                  size={16} 
-                  color={platform.color || '#6b7280'} 
-                />
+                <Ionicons name={platform.icon} size={16} color={platform.color || '#6b7280'} />
               )}
-              <Text style={[
-                styles.platformDropdownText,
-                selectedPlatform === platform.id && styles.platformDropdownTextSelected
-              ]}>
+              <Text
+                style={[
+                  styles.platformDropdownText,
+                  selectedPlatform === platform.id && styles.platformDropdownTextSelected,
+                ]}
+              >
                 {platform.name}
               </Text>
               {selectedPlatform === platform.id && (
@@ -125,69 +124,69 @@ export const PlatformSelector = ({
   );
 };
 
-const createStyles = (theme) => StyleSheet.create({
-  container: {
-    position: 'relative',
-  },
-  platformSelectorButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.xs,
-    paddingHorizontal: theme.spacing.sm,
-    paddingVertical: theme.spacing.sm,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 6,
-    backgroundColor: theme.card,
-    minHeight: 32,
-  },
-  platformSelectorText: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.text,
-  },
-  spotifyIconContainer: {
-    width: 14,
-    height: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  platformDropdown: {
-    position: 'absolute',
-    top: 32,
-    right: 0,
-    backgroundColor: theme.modalBackground,
-    borderWidth: 1,
-    borderColor: theme.border,
-    borderRadius: 8,
-    minWidth: 140,
-    zIndex: 1000,
-    ...theme.shadow.md,
-  },
-  platformDropdownItem: {
-    paddingHorizontal: theme.spacing.md,
-    paddingVertical: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.borderLight,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: theme.spacing.sm,
-    backgroundColor: theme.card,
-  },
-  platformDropdownItemLast: {
-    borderBottomWidth: 0,
-  },
-  platformDropdownItemSelected: {
-    backgroundColor: theme.cardSecondary,
-  },
-  platformDropdownText: {
-    fontSize: theme.fontSize.sm,
-    fontWeight: theme.fontWeight.medium,
-    color: theme.text,
-    flex: 1,
-  },
-  platformDropdownTextSelected: {
-    fontWeight: theme.fontWeight.semibold,
-  },
-});
-
+const createStyles = (theme) =>
+  StyleSheet.create({
+    container: {
+      position: 'relative',
+    },
+    platformSelectorButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.xs,
+      paddingHorizontal: theme.spacing.sm,
+      paddingVertical: theme.spacing.sm,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 6,
+      backgroundColor: theme.card,
+      minHeight: 32,
+    },
+    platformSelectorText: {
+      fontSize: theme.fontSize.sm,
+      fontWeight: theme.fontWeight.medium,
+      color: theme.text,
+    },
+    spotifyIconContainer: {
+      width: 14,
+      height: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    platformDropdown: {
+      position: 'absolute',
+      top: 32,
+      right: 0,
+      backgroundColor: theme.modalBackground,
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: 8,
+      minWidth: 140,
+      zIndex: 1000,
+      ...theme.shadow.md,
+    },
+    platformDropdownItem: {
+      paddingHorizontal: theme.spacing.md,
+      paddingVertical: theme.spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: theme.borderLight,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: theme.spacing.sm,
+      backgroundColor: theme.card,
+    },
+    platformDropdownItemLast: {
+      borderBottomWidth: 0,
+    },
+    platformDropdownItemSelected: {
+      backgroundColor: theme.cardSecondary,
+    },
+    platformDropdownText: {
+      fontSize: theme.fontSize.sm,
+      fontWeight: theme.fontWeight.medium,
+      color: theme.text,
+      flex: 1,
+    },
+    platformDropdownTextSelected: {
+      fontWeight: theme.fontWeight.semibold,
+    },
+  });

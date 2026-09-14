@@ -1,3 +1,4 @@
+import { CUE_SOUND_OPTIONS } from '../../../../services/alerts/assets';
 /**
  * Constants used by the music search modal and its sub-hooks.
  *
@@ -38,30 +39,9 @@ export const BOOKMARK_SITES = [
 
 export const DEFAULT_BROWSER_URL = 'https://mixkit.co/free-sound-effects/';
 
-/**
- * Built-in countdown voice / sound presets. These are referenced by the
- * voices "platform" and resolved by `countdownSoundPlayer` to bundled assets.
- */
-export const DEFAULT_VOICES = [
-  // Beeps & Tones
-  { id: 'beep_short', name: 'Quick Beep', type: 'voice', platform: 'voices', uri: 'voices://beep_short', duration: 1 },
-  { id: 'beep_long', name: 'Long Beep', type: 'voice', platform: 'voices', uri: 'voices://beep_long', duration: 2 },
-  { id: 'tone_high', name: 'High Tone', type: 'voice', platform: 'voices', uri: 'voices://tone_high', duration: 1 },
-  { id: 'tone_low', name: 'Low Tone', type: 'voice', platform: 'voices', uri: 'voices://tone_low', duration: 1 },
-  // Bells
-  { id: 'bell', name: 'Bell Ding', type: 'voice', platform: 'voices', uri: 'voices://bell', duration: 1 },
-  { id: 'gong', name: 'Gong', type: 'voice', platform: 'voices', uri: 'voices://gong', duration: 2 },
-  { id: 'boxing_bell', name: 'Boxing Bell', type: 'voice', platform: 'voices', uri: 'voices://boxing_bell', duration: 1 },
-  // Alarms
-  { id: 'whistle', name: 'Whistle', type: 'voice', platform: 'voices', uri: 'voices://whistle', duration: 1 },
-  { id: 'buzzer', name: 'Buzzer', type: 'voice', platform: 'voices', uri: 'voices://buzzer', duration: 1 },
-  { id: 'air_horn', name: 'Air Horn', type: 'voice', platform: 'voices', uri: 'voices://air_horn', duration: 2 },
-  // Countdown signals
-  { id: 'countdown_321', name: 'Countdown Beeps', type: 'voice', platform: 'voices', uri: 'voices://countdown_321', duration: 4 },
-  { id: 'countdown_go', name: 'Start Signal', type: 'voice', platform: 'voices', uri: 'voices://countdown_go', duration: 1 },
-  { id: 'countdown_start', name: 'Ready Signal', type: 'voice', platform: 'voices', uri: 'voices://countdown_start', duration: 2 },
-  { id: 'success', name: 'Success Chime', type: 'voice', platform: 'voices', uri: 'voices://success', duration: 1 },
-];
+// New selections use the verified, distinct effect files. Existing routine URIs
+// still resolve through the legacy player without relabeling old recordings.
+export const DEFAULT_VOICES = CUE_SOUND_OPTIONS.map((sound) => ({ ...sound, type: 'voice' }));
 
 /**
  * Browser-injected JS that scans the current page for downloadable audio /

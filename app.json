@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "scheme": "syncapp",
     "splash": {
@@ -18,7 +18,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.syncapp.app"
+      "bundleIdentifier": "com.feridun.syncapp"
     },
     "android": {
       "adaptiveIcon": {
@@ -54,7 +54,9 @@
           "photosPermission": "The app accesses your photos to let you set your profile picture.",
           "cameraPermission": "The app accesses your camera to let you take a photo for your profile picture."
         }
-      ]
+      ],
+      "expo-video",
+      "expo-secure-store"
     ]
   }
 }

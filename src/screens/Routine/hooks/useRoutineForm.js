@@ -1,5 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Alert } from 'react-native';
+import { validateRoutine, normalizeRoutine } from '../../../domain/routines';
+import { normalizeAlertConfig } from '../../../domain/alerts';
 
 const ROUTINE_NAME_MAX_LENGTH = 60;
 
@@ -20,19 +22,14 @@ const validateRoutineName = (rawName) => {
 /**
  * Custom hook for managing routine form state and handlers
  * Extracts all state management logic from CreateRoutineScreen
- * 
+ *
  * @param {Object} params
  * @param {Object|null} params.templateRoutine - Existing routine to edit (or null for new)
  * @param {Function} params.addRoutine - Context function to add new routine
  * @param {Function} params.updateRoutine - Context function to update existing routine
  * @param {Function} params.onSave - Callback after successful save
  */
-export const useRoutineForm = ({ 
-  templateRoutine, 
-  addRoutine, 
-  updateRoutine, 
-  onSave 
-}) => {
+export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onSave }) => {
   const playlistStateRef = useRef({ work: {}, rest: {} });
   const templateRoutineIdRef = useRef(templateRoutine?.id);
 
@@ -54,18 +51,18 @@ export const useRoutineForm = ({
         roundRestPlaylists: {},
       };
     }
-    
+
     const workSongs = {};
     const restSongs = {};
     const workSecs = {};
     const restSecs = {};
     const workPlaylists = {};
     const restPlaylists = {};
-    
+
     if (templateRoutine.roundsData && Array.isArray(templateRoutine.roundsData)) {
       templateRoutine.roundsData.forEach((round) => {
         const roundNum = round.roundNumber;
-        
+
         // Work music: Song has priority over playlist
         if (round.workSong) {
           workSongs[roundNum] = round.workSong;
@@ -78,7 +75,7 @@ export const useRoutineForm = ({
             platform: round.workPlaylistPlatform || null,
           };
         }
-        
+
         // Rest music: Song has priority over playlist
         if (round.restSong) {
           restSongs[roundNum] = round.restSong;
@@ -91,28 +88,32 @@ export const useRoutineForm = ({
             platform: round.restPlaylistPlatform || null,
           };
         }
-        
+
         if (round.workSec !== undefined) workSecs[roundNum] = String(round.workSec);
         if (round.restSec !== undefined) restSecs[roundNum] = String(round.restSec);
       });
     }
-    
+
     const numRounds = templateRoutine.rounds || 1;
     const roundsOrder = Array.from({ length: numRounds }, (_, i) => i + 1);
-    
+
     // If templateRoutine has an ID, it means we're editing an existing routine
     const isEditing = !!templateRoutine.id;
-    const routineName = templateRoutine.name 
-      ? (isEditing ? templateRoutine.name : `${templateRoutine.name} (Copy)`)
+    const routineName = templateRoutine.name
+      ? isEditing
+        ? templateRoutine.name
+        : `${templateRoutine.name} (Copy)`
       : '';
-    
+
     return {
       name: routineName,
       numberOfRounds: String(numRounds),
       roundsOrder,
-      workSec: String(templateRoutine.workSec || 60),
-      restSec: String(templateRoutine.restSec || 30),
-      totalDurationMin: templateRoutine.targetDurationMin ? String(templateRoutine.targetDurationMin) : '',
+      workSec: String(templateRoutine.workSec ?? 60),
+      restSec: String(templateRoutine.restSec ?? 30),
+      totalDurationMin: templateRoutine.targetDurationMin
+        ? String(templateRoutine.targetDurationMin)
+        : '',
       roundWorkSecs: workSecs,
       roundRestSecs: restSecs,
       roundWorkSongs: workSongs,
@@ -128,17 +129,20 @@ export const useRoutineForm = ({
 
   // Wrap the name setter so the inline error clears as soon as the user
   // starts fixing the input.
-  const setName = useCallback((next) => {
-    setNameRaw(next);
-    if (nameError) setNameError(null);
-  }, [nameError]);
+  const setName = useCallback(
+    (next) => {
+      setNameRaw(next);
+      if (nameError) setNameError(null);
+    },
+    [nameError],
+  );
 
   const [numberOfRounds, setNumberOfRounds] = useState(initialValues.numberOfRounds);
   const [roundsOrder, setRoundsOrder] = useState(initialValues.roundsOrder);
   const [workSec, setWorkSec] = useState(initialValues.workSec);
   const [restSec, setRestSec] = useState(initialValues.restSec);
   const [totalDurationMin, setTotalDurationMin] = useState(initialValues.totalDurationMin);
-  
+
   // Per-round state
   const [roundWorkSecs, setRoundWorkSecs] = useState(initialValues.roundWorkSecs);
   const [roundRestSecs, setRoundRestSecs] = useState(initialValues.roundRestSecs);
@@ -146,17 +150,25 @@ export const useRoutineForm = ({
   const [roundRestSongs, setRoundRestSongs] = useState(initialValues.roundRestSongs);
   const [roundWorkPlaylists, setRoundWorkPlaylists] = useState(initialValues.roundWorkPlaylists);
   const [roundRestPlaylists, setRoundRestPlaylists] = useState(initialValues.roundRestPlaylists);
-  
+
   // Playlist IDs for shuffle. Hydrate from template so editing an existing
   // routine doesn't silently drop its attached playlists.
-  const [workoutPlaylistId, setWorkoutPlaylistId] = useState(templateRoutine?.workoutPlaylistId ?? null);
+  const [workoutPlaylistId, setWorkoutPlaylistId] = useState(
+    templateRoutine?.workoutPlaylistId ?? null,
+  );
   const [restPlaylistId, setRestPlaylistId] = useState(templateRoutine?.restPlaylistId ?? null);
-  
+
   // Advanced Settings State
+  // Null keeps existing routines on their legacy alerts until the user opts in.
+  const [audioAlerts, setAudioAlerts] = useState(templateRoutine?.audioAlerts ?? null);
   const [restVolume, setRestVolume] = useState(templateRoutine?.restVolume ?? 100);
   // Before Start countdown - has duration
-  const [countdownBeforeStartSec, setCountdownBeforeStartSec] = useState(templateRoutine?.countdownBeforeStartDuration ?? 0);
-  const [countdownBeforeStartSound, setCountdownBeforeStartSound] = useState(templateRoutine?.countdownBeforeStartSound ?? null);
+  const [countdownBeforeStartSec, setCountdownBeforeStartSec] = useState(
+    templateRoutine?.countdownBeforeStartDuration ?? 0,
+  );
+  const [countdownBeforeStartSound, setCountdownBeforeStartSound] = useState(
+    templateRoutine?.countdownBeforeStartSound ?? null,
+  );
   // Phase transition sounds - just sound, no duration (sound plays at transition, overlays music)
   const [endWorkSound, setEndWorkSound] = useState(templateRoutine?.endWorkSound ?? null);
   const [endRestSound, setEndRestSound] = useState(templateRoutine?.endRestSound ?? null);
@@ -165,67 +177,90 @@ export const useRoutineForm = ({
   useEffect(() => {
     playlistStateRef.current.work = roundWorkPlaylists;
   }, [roundWorkPlaylists]);
-  
+
   useEffect(() => {
     playlistStateRef.current.rest = roundRestPlaylists;
   }, [roundRestPlaylists]);
-  
-  // Update from template when template ID changes
+
+  // A reused editor must load the entire newly selected routine.
   useEffect(() => {
-    if (templateRoutine?.id && templateRoutineIdRef.current !== templateRoutine.id) {
-      templateRoutineIdRef.current = templateRoutine.id;
-      if (Object.keys(playlistStateRef.current.work).length === 0) {
-        setRoundWorkPlaylists(initialValues.roundWorkPlaylists);
-      }
-      if (Object.keys(playlistStateRef.current.rest).length === 0) {
-        setRoundRestPlaylists(initialValues.roundRestPlaylists);
-      }
-    }
-  }, [templateRoutine?.id, initialValues.roundWorkPlaylists, initialValues.roundRestPlaylists]);
+    if (templateRoutineIdRef.current === templateRoutine?.id) return;
+    templateRoutineIdRef.current = templateRoutine?.id;
+    setNameRaw(initialValues.name);
+    setNameError(null);
+    setNumberOfRounds(initialValues.numberOfRounds);
+    setRoundsOrder(initialValues.roundsOrder);
+    setWorkSec(initialValues.workSec);
+    setRestSec(initialValues.restSec);
+    setTotalDurationMin(initialValues.totalDurationMin);
+    setRoundWorkSecs(initialValues.roundWorkSecs);
+    setRoundRestSecs(initialValues.roundRestSecs);
+    setRoundWorkSongs(initialValues.roundWorkSongs);
+    setRoundRestSongs(initialValues.roundRestSongs);
+    setRoundWorkPlaylists(initialValues.roundWorkPlaylists);
+    setRoundRestPlaylists(initialValues.roundRestPlaylists);
+    setWorkoutPlaylistId(templateRoutine?.workoutPlaylistId ?? null);
+    setRestPlaylistId(templateRoutine?.restPlaylistId ?? null);
+    setAudioAlerts(templateRoutine?.audioAlerts ?? null);
+    setRestVolume(templateRoutine?.restVolume ?? 100);
+    setCountdownBeforeStartSec(templateRoutine?.countdownBeforeStartDuration ?? 0);
+    setCountdownBeforeStartSound(templateRoutine?.countdownBeforeStartSound ?? null);
+    setEndWorkSound(templateRoutine?.endWorkSound ?? null);
+    setEndRestSound(templateRoutine?.endRestSound ?? null);
+  }, [templateRoutine, initialValues]);
+
+  const setGlobalWorkSec = useCallback((value) => {
+    setWorkSec(value);
+    setRoundWorkSecs({});
+  }, []);
+  const setGlobalRestSec = useCallback((value) => {
+    setRestSec(value);
+    setRoundRestSecs({});
+  }, []);
 
   // Handlers
   const attachSongToRound = useCallback((roundNum, song, type) => {
     const songWithPlatform = {
       ...song,
-      platform: song.platform || song.source || 'device'
+      platform: song.platform || song.source || 'device',
     };
-    
+
     if (type === 'work') {
-      setRoundWorkSongs(prev => ({ ...prev, [roundNum]: songWithPlatform }));
-      setRoundWorkPlaylists(prev => {
+      setRoundWorkSongs((prev) => ({ ...prev, [roundNum]: songWithPlatform }));
+      setRoundWorkPlaylists((prev) => {
         const newState = { ...prev };
         delete newState[roundNum];
         return newState;
       });
     } else {
-      setRoundRestSongs(prev => ({ ...prev, [roundNum]: songWithPlatform }));
-      setRoundRestPlaylists(prev => {
+      setRoundRestSongs((prev) => ({ ...prev, [roundNum]: songWithPlatform }));
+      setRoundRestPlaylists((prev) => {
         const newState = { ...prev };
         delete newState[roundNum];
         return newState;
       });
     }
   }, []);
-  
+
   const attachPlaylistToRound = useCallback((roundNum, playlist, type) => {
     const playlistData = {
       id: playlist.id,
       name: playlist.name,
       image: playlist.image || null,
       tracksCount: playlist.tracksCount || 0,
-      platform: playlist.platform || 'device'
+      platform: playlist.platform || 'device',
     };
 
     if (type === 'work') {
-      setRoundWorkPlaylists(prev => ({ ...prev, [roundNum]: playlistData }));
-      setRoundWorkSongs(prev => {
+      setRoundWorkPlaylists((prev) => ({ ...prev, [roundNum]: playlistData }));
+      setRoundWorkSongs((prev) => {
         const newState = { ...prev };
         delete newState[roundNum];
         return newState;
       });
     } else {
-      setRoundRestPlaylists(prev => ({ ...prev, [roundNum]: playlistData }));
-      setRoundRestSongs(prev => {
+      setRoundRestPlaylists((prev) => ({ ...prev, [roundNum]: playlistData }));
+      setRoundRestSongs((prev) => {
         const newState = { ...prev };
         delete newState[roundNum];
         return newState;
@@ -234,8 +269,9 @@ export const useRoutineForm = ({
   }, []);
 
   const handleAddRound = useCallback(() => {
+    if (roundsOrder.length >= 50) return;
     const newRoundNum = roundsOrder.length + 1;
-    setRoundsOrder(prev => [...prev, newRoundNum]);
+    setRoundsOrder((prev) => [...prev, newRoundNum]);
     setNumberOfRounds(String(newRoundNum));
   }, [roundsOrder.length]);
 
@@ -246,63 +282,68 @@ export const useRoutineForm = ({
     setRoundRestSongs({});
     setRoundWorkPlaylists({});
     setRoundRestPlaylists({});
+    setWorkoutPlaylistId(null);
+    setRestPlaylistId(null);
   }, []);
 
   const handleShuffleForWork = useCallback((playlist, roundSongs) => {
     if (!roundSongs) return;
-    setRoundWorkSongs(prev => ({ ...prev, ...roundSongs }));
+    setRoundWorkSongs((prev) => ({ ...prev, ...roundSongs }));
     setWorkoutPlaylistId(playlist.id);
   }, []);
 
   const handleShuffleForRest = useCallback((playlist, roundSongs) => {
     if (!roundSongs) return;
-    setRoundRestSongs(prev => ({ ...prev, ...roundSongs }));
+    setRoundRestSongs((prev) => ({ ...prev, ...roundSongs }));
     setRestPlaylistId(playlist.id);
   }, []);
 
-  const handleRemoveRound = useCallback((roundNum) => {
-    if (roundsOrder.length <= 1) {
-      Alert.alert('Cannot Remove', 'You must have at least one round.');
-      return;
-    }
-    
-    const remainingRounds = roundsOrder.filter(r => r !== roundNum);
-    const newOrder = remainingRounds.map((_, index) => index + 1);
-    setRoundsOrder(newOrder);
-    setNumberOfRounds(String(newOrder.length));
-    
-    // Build mapping from old to new round numbers
-    const oldToNewMap = {};
-    remainingRounds.forEach((oldNum, index) => {
-      oldToNewMap[oldNum] = index + 1;
-    });
-    
-    // Rebuild all state objects with new sequential keys
-    const rebuildState = (prev) => {
-      const newState = {};
-      remainingRounds.forEach(oldNum => {
-        if (prev[oldNum] !== undefined) {
-          newState[oldToNewMap[oldNum]] = prev[oldNum];
-        }
+  const handleRemoveRound = useCallback(
+    (roundNum) => {
+      if (roundsOrder.length <= 1) {
+        Alert.alert('Cannot Remove', 'You must have at least one round.');
+        return;
+      }
+
+      const remainingRounds = roundsOrder.filter((r) => r !== roundNum);
+      const newOrder = remainingRounds.map((_, index) => index + 1);
+      setRoundsOrder(newOrder);
+      setNumberOfRounds(String(newOrder.length));
+
+      // Build mapping from old to new round numbers
+      const oldToNewMap = {};
+      remainingRounds.forEach((oldNum, index) => {
+        oldToNewMap[oldNum] = index + 1;
       });
-      return newState;
-    };
-    
-    setRoundWorkSecs(rebuildState);
-    setRoundRestSecs(rebuildState);
-    setRoundWorkSongs(rebuildState);
-    setRoundRestSongs(rebuildState);
-    setRoundWorkPlaylists(rebuildState);
-    setRoundRestPlaylists(rebuildState);
-  }, [roundsOrder]);
+
+      // Rebuild all state objects with new sequential keys
+      const rebuildState = (prev) => {
+        const newState = {};
+        remainingRounds.forEach((oldNum) => {
+          if (prev[oldNum] !== undefined) {
+            newState[oldToNewMap[oldNum]] = prev[oldNum];
+          }
+        });
+        return newState;
+      };
+
+      setRoundWorkSecs(rebuildState);
+      setRoundRestSecs(rebuildState);
+      setRoundWorkSongs(rebuildState);
+      setRoundRestSongs(rebuildState);
+      setRoundWorkPlaylists(rebuildState);
+      setRoundRestPlaylists(rebuildState);
+    },
+    [roundsOrder],
+  );
 
   const handleRemoveWorkMusic = useCallback((roundNum) => {
-    setRoundWorkSongs(prev => {
+    setRoundWorkSongs((prev) => {
       const newState = { ...prev };
       delete newState[roundNum];
       return newState;
     });
-    setRoundWorkPlaylists(prev => {
+    setRoundWorkPlaylists((prev) => {
       const newState = { ...prev };
       delete newState[roundNum];
       return newState;
@@ -310,12 +351,12 @@ export const useRoutineForm = ({
   }, []);
 
   const handleRemoveRestMusic = useCallback((roundNum) => {
-    setRoundRestSongs(prev => {
+    setRoundRestSongs((prev) => {
       const newState = { ...prev };
       delete newState[roundNum];
       return newState;
     });
-    setRoundRestPlaylists(prev => {
+    setRoundRestPlaylists((prev) => {
       const newState = { ...prev };
       delete newState[roundNum];
       return newState;
@@ -335,25 +376,37 @@ export const useRoutineForm = ({
       return;
     }
     const trimmedName = name.trim();
-    
-    const roundsData = roundsOrder.slice(0, rounds).map(roundNum => ({
+
+    const roundsData = roundsOrder.slice(0, rounds).map((roundNum) => ({
       roundNumber: roundNum,
-      workSec: roundWorkSecs[roundNum] ? parseInt(roundWorkSecs[roundNum]) : parseInt(workSec),
-      restSec: roundRestSecs[roundNum] ? parseInt(roundRestSecs[roundNum]) : parseInt(restSec),
+      workSec:
+        roundWorkSecs[roundNum] !== undefined
+          ? parseInt(roundWorkSecs[roundNum])
+          : parseInt(workSec),
+      restSec:
+        roundRestSecs[roundNum] !== undefined
+          ? parseInt(roundRestSecs[roundNum])
+          : parseInt(restSec),
       workSong: roundWorkSongs[roundNum] || null,
       restSong: roundRestSongs[roundNum] || null,
       workPlaylistId: roundWorkPlaylists[roundNum]?.id || null,
       workPlaylistName: roundWorkPlaylists[roundNum]?.name || null,
-      workPlaylistImage: (roundWorkPlaylists[roundNum]?.image && roundWorkPlaylists[roundNum].image.trim() !== '') ? roundWorkPlaylists[roundNum].image : null,
+      workPlaylistImage:
+        roundWorkPlaylists[roundNum]?.image && roundWorkPlaylists[roundNum].image.trim() !== ''
+          ? roundWorkPlaylists[roundNum].image
+          : null,
       workPlaylistTracksCount: roundWorkPlaylists[roundNum]?.tracksCount || 0,
       workPlaylistPlatform: roundWorkPlaylists[roundNum]?.platform || null,
       restPlaylistId: roundRestPlaylists[roundNum]?.id || null,
       restPlaylistName: roundRestPlaylists[roundNum]?.name || null,
-      restPlaylistImage: (roundRestPlaylists[roundNum]?.image && roundRestPlaylists[roundNum].image.trim() !== '') ? roundRestPlaylists[roundNum].image : null,
+      restPlaylistImage:
+        roundRestPlaylists[roundNum]?.image && roundRestPlaylists[roundNum].image.trim() !== ''
+          ? roundRestPlaylists[roundNum].image
+          : null,
       restPlaylistTracksCount: roundRestPlaylists[roundNum]?.tracksCount || 0,
       restPlaylistPlatform: roundRestPlaylists[roundNum]?.platform || null,
     }));
-    
+
     const routineData = {
       name: trimmedName,
       rounds,
@@ -364,6 +417,7 @@ export const useRoutineForm = ({
       restPlaylistId: restPlaylistId || null,
       restVolume: restVolume,
       restVolumeEnabled: restVolume < 100,
+      audioAlerts: audioAlerts == null ? null : normalizeAlertConfig(audioAlerts),
       // Before Start countdown - has duration
       countdownBeforeStart: countdownBeforeStartSec > 0,
       countdownBeforeStartDuration: countdownBeforeStartSec,
@@ -371,66 +425,98 @@ export const useRoutineForm = ({
       // Phase transition sounds - just sound, plays at transition and overlays music
       endWorkSound: endWorkSound,
       endRestSound: endRestSound,
-      roundsData
+      roundsData,
     };
-    
-    // Debug: Log what we're saving
-    console.log('💾 Saving routine:', name);
-    console.log('💾 Advanced settings:', {
-      restVolume,
-      countdownBeforeStartSec,
-      countdownBeforeStartSound,
-      endWorkSound: endWorkSound?.name,
-      endRestSound: endRestSound?.name,
-    });
-    
+
+    const validation = validateRoutine(routineData);
+    if (validation) {
+      Alert.alert('Check routine', validation);
+      return;
+    }
+
     if (templateRoutine?.id) {
-      console.log('💾 Updating existing routine:', templateRoutine.id);
       updateRoutine({
-        ...routineData,
+        ...normalizeRoutine({ ...templateRoutine, ...routineData }),
         id: templateRoutine.id,
       });
     } else {
-      console.log('💾 Adding new routine');
-      addRoutine(routineData);
+      addRoutine(normalizeRoutine(routineData));
     }
-    
+
     if (onSave) onSave();
   }, [
-    name, numberOfRounds, roundsOrder, workSec, restSec, totalDurationMin,
-    roundWorkSecs, roundRestSecs, roundWorkSongs, roundRestSongs,
-    roundWorkPlaylists, roundRestPlaylists, workoutPlaylistId, restPlaylistId,
-    restVolume, countdownBeforeStartSec, countdownBeforeStartSound,
-    endWorkSound, endRestSound,
-    templateRoutine?.id, addRoutine, updateRoutine, onSave
+    name,
+    numberOfRounds,
+    roundsOrder,
+    workSec,
+    restSec,
+    totalDurationMin,
+    roundWorkSecs,
+    roundRestSecs,
+    roundWorkSongs,
+    roundRestSongs,
+    roundWorkPlaylists,
+    roundRestPlaylists,
+    workoutPlaylistId,
+    restPlaylistId,
+    restVolume,
+    audioAlerts,
+    countdownBeforeStartSec,
+    countdownBeforeStartSound,
+    endWorkSound,
+    endRestSound,
+    templateRoutine,
+    addRoutine,
+    updateRoutine,
+    onSave,
   ]);
 
   return {
     // Core state
-    name, setName,
-    nameError, setNameError,
-    numberOfRounds, setNumberOfRounds,
-    roundsOrder, setRoundsOrder,
-    workSec, setWorkSec,
-    restSec, setRestSec,
-    totalDurationMin, setTotalDurationMin,
-    
+    name,
+    setName,
+    nameError,
+    setNameError,
+    numberOfRounds,
+    setNumberOfRounds,
+    roundsOrder,
+    setRoundsOrder,
+    workSec,
+    setWorkSec: setGlobalWorkSec,
+    restSec,
+    setRestSec: setGlobalRestSec,
+    totalDurationMin,
+    setTotalDurationMin,
+
     // Per-round state
-    roundWorkSecs, setRoundWorkSecs,
-    roundRestSecs, setRoundRestSecs,
-    roundWorkSongs, setRoundWorkSongs,
-    roundRestSongs, setRoundRestSongs,
-    roundWorkPlaylists, setRoundWorkPlaylists,
-    roundRestPlaylists, setRoundRestPlaylists,
-    
+    roundWorkSecs,
+    setRoundWorkSecs,
+    roundRestSecs,
+    setRoundRestSecs,
+    roundWorkSongs,
+    setRoundWorkSongs,
+    roundRestSongs,
+    setRoundRestSongs,
+    roundWorkPlaylists,
+    setRoundWorkPlaylists,
+    roundRestPlaylists,
+    setRoundRestPlaylists,
+
     // Advanced settings
-    restVolume, setRestVolume,
-    countdownBeforeStartSec, setCountdownBeforeStartSec,
-    countdownBeforeStartSound, setCountdownBeforeStartSound,
+    audioAlerts,
+    setAudioAlerts,
+    restVolume,
+    setRestVolume,
+    countdownBeforeStartSec,
+    setCountdownBeforeStartSec,
+    countdownBeforeStartSound,
+    setCountdownBeforeStartSound,
     // Phase transition sounds
-    endWorkSound, setEndWorkSound,
-    endRestSound, setEndRestSound,
-    
+    endWorkSound,
+    setEndWorkSound,
+    endRestSound,
+    setEndRestSound,
+
     // Handlers
     attachSongToRound,
     attachPlaylistToRound,
@@ -444,4 +530,3 @@ export const useRoutineForm = ({
     handleSaveRoutine,
   };
 };
-

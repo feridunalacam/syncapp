@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { normalizeDetectedMedia } from '../../../../domain/musicLibrary';
 import { DEFAULT_BROWSER_URL } from './constants';
 
 /**
@@ -25,7 +26,7 @@ export const useMediaWebView = ({ active }) => {
     try {
       const message = JSON.parse(event.nativeEvent.data);
       if (message.type === 'media') {
-        setDetectedMedia(message.data || []);
+        setDetectedMedia(normalizeDetectedMedia(message.data));
       }
     } catch {
       // Ignore malformed messages — page can post anything via postMessage.

@@ -1,206 +1,200 @@
-import React from 'react';
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  LayoutAnimation,
-  Platform,
-  UIManager,
-} from 'react-native';
-
-// Android needs an opt-in for LayoutAnimation. iOS supports it out of the box.
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
+import Surface from '../../components/common/Surface';
+import React, { useState } from 'react';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import { useRoutineContext } from '../../context/RoutineContext';
+import IntervalPreview from '../../components/common/IntervalPreview';
+import { useWorkout } from '../../context/WorkoutContext';
 import { useTheme } from '../../context/ThemeContext';
 import useConfirm from '../../hooks/useConfirm';
-import { createScreenStyles } from '../../styles/screenStyles';
+import { getRoutineDuration } from '../../domain/routines';
+import { formatTime } from '../../utils/timeFormatters';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
+import ScreenHeader from '../../components/common/ScreenHeader';
 import { EmptyState } from '../../components/common/StateViews';
 import { navigateToCreateRoutine } from '../../navigation/navigationHelpers';
-
-export default function RoutineListScreen({ navigation }) {
+export default function RoutineListScreen({ navigation, embedded = false }) {
   const { routines, reorderRoutines, deleteRoutine } = useRoutineContext();
-  const { theme, isDark } = useTheme();
-  const screenStyles = createScreenStyles({ ...theme, isDark });
+  const { theme } = useTheme();
   const confirm = useConfirm();
-
-  const handleDeleteRoutine = (routine) => {
+  const { selectRoutine, selectedRoutine, isWorkoutRunning } = useWorkout();
+  const openRoutine = (routine) => {
+    const open = () => {
+      if (selectedRoutine?.id !== routine.id) selectRoutine(routine.id);
+      navigation.navigate('Home');
+    };
+    if (isWorkoutRunning && selectedRoutine?.id !== routine.id)
+      confirm({
+        title: 'Switch routine?',
+        message: 'This ends your current session.',
+        confirmLabel: 'Switch',
+        onConfirm: open,
+      });
+    else open();
+  };
+  const [organizing, setOrganizing] = useState(false);
+  const remove = (r) =>
     confirm({
-      title: 'Delete Routine',
-      message: `Are you sure you want to delete "${routine.name}"? This action cannot be undone.`,
+      title: 'Delete routine?',
+      message: `Remove “${r.name}” from your routines?`,
       confirmLabel: 'Delete',
       destructive: true,
-      onConfirm: () => {
-        // Slide adjacent rows into the freed space instead of snapping.
-        LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-        deleteRoutine(routine.id);
-      },
+      onConfirm: () => deleteRoutine(r.id),
     });
-  };
-
-  const handleDragGesture = (event, index) => {
-    const { translationY, state } = event.nativeEvent;
-    
-    if (state === State.BEGAN) {
-      // Drag started
-    } else if (state === State.ACTIVE) {
-      // Calculate approximate height of each card based on content
-      // Routine card has header + meta row, similar to RoundEditor structure
-      const itemHeight = 50; // Approximate height, matches RoundEditor
-      const deltaIndex = Math.round(translationY / itemHeight);
-      const newIndex = Math.max(0, Math.min(routines.length - 1, index + deltaIndex));
-      
-      if (newIndex !== index && newIndex >= 0) {
-        reorderRoutines(index, newIndex);
-      }
-    } else if (state === State.END || state === State.CANCELLED) {
-      // Drag ended
-    }
-  };
-
-  const renderRoutineCard = (routine, index) => {
-    const totalDuration = routine.rounds * (routine.workSec + routine.restSec);
-    const minutes = Math.floor(totalDuration / 60);
-    const seconds = totalDuration % 60;
-    const durationLabel = `${minutes > 0 ? `${minutes}m ` : ''}${seconds}s`;
-
-    const isLastCard = index === routines.length - 1;
-    const isFirstCard = index === 0;
-
-    // Border radius logic: only first and last cards have curved corners
-    // If it's both first and last (only one card), all corners should be rounded
-    const borderRadiusStyle = isFirstCard && isLastCard
-      ? { borderRadius: theme.radius.md }
-      : isFirstCard
-      ? { borderTopLeftRadius: theme.radius.md, borderTopRightRadius: theme.radius.md, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }
-      : isLastCard
-      ? { borderTopLeftRadius: 0, borderTopRightRadius: 0, borderBottomLeftRadius: theme.radius.md, borderBottomRightRadius: theme.radius.md }
-      : { borderRadius: 0 };
-
-    const cardStyle = [
-      screenStyles.routineCard,
-      borderRadiusStyle,
-      !isLastCard && { borderBottomWidth: 1, borderBottomColor: theme.border, paddingBottom: theme.spacing.md },
-    ];
-
-    return (
-      <View key={routine.id} style={{ paddingHorizontal: theme.spacing.xl }}>
-        <TouchableOpacity
-          style={cardStyle}
-          activeOpacity={0.85}
-          onPress={() => navigateToCreateRoutine(navigation, routine)}
-          accessibilityRole="button"
-          accessibilityHint="Tap to use as template for a new routine. Drag the handle on the left to reorder."
-        >
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <PanGestureHandler
-              onGestureEvent={(event) => handleDragGesture(event, index)}
-              onHandlerStateChange={(event) => handleDragGesture(event, index)}
-              minPointers={1}
-            >
-              <TouchableOpacity
-                style={{
-                  padding: theme.spacing.xs,
-                  marginLeft: -theme.spacing.xs,
-                }}
-                activeOpacity={0.6}
-                accessibilityRole="adjustable"
-                accessibilityLabel={`Reorder ${routine.name}. Drag up or down to move.`}
-              >
-                <View style={{ flexDirection: 'row', gap: 3 }}>
-                  <View style={{ flexDirection: 'column', gap: 3 }}>
-                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: theme.iconTertiary }} />
-                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: theme.iconTertiary }} />
-                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: theme.iconTertiary }} />
-                  </View>
-                  <View style={{ flexDirection: 'column', gap: 3 }}>
-                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: theme.iconTertiary }} />
-                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: theme.iconTertiary }} />
-                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: theme.iconTertiary }} />
-                  </View>
-                </View>
-              </TouchableOpacity>
-            </PanGestureHandler>
-              <View style={{ flex: 1 }}>
-                <View style={screenStyles.routineCardHeader}>
-                  <Text style={screenStyles.roundTitle}>{routine.name}</Text>
-                </View>
-
-                <View style={screenStyles.routineMetaRow}>
-                  <View style={screenStyles.routineMetaPill}>
-                    <Ionicons name="barbell-outline" size={12} color={theme.iconPrimary} />
-                    <Text style={screenStyles.routineMetaText}>{routine.rounds} rounds</Text>
-                  </View>
-                  <View style={screenStyles.routineMetaPill}>
-                    <Ionicons name="flash-outline" size={12} color={theme.iconPrimary} />
-                    <Text style={screenStyles.routineMetaText}>{routine.workSec}s work</Text>
-                  </View>
-                  <View style={screenStyles.routineMetaPill}>
-                    <Ionicons name="chatbubble-ellipses-outline" size={12} color={theme.iconPrimary} />
-                    <Text style={screenStyles.routineMetaText}>
-                      {routine.restSec > 0 ? `${routine.restSec}s rest` : 'No rest'}
-                    </Text>
-                  </View>
-                  <View style={screenStyles.routineMetaPill}>
-                    <Ionicons name="time-outline" size={12} color={theme.iconPrimary} />
-                    <Text style={screenStyles.routineMetaText}>~ {durationLabel}</Text>
-                  </View>
-                </View>
-              </View>
-              <View style={{ alignSelf: 'center' }}>
-                <TouchableOpacity
-                  onPress={(e) => {
-                    e.stopPropagation();
-                    handleDeleteRoutine(routine);
-                  }}
-                  style={screenStyles.routineDeleteButton}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Delete routine ${routine.name}`}
-                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                >
-                  <Ionicons name="trash-outline" size={theme.iconSize.md} color={theme.iconSecondary} />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </TouchableOpacity>
-      </View>
-    );
-  };
-
+  const Frame = embedded ? View : ScreenWrapper;
   return (
-    <ScreenWrapper style={screenStyles.container}>
-      <View style={screenStyles.pageHeader}>
-        <View style={[screenStyles.pageHeaderContent, { marginBottom: theme.spacing.sm }]}>
-          <Text style={screenStyles.pageTitle}>Routines</Text>
-          <TouchableOpacity
-            style={screenStyles.addButton}
-            onPress={() => navigateToCreateRoutine(navigation)}
-            accessibilityRole="button"
-            accessibilityLabel="Create new routine"
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Text style={screenStyles.addButtonText}>+</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-      {routines.length === 0 ? (
+    <Frame style={{ flex: 1 }}>
+      {!embedded && (
+        <ScreenHeader
+          title="Routines"
+          subtitle=""
+          actionLabel="Create routine"
+          onAction={() => navigateToCreateRoutine(navigation)}
+        />
+      )}
+      {!routines.length ? (
         <EmptyState
-          icon="barbell-outline"
+          icon="layers-outline"
           title="No routines yet"
-          description="Build your first routine to start training. You can save work/rest times, attach playlists, and reuse it across sessions."
-          actionLabel="Create Routine"
+          description="Create a routine to start a session."
+          actionLabel="Create routine"
           onAction={() => navigateToCreateRoutine(navigation)}
         />
       ) : (
-        <ScrollView contentContainerStyle={[screenStyles.roundList, { paddingHorizontal: 0 }]}>
-          {routines.map((routine, index) => renderRoutineCard(routine, index))}
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <View style={styles.section}>
+            <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+              {routines.length} saved routines
+            </Text>
+            <Pressable onPress={() => setOrganizing(!organizing)} hitSlop={12}>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.accent }}>
+                {organizing ? 'Done' : 'Organize'}
+              </Text>
+            </Pressable>
+          </View>
+          {routines.map((r, index) => (
+            <Surface
+              variant="card"
+              key={r.id}
+              style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+            >
+              <Pressable
+                onPress={() => navigateToCreateRoutine(navigation, r)}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${r.name}`}
+                style={styles.row}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 20, fontWeight: '600', color: theme.text }}>
+                    {r.name}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 6 }}>
+                    {r.rounds} rounds · {formatTime(getRoutineDuration(r))} total
+                  </Text>
+                </View>
+                <Ionicons name="create-outline" size={19} color={theme.textSecondary} />
+              </Pressable>
+              <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+                <IntervalPreview routine={r} height={7} />
+                <View
+                  style={{
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginTop: 14,
+                  }}
+                >
+                  <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
+                    {formatTime(r.workSec)} work · {formatTime(r.restSec)} rest
+                  </Text>
+                  <Pressable
+                    onPress={() => openRoutine(r)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${r.name} in Timer`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 5,
+                      paddingVertical: 8,
+                      paddingHorizontal: 12,
+                      borderRadius: 13,
+                      backgroundColor: theme.accentLight,
+                    }}
+                  >
+                    <Ionicons name="play" size={12} color={theme.accent} />
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: theme.accent }}>
+                      Open
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+              {organizing && (
+                <View style={[styles.actions, { borderColor: theme.border }]}>
+                  {[
+                    {
+                      icon: 'arrow-up',
+                      label: `Move ${r.name} up`,
+                      disabled: index === 0,
+                      onPress: () => reorderRoutines(index, index - 1),
+                    },
+                    {
+                      icon: 'arrow-down',
+                      label: `Move ${r.name} down`,
+                      disabled: index === routines.length - 1,
+                      onPress: () => reorderRoutines(index, index + 1),
+                    },
+                    { icon: 'trash-outline', label: `Delete ${r.name}`, onPress: () => remove(r) },
+                  ].map((a) => (
+                    <Pressable
+                      key={a.icon}
+                      onPress={a.onPress}
+                      disabled={a.disabled}
+                      accessibilityLabel={a.label}
+                      style={styles.action}
+                    >
+                      <Ionicons
+                        name={a.icon}
+                        size={19}
+                        color={
+                          a.disabled
+                            ? theme.textTertiary
+                            : a.icon === 'trash-outline'
+                              ? theme.error
+                              : theme.text
+                        }
+                      />
+                    </Pressable>
+                  ))}
+                </View>
+              )}
+            </Surface>
+          ))}
         </ScrollView>
       )}
-    </ScreenWrapper>
+    </Frame>
   );
 }
+const styles = StyleSheet.create({
+  content: { paddingHorizontal: 20, paddingBottom: 24 },
+  section: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  card: {
+    borderRadius: 22,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  row: { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 15 },
+  icon: { width: 48, height: 48, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  actions: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 12,
+  },
+  action: { padding: 14 },
+});

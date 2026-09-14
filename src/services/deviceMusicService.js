@@ -2,7 +2,7 @@ import ExpoAVPlayer from './audio/ExpoAVPlayer';
 
 /**
  * Device Music Service
- * 
+ *
  * Built-in music player for device-local audio files.
  * Uses ExpoAVPlayer (shared Expo AV logic) for playback.
  */
@@ -17,7 +17,7 @@ class DeviceMusicPlayer {
       // Prepare track metadata for player
       const trackOptions = {
         positionMs: options.positionMs || 0,
-        shouldPlay: true,
+        shouldPlay: options.shouldPlay !== false,
         name: options.name || 'Device Track',
         artist: options.artist || 'Unknown Artist',
         album: options.album || 'Unknown Album',
@@ -93,24 +93,26 @@ const deviceMusicService = {
     }
     return deviceMusicPlayer.play(accessToken, deviceId);
   },
-  
-  playTrack: (accessToken, trackUri, deviceId, options) => 
+
+  playTrack: (accessToken, trackUri, deviceId, options) =>
     deviceMusicPlayer.playTrack(accessToken, trackUri, deviceId, options),
-  
-  pause: (accessToken, refreshCallback) => 
-    deviceMusicPlayer.pause(accessToken, refreshCallback),
-  
-  playPlaylist: (accessToken, playlistId, deviceId, shuffle) => 
+
+  pause: (accessToken, refreshCallback) => deviceMusicPlayer.pause(accessToken, refreshCallback),
+
+  playPlaylist: (accessToken, playlistId, deviceId, shuffle) =>
     deviceMusicPlayer.playPlaylist(accessToken, playlistId, deviceId, shuffle),
 
   // Player State
-  getCurrentPlayback: (accessToken, refreshCallback) => 
+  getCurrentPlayback: (accessToken, refreshCallback) =>
     deviceMusicPlayer.getCurrentPlayback(accessToken, refreshCallback),
-  
-  getDevices: () => Promise.resolve({ devices: [{ id: 'device', name: 'This Device', is_active: true, is_restricted: false }] }),
-  
+
+  getDevices: () =>
+    Promise.resolve({
+      devices: [{ id: 'device', name: 'This Device', is_active: true, is_restricted: false }],
+    }),
+
   getActiveDevice: () => Promise.resolve('device'),
-  
+
   transferPlayback: () => Promise.resolve({ success: true }),
 
   // Set track metadata helper
@@ -119,9 +121,14 @@ const deviceMusicService = {
   // Volume control (0-100)
   setVolume: (accessToken, volumePercent) => deviceMusicPlayer.setVolume(volumePercent),
 
+  setRepeat: async (accessToken, mode) => {
+    const sound = deviceMusicPlayer.player.sound;
+    if (sound) await sound.setIsLoopingAsync(mode !== 'off');
+    return { success: true };
+  },
+
   // Cleanup
   cleanup: () => deviceMusicPlayer.cleanup(),
 };
 
 export default deviceMusicService;
-
