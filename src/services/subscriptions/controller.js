@@ -33,10 +33,13 @@ export function createSubscriptionController({
   let sdkUserId = null;
   let initialized = false;
   let disposed = false;
+  let verificationPending = 0;
+  let backendVerified = false;
   let queue = Promise.resolve();
   let listener;
   let state = {
     ready: false,
+    accessVerified: false,
     configured: !!sdk && !!apiKey,
     userId: null,
     packages: [],
@@ -53,6 +56,11 @@ export function createSubscriptionController({
     onChange?.(state);
   };
   const current = (version, id) => !disposed && epoch === version && userId === id;
+  const beginVerification = (version, id) => {
+    if (!current(version, id)) return;
+    verificationPending++;
+    emit({ accessVerified: false });
+  };
   const enqueue = (operation) => {
     const result = queue.then(operation);
     queue = result.catch(() => {});
@@ -78,10 +86,12 @@ export function createSubscriptionController({
         // the identity queue rather than trusting its unscoped payload.
         const version = epoch;
         const target = userId;
-        if (target)
+        if (target) {
+          beginVerification(version, target);
           enqueue(() =>
             current(version, target) ? read(version, target, { sync: true }) : null,
           ).catch(() => {});
+        }
       };
       if (!disposed) sdk.addCustomerInfoUpdateListener?.(listener);
     } else if (initialized && sdkUserId !== id) {
@@ -91,24 +101,42 @@ export function createSubscriptionController({
     }
   };
   const read = async (version, id, { sync = false, customerInfo } = {}) => {
-    const result = await verify(id, { sync });
-    if (!current(version, id)) return { stale: true };
-    const entitlement = result?.entitlement || null;
-    const isPro = isActiveEntitlement(entitlement, now());
-    const sdkActive = !!customerInfo?.entitlements?.active?.[sdkEntitlementId];
-    emit({
-      entitlement,
-      isPro,
-      customerInfo: customerInfo || state.customerInfo,
-      pending: !isPro && sdkActive,
-      error: result?.syncError || null,
-    });
-    return { isPro, pending: !isPro && sdkActive };
+    try {
+      const result = await verify(id, { sync });
+      if (!current(version, id)) return { stale: true };
+      if (!result || !Object.hasOwn(result, 'entitlement'))
+        throw new Error('Could not verify cloud access. Please try again.');
+      const entitlement = result.entitlement || null;
+      const isPro = isActiveEntitlement(entitlement, now());
+      const info = customerInfo || state.customerInfo;
+      const sdkActive = !!info?.entitlements?.active?.[sdkEntitlementId];
+      backendVerified = !result.syncError;
+      emit({
+        entitlement,
+        isPro,
+        customerInfo: info,
+        pending: !isPro && sdkActive,
+        error: result.syncError || null,
+      });
+      return { isPro, pending: !isPro && sdkActive };
+    } catch (error) {
+      if (current(version, id)) {
+        backendVerified = false;
+        emit({ error: message(error) });
+      }
+      throw error;
+    } finally {
+      if (current(version, id)) {
+        verificationPending--;
+        emit({ accessVerified: verificationPending === 0 && backendVerified });
+      }
+    }
   };
   const refresh = ({ sync = false } = {}) => {
     const version = epoch;
     const id = userId;
     if (!id || disposed) return Promise.resolve();
+    beginVerification(version, id);
     return enqueue(async () => {
       if (!current(version, id)) return { stale: true };
       let customerInfo;
@@ -116,12 +144,15 @@ export function createSubscriptionController({
       try {
         if (sdk && apiKey) {
           await identifySdk(id);
-          [customerInfo] = await Promise.all([
+          const [info, offerings] = await Promise.allSettled([
             sdk.getCustomerInfo(),
-            sdk.getOfferings().then((offerings) => {
-              if (current(version, id)) emit({ packages: offeredPackages(offerings.current) });
-            }),
+            sdk.getOfferings(),
           ]);
+          if (info.status === 'fulfilled') customerInfo = info.value;
+          if (offerings.status === 'fulfilled' && current(version, id))
+            emit({ packages: offeredPackages(offerings.value.current) });
+          if (info.status === 'rejected' || offerings.status === 'rejected')
+            throw new Error('Store information unavailable');
         }
       } catch {
         sdkError =
@@ -142,10 +173,13 @@ export function createSubscriptionController({
   const identify = (nextUserId) => {
     const version = ++epoch;
     userId = nextUserId || null;
+    verificationPending = 0;
+    backendVerified = false;
     const id = userId;
     emit({
       userId: id,
       ready: !id,
+      accessVerified: false,
       loading: false,
       error: null,
       pending: false,
@@ -182,6 +216,7 @@ export function createSubscriptionController({
           kind === 'purchase' ? await sdk.purchasePackage(available) : await sdk.restorePurchases();
         if (!current(version, id)) return { stale: true };
         const customerInfo = kind === 'purchase' ? response.customerInfo : response;
+        beginVerification(version, id);
         const result = await read(version, id, { sync: true, customerInfo });
         if (current(version, id) && !result.isPro && !result.pending && kind === 'restore')
           emit({ error: 'No active Pro subscription was found for this account.' });

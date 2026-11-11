@@ -26,7 +26,7 @@ function loadSdk() {
 const sdk = loadSdk();
 
 async function verifyEntitlement(userId, { sync = false } = {}) {
-  if (!supabase) return { entitlement: null };
+  if (!supabase) throw new Error('Account services are not available in this build.');
   const { data: sessionData } = await supabase.auth.getSession();
   if (sessionData.session?.user.id !== userId)
     throw new Error('Your account changed. Please try again.');
@@ -53,6 +53,7 @@ export function SubscriptionProvider({ children }) {
   const { user, ready: authReady } = useAuth();
   const [state, setState] = useState({
     ready: false,
+    accessVerified: false,
     configured: !!sdk,
     isPro: false,
     packages: [],
@@ -98,6 +99,7 @@ export function SubscriptionProvider({ children }) {
   const value = {
     ...state,
     ready: authReady && (belongsToUser ? state.ready : false),
+    accessVerified: authReady && belongsToUser && !!state.accessVerified,
     isPro: belongsToUser && !!state.isPro,
     entitlement: belongsToUser ? state.entitlement : null,
     customerInfo: belongsToUser ? state.customerInfo : null,

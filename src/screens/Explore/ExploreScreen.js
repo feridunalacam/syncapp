@@ -122,6 +122,12 @@ export default function ExploreScreen() {
           ))}
         </ScrollView>
       </View>
+      <View style={styles.adPlacement}>
+        <DiscoverAdSlot
+          visible={!searchOpen && !query.trim() && visiblePosts.length > 0}
+          hasBlockingModal={!!selected}
+        />
+      </View>
       <FlatList
         ref={feed}
         data={visiblePosts}
@@ -130,7 +136,6 @@ export default function ExploreScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
         contentContainerStyle={styles.content}
-        ListHeaderComponent={<DiscoverAdSlot />}
         ListEmptyComponent={
           <EmptyState
             icon="search-outline"
@@ -211,6 +216,7 @@ export default function ExploreScreen() {
 }
 const styles = StyleSheet.create({
   top: { paddingHorizontal: 20 },
+  adPlacement: { paddingHorizontal: 20 },
   search: {
     flexDirection: 'row',
     alignItems: 'center',

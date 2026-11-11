@@ -1,6 +1,6 @@
 import Surface from '../../components/common/Surface';
 import SpotifyDevicePicker from '../../components/common/SpotifyDevicePicker';
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useIsFocused } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
 import * as Clipboard from 'expo-clipboard';
 import { useRoutineContext } from '../../context/RoutineContext';
@@ -21,6 +22,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useAccountData } from '../../context/AccountDataContext';
 import { useSubscription } from '../../context/SubscriptionContext';
+import { useAds } from '../../context/AdsContext';
+import { useWorkout } from '../../context/WorkoutContext';
 import AccountPanel from '../../components/account/AccountPanel';
 import SubscriptionPanel from '../../components/account/SubscriptionPanel';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
@@ -36,6 +39,9 @@ export default function ProfileScreen() {
   const auth = useAuth();
   const cloud = useAccountData();
   const subscription = useSubscription();
+  const ads = useAds();
+  const workout = useWorkout();
+  const focused = useIsFocused();
   const { routines, completedRoutines } = useRoutineContext();
   const { posts, addPost, deletePost } = usePostContext();
   const profile = useProfileData();
@@ -45,6 +51,57 @@ export default function ProfileScreen() {
   const [routineId, setRoutineId] = useState(null);
   const [category, setCategory] = useState('sport');
   const [cloudBusy, setCloudBusy] = useState(false);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
+  const adPrivacyBusy = privacyBusy || ads.privacyOptionsBusy;
+  const privacySafeRef = useRef(false);
+  privacySafeRef.current =
+    focused &&
+    ads.appActive === true &&
+    sheet === null &&
+    !cloudBusy &&
+    !auth.recoveryMode &&
+    !auth.error &&
+    !spotify.connecting &&
+    workout?.isWorkoutRunning === false &&
+    workout?.isMusicPlaying === false &&
+    workout?.isAudioSyncing === false;
+  useEffect(
+    () => () => {
+      privacySafeRef.current = false;
+    },
+    [],
+  );
+  const openAdPrivacy = async () => {
+    if (adPrivacyBusy) return;
+    if (workout.isWorkoutRunning || workout.isMusicPlaying || workout.isAudioSyncing) {
+      Alert.alert(
+        'Ad privacy choices',
+        'Finish your session or stop playback before changing ad privacy choices.',
+      );
+      return;
+    }
+    if (!privacySafeRef.current) return;
+    setPrivacyBusy(true);
+    try {
+      const result = await ads.requestPrivacyOptions(() => privacySafeRef.current);
+      if (!result?.changed && privacySafeRef.current) {
+        Alert.alert(
+          'Ad privacy choices',
+          !result?.error && result?.status === 'NOT_REQUIRED'
+            ? 'No additional advertising privacy choices are required for this device right now. You can read more in Privacy policy.'
+            : 'Privacy choices are not available right now. Please try again later.',
+        );
+      }
+    } catch {
+      if (privacySafeRef.current)
+        Alert.alert(
+          'Ad privacy choices',
+          'Privacy choices could not be opened. Please try again later.',
+        );
+    } finally {
+      setPrivacyBusy(false);
+    }
+  };
   const accountAction = async (action, success) => {
     if (cloudBusy) return;
     setCloudBusy(true);
@@ -184,7 +241,12 @@ export default function ProfileScreen() {
         actionLabel="Edit profile"
         onAction={profile.ready ? () => setSheet('profile') : undefined}
       />
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        pointerEvents={adPrivacyBusy ? 'none' : 'auto'}
+        accessibilityState={{ busy: !!adPrivacyBusy }}
+      >
         <Surface variant="card" style={styles.profile}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
             <Pressable onPress={profile.changePicture} accessibilityLabel="Change profile photo">
@@ -271,10 +333,10 @@ export default function ProfileScreen() {
             'sparkles-outline',
             subscription.isPro ? 'Sync Pro' : 'Explore Sync Pro',
             subscription.isPro
-              ? 'Your Pro membership is active.'
+              ? 'Your Pro membership is active. Discover stays ad-free.'
               : subscription.pending
                 ? 'Confirming your purchase with the store…'
-                : 'Cloud backup and sync. Keep your local timer free.',
+                : 'Cloud backup, device sync and an ad-free Discover.',
             () => setSheet('subscription'),
             <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>
               {subscription.isPro ? 'Pro' : subscription.pending ? 'Verifying' : 'Free'}
@@ -366,6 +428,27 @@ export default function ProfileScreen() {
               accessibilityLabel="Dark appearance"
             />,
           )}
+          {row(
+            'shield-checkmark-outline',
+            'Privacy policy',
+            'How Sync uses account, subscription and advertising information.',
+            process.env.EXPO_PUBLIC_PRIVACY_URL
+              ? () => openLink(process.env.EXPO_PUBLIC_PRIVACY_URL)
+              : undefined,
+            null,
+            true,
+          )}
+          {(ads.nativeAvailable || ads.privacyOptionsRequired) &&
+            row(
+              'options-outline',
+              'Ad privacy choices',
+              adPrivacyBusy
+                ? 'Opening your choices…'
+                : 'Review and update your advertising choices.',
+              adPrivacyBusy ? undefined : openAdPrivacy,
+              null,
+              true,
+            )}
           {row(
             'flash-outline',
             'Routine shortcuts',
@@ -604,10 +687,10 @@ export default function ProfileScreen() {
         <Text style={[styles.prose, { color: theme.text }]}>
           Sync brings intervals and music together for movement, study and focus.{'\n\n'}Use Sync on
           this device for free, or sign in to keep separate account data. Sync Pro adds private
-          cloud backups for routines, activity and profile details across devices. Local audio files
-          and Spotify credentials stay on this device.{'\n\n'}Discover posts are private saved
-          content, not public online publishing. Manage your membership and account in the Account
-          section above.
+          cloud backups for routines, activity and profile details across devices, plus an ad-free
+          Discover. Local audio files and Spotify credentials stay on this device.{'\n\n'}Discover
+          posts are private saved content, not public online publishing. Manage your membership and
+          account in the Account section above.
         </Text>
       </Sheet>
     </ScreenWrapper>
