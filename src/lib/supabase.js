@@ -4,10 +4,16 @@ import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAuthSessionStorage } from './authSessionStorage';
+import { installNativeAuthCrypto } from './authCrypto';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-export const isSupabaseConfigured = Boolean(url && key);
+const authCryptoReady = installNativeAuthCrypto({
+  platform: Platform.OS,
+  target: globalThis,
+  loadNativeCrypto: () => require('expo-crypto'),
+});
+export const isSupabaseConfigured = Boolean(url && key && authCryptoReady);
 export const supabase = isSupabaseConfigured
   ? createClient(url, key, {
       auth: {

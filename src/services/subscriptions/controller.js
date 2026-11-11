@@ -123,8 +123,9 @@ export function createSubscriptionController({
             }),
           ]);
         }
-      } catch (error) {
-        sdkError = message(error);
+      } catch {
+        sdkError =
+          'Store subscription information is temporarily unavailable. Try Refresh access again later. Your timer and routines are still available.';
       }
       try {
         const result = await read(version, id, { sync, customerInfo });

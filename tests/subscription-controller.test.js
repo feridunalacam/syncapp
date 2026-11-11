@@ -293,7 +293,10 @@ test('offerings failure does not hide an existing server entitlement', async () 
   });
   await controller.identify('user-a');
   assert.equal(controller.getState().isPro, true);
-  assert.equal(controller.getState().error, 'No store connection');
+  assert.equal(
+    controller.getState().error,
+    'Store subscription information is temporarily unavailable. Try Refresh access again later. Your timer and routines are still available.',
+  );
 });
 
 test('reused native SDK is identified rather than configured twice', async () => {
