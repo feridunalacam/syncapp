@@ -1,3 +1,4 @@
+import { useAccountData } from './AccountDataContext';
 import React, {
   createContext,
   useCallback,
@@ -8,7 +9,7 @@ import React, {
   useState,
 } from 'react';
 import { AppState, Alert } from 'react-native';
-import storage, { STORAGE_KEYS } from '../lib/storage';
+import { STORAGE_KEYS } from '../lib/storage';
 import spotifyService from '../services/spotify';
 import deviceMusicService from '../services/deviceMusicService';
 import { loadPlatforms, savePlatforms } from '../lib/platformStorage';
@@ -21,6 +22,8 @@ const services = { spotify: spotifyService, device: deviceMusicService };
 const defaults = { device: { connected: true, accessToken: 'device' } };
 const PlatformContext = createContext({ connectedPlatforms: defaults, services, ready: false });
 export function PlatformProvider({ children }) {
+  const { storage } = useAccountData();
+  const platformOptions = { storage, accountId: storage.userId };
   const [connectedPlatforms, setConnectedPlatforms] = useState(defaults);
   const [selectedPlatform, setSelected] = useState(null);
   const [ready, setReady] = useState(false);
@@ -34,7 +37,7 @@ export function PlatformProvider({ children }) {
       let selection = null;
       try {
         [initial, selection] = await Promise.all([
-          loadPlatforms(),
+          loadPlatforms(platformOptions),
           storage.getString(STORAGE_KEYS.SELECTED_PLATFORM),
         ]);
       } catch {
@@ -43,7 +46,7 @@ export function PlatformProvider({ children }) {
       if (!alive) return;
       const manager = createMusicConnections({
         initial,
-        save: savePlatforms,
+        save: (value) => savePlatforms(value, platformOptions),
         services,
         onChange: (next) => {
           if (alive) {
@@ -64,6 +67,7 @@ export function PlatformProvider({ children }) {
     })();
     return () => {
       alive = false;
+      store.current?.dispose();
     };
   }, []);
   const connectPlatform = useCallback(async (id, data) => {

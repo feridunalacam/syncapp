@@ -1,0 +1,264 @@
+import React, { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import Sheet from '../common/Sheet';
+import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
+import { useSubscription } from '../../context/SubscriptionContext';
+
+const privacyUrl = process.env.EXPO_PUBLIC_PRIVACY_URL;
+const termsUrl = process.env.EXPO_PUBLIC_TERMS_URL;
+const validLink = (url) => typeof url === 'string' && /^https:\/\/[^\s/]+(?:\/[^\s]*)?$/.test(url);
+
+export default function SubscriptionPanel({ visible, onClose, onSignIn }) {
+  const { theme } = useTheme();
+  const { user } = useAuth();
+  const subscription = useSubscription();
+  const [selectedId, setSelectedId] = useState('$rc_annual');
+  const [localMessage, setLocalMessage] = useState(null);
+  const [working, setWorking] = useState(false);
+  const packages = subscription.packages || [];
+  const selected = packages.find((pkg) => pkg.identifier === selectedId) || packages[0];
+  const legalReady = validLink(privacyUrl) && validLink(termsUrl);
+  const busy = subscription.loading || working;
+  useEffect(() => {
+    if (visible) setLocalMessage(null);
+  }, [visible]);
+  const run = async (operation) => {
+    setLocalMessage(null);
+    setWorking(true);
+    try {
+      const result = await operation();
+      if (result?.isPro) setLocalMessage('Pro is active. Cloud backup is ready in your account.');
+      else if (result?.pending)
+        setLocalMessage('Purchase received. We are verifying your Pro access.');
+    } catch (error) {
+      if (!error?.userCancelled)
+        setLocalMessage(error?.message || 'Could not complete the request. Please try again.');
+    } finally {
+      setWorking(false);
+    }
+  };
+  const text = (copy, style) => (
+    <Text style={[styles.body, { color: theme.textSecondary }, style]}>{copy}</Text>
+  );
+  const action = (label, onPress, { primary = false, disabled = false } = {}) => (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: disabled || busy }}
+      disabled={disabled || busy}
+      onPress={onPress}
+      style={[
+        styles.action,
+        {
+          backgroundColor: primary ? theme.accent : theme.cardSecondary,
+          opacity: disabled || busy ? 0.45 : 1,
+        },
+      ]}
+    >
+      <Text
+        style={{ color: primary ? theme.accentText : theme.text, fontSize: 15, fontWeight: '600' }}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+  return (
+    <Sheet
+      visible={visible}
+      title={subscription.isPro ? 'Sync Pro' : 'Make room for more'}
+      onClose={onClose}
+    >
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+        <View style={[styles.badge, { backgroundColor: theme.accentLight }]}>
+          <Ionicons name="cloud-outline" size={27} color={theme.accent} />
+          <Text style={{ color: theme.accent, fontSize: 22, fontWeight: '700' }}>Sync Pro</Text>
+        </View>
+        <Text style={[styles.title, { color: theme.text }]}>
+          {subscription.isPro ? 'Your routines, backed up.' : 'Keep your training with you.'}
+        </Text>
+        {text('Back up your routines, activity and profile, then sync them across your devices.')}
+        {text(
+          'Timer, music and local routines stay free. Imported audio files remain on the device where you added them.',
+        )}
+        {subscription.isPro &&
+          text(
+            `Cloud access is active${subscription.entitlement?.expires_at ? ` until ${new Date(subscription.entitlement.expires_at).toLocaleDateString()}` : ''}.`,
+            { color: theme.accent, fontWeight: '600' },
+          )}
+        {subscription.pending &&
+          text(
+            'Your store purchase is waiting for server verification. Refresh access in a moment.',
+            { color: theme.accent },
+          )}
+        {!user ? (
+          <>
+            {text(
+              'Sign in to keep a subscription connected to your account and restore it on another device.',
+            )}
+            {action('Sign in or create account', onSignIn, { primary: true, disabled: !onSignIn })}
+          </>
+        ) : !subscription.isPro ? (
+          <>
+            {packages.map((pkg) => {
+              const annual = pkg.identifier === '$rc_annual';
+              const isSelected = pkg.identifier === selected?.identifier;
+              return (
+                <Pressable
+                  key={pkg.identifier}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: isSelected, disabled: busy }}
+                  disabled={busy}
+                  onPress={() => setSelectedId(pkg.identifier)}
+                  style={[
+                    styles.plan,
+                    {
+                      borderColor: isSelected ? theme.accent : theme.border,
+                      backgroundColor: theme.cardSecondary,
+                    },
+                  ]}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: theme.text, fontSize: 17, fontWeight: '600' }}>
+                      {annual ? 'Annual' : 'Monthly'}
+                    </Text>
+                    {text(`${pkg.product.priceString} / ${annual ? 'year' : 'month'}`, {
+                      marginBottom: 0,
+                    })}
+                  </View>
+                  <Ionicons
+                    name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+                    size={23}
+                    color={isSelected ? theme.accent : theme.textTertiary}
+                  />
+                </Pressable>
+              );
+            })}
+            {!subscription.ready && (
+              <ActivityIndicator color={theme.accent} style={{ marginVertical: 15 }} />
+            )}
+            {subscription.ready &&
+              !subscription.configured &&
+              text(
+                subscription.requiresNativeBuild
+                  ? 'Purchases will be available after updating this app build.'
+                  : 'Subscriptions are not available for purchase yet. Your free features are ready to use.',
+              )}
+            {subscription.ready &&
+              subscription.configured &&
+              packages.length === 0 &&
+              text('No plans are available from the store right now. Please try again later.')}
+            {!legalReady &&
+              packages.length > 0 &&
+              text('Subscriptions will open when the terms and privacy policy are available.')}
+            {action(
+              selected
+                ? `Subscribe · ${selected.product.priceString} / ${selected.identifier === '$rc_annual' ? 'year' : 'month'}`
+                : 'Subscribe to Pro',
+              () => run(() => subscription.purchase(selected)),
+              {
+                primary: true,
+                disabled:
+                  !subscription.ready ||
+                  !subscription.configured ||
+                  !selected ||
+                  !legalReady ||
+                  subscription.pending,
+              },
+            )}
+            {text(
+              'Payment is charged to your store account. The subscription renews automatically unless cancelled in your store subscription settings before renewal. Access continues through the paid period after cancellation.',
+              styles.fine,
+            )}
+          </>
+        ) : null}
+        {!!user && (
+          <>
+            {action('Refresh access', () => run(subscription.refresh), {
+              disabled: !subscription.ready,
+            })}
+            {action('Restore purchases', () => run(subscription.restore), {
+              disabled: !subscription.configured || !subscription.ready,
+            })}
+            {action('Manage subscription', () => run(subscription.manage))}
+          </>
+        )}
+        {busy && <ActivityIndicator color={theme.accent} style={{ marginTop: 14 }} />}
+        {(localMessage || subscription.error) && (
+          <Text
+            accessibilityRole="alert"
+            style={[styles.body, { color: theme.text, marginTop: 16 }]}
+          >
+            {localMessage || subscription.error}
+          </Text>
+        )}
+        <View style={styles.legal}>
+          {validLink(termsUrl) && (
+            <Pressable
+              accessibilityRole="link"
+              onPress={() => run(() => Linking.openURL(termsUrl))}
+            >
+              <Text style={{ color: theme.accent }}>Terms of use</Text>
+            </Pressable>
+          )}
+          {validLink(privacyUrl) && (
+            <Pressable
+              accessibilityRole="link"
+              onPress={() => run(() => Linking.openURL(privacyUrl))}
+            >
+              <Text style={{ color: theme.accent }}>Privacy policy</Text>
+            </Pressable>
+          )}
+        </View>
+      </ScrollView>
+    </Sheet>
+  );
+}
+
+const styles = StyleSheet.create({
+  content: { paddingBottom: 12 },
+  badge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+    paddingVertical: 10,
+    paddingHorizontal: 15,
+    borderRadius: 18,
+    marginBottom: 20,
+  },
+  title: { fontSize: 28, fontWeight: '700', lineHeight: 34, marginBottom: 12 },
+  body: { fontSize: 14, lineHeight: 21, marginBottom: 13 },
+  plan: {
+    padding: 17,
+    borderWidth: 1.5,
+    borderRadius: 18,
+    marginTop: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  action: {
+    paddingVertical: 16,
+    paddingHorizontal: 15,
+    borderRadius: 18,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  fine: { fontSize: 11, lineHeight: 17, marginTop: 13 },
+  legal: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 22,
+    marginTop: 20,
+  },
+});
