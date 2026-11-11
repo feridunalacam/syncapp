@@ -85,9 +85,11 @@ export default function SubscriptionPanel({ visible, onClose, onSignIn }) {
         <Text style={[styles.title, { color: theme.text }]}>
           {subscription.isPro ? 'Your routines, backed up.' : 'Keep your training with you.'}
         </Text>
-        {text('Back up your routines, activity and profile, then sync them across your devices.')}
         {text(
-          'Timer, music and local routines stay free. Imported audio files remain on the device where you added them.',
+          'Back up your routines, activity and profile, sync them across your devices, and keep Discover ad-free.',
+        )}
+        {text(
+          'Timer, music and local routines stay free. Free Discover may show a labelled advertisement when you are not in a session. Imported audio files remain on the device where you added them.',
         )}
         {subscription.isPro &&
           text(

@@ -96,6 +96,7 @@ test('server-confirmed access works without a purchases native module', async ()
   assert.equal(controller.getState().configured, false);
   assert.equal(controller.getState().isPro, true);
   assert.equal(controller.getState().ready, true);
+  assert.equal(controller.getState().accessVerified, true);
 });
 
 test('SDK Pro cannot grant cloud access before backend verification', async () => {
@@ -152,6 +153,7 @@ test('successful purchase remains pending when backend configuration is incomple
   assert.equal(result.pending, true);
   assert.equal(controller.getState().isPro, false);
   assert.equal(controller.getState().error, 'Verification unavailable');
+  assert.equal(controller.getState().accessVerified, false);
 });
 
 test('account change during purchase clears access immediately and serializes SDK login', async () => {
@@ -171,6 +173,7 @@ test('account change during purchase clears access immediately and serializes SD
   const switchAccount = controller.identify('user-b');
   assert.equal(controller.getState().isPro, false);
   assert.equal(controller.getState().userId, 'user-b');
+  assert.equal(controller.getState().accessVerified, false);
   assert.equal(
     calls.some(([type]) => type === 'login'),
     false,
@@ -194,6 +197,7 @@ test('signout during a pending restore never restores the previous user access',
   const signout = controller.identify(null);
   assert.equal(controller.getState().userId, null);
   assert.equal(controller.getState().isPro, false);
+  assert.equal(controller.getState().accessVerified, false);
   waiting.resolve(activeInfo);
   assert.deepEqual(await restore, { stale: true });
   await signout;
@@ -293,10 +297,129 @@ test('offerings failure does not hide an existing server entitlement', async () 
   });
   await controller.identify('user-a');
   assert.equal(controller.getState().isPro, true);
+  assert.equal(controller.getState().accessVerified, true);
   assert.equal(
     controller.getState().error,
     'Store subscription information is temporarily unavailable. Try Refresh access again later. Your timer and routines are still available.',
   );
+});
+
+test('Free access is verified only after a successful backend response and resets for guests', async () => {
+  const waiting = deferred();
+  const { controller } = setup({ verify: () => waiting.promise });
+  assert.equal(controller.getState().accessVerified, false);
+  const identified = controller.identify('user-a');
+  assert.equal(controller.getState().accessVerified, false);
+  waiting.resolve({ entitlement: null });
+  await identified;
+  assert.equal(controller.getState().accessVerified, true);
+  assert.equal(controller.getState().isPro, false);
+  await controller.identify(null);
+  assert.equal(controller.getState().ready, true);
+  assert.equal(controller.getState().accessVerified, false);
+});
+
+test('refresh invalidates access immediately and remains unknown through all queued verifications', async () => {
+  const first = deferred();
+  const second = deferred();
+  let reads = 0;
+  const { controller, changes } = setup({
+    verify: () => {
+      reads++;
+      return reads === 1 ? { entitlement: null } : reads === 2 ? first.promise : second.promise;
+    },
+  });
+  await controller.identify('user-a');
+  const start = changes.length;
+  const refreshing = controller.refresh();
+  assert.equal(controller.getState().accessVerified, false);
+  const queued = controller.refresh();
+  await settle();
+  first.resolve({ entitlement: null });
+  await refreshing;
+  assert.equal(controller.getState().accessVerified, false);
+  assert.ok(changes.slice(start).every((state) => state.accessVerified === false));
+  second.resolve({ entitlement: null });
+  await queued;
+  assert.equal(controller.getState().accessVerified, true);
+});
+
+test('backend verification failure clears verification and a later successful refresh recovers it', async () => {
+  let fail = false;
+  const { controller } = setup({
+    verify: async () => {
+      if (fail) throw new Error('Backend offline');
+      return { entitlement: null };
+    },
+  });
+  await controller.identify('user-a');
+  fail = true;
+  await assert.rejects(controller.refresh(), /Backend offline/);
+  assert.equal(controller.getState().ready, true);
+  assert.equal(controller.getState().accessVerified, false);
+  fail = false;
+  await controller.refresh();
+  assert.equal(controller.getState().accessVerified, true);
+  assert.equal(controller.getState().error, null);
+});
+
+test('a stale backend rejection cannot change the new account verification or error', async () => {
+  const old = deferred();
+  let reads = 0;
+  const { controller } = setup({
+    verify: async (id) => {
+      reads++;
+      if (id === 'user-a' && reads > 1) return old.promise;
+      return { entitlement: null };
+    },
+  });
+  await controller.identify('user-a');
+  const refreshing = controller.refresh();
+  await settle();
+  const switched = controller.identify('user-b');
+  assert.equal(controller.getState().accessVerified, false);
+  old.reject(new Error('Old account failure'));
+  await assert.rejects(refreshing, /Old account failure/);
+  await switched;
+  assert.equal(controller.getState().userId, 'user-b');
+  assert.equal(controller.getState().accessVerified, true);
+  assert.equal(controller.getState().error, null);
+});
+
+test('store offerings failure preserves verified Free and the SDK purchase-pending signal', async () => {
+  const { controller } = setup({
+    sdk: {
+      getCustomerInfo: async () => activeInfo,
+      getOfferings: async () => {
+        throw new Error('No offerings');
+      },
+    },
+  });
+  await controller.identify('user-a');
+  assert.equal(controller.getState().accessVerified, true);
+  assert.equal(controller.getState().isPro, false);
+  assert.equal(controller.getState().pending, true);
+});
+
+test('listener-triggered verification also invalidates access and handles failure', async () => {
+  const waiting = deferred();
+  let reads = 0;
+  const { controller, callbacks } = setup({
+    verify: () => (++reads === 1 ? { entitlement: null } : waiting.promise),
+  });
+  await controller.identify('user-a');
+  [...callbacks][0](activeInfo);
+  assert.equal(controller.getState().accessVerified, false);
+  waiting.reject(new Error('Listener verification failed'));
+  await settle();
+  assert.equal(controller.getState().accessVerified, false);
+  assert.equal(controller.getState().error, 'Listener verification failed');
+});
+
+test('an incomplete backend response cannot be mistaken for verified Free', async () => {
+  const { controller } = setup({ verify: async () => undefined });
+  await assert.rejects(controller.identify('user-a'), /Could not verify/);
+  assert.equal(controller.getState().accessVerified, false);
 });
 
 test('reused native SDK is identified rather than configured twice', async () => {

@@ -1,5 +1,6 @@
 import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { SubscriptionProvider } from './src/context/SubscriptionContext';
+import { AdsProvider } from './src/context/AdsContext';
 import { AccountDataProvider } from './src/context/AccountDataContext';
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View, Alert } from 'react-native';
@@ -74,26 +75,28 @@ function AccountApp() {
     );
   return (
     <SubscriptionProvider>
-      <AccountPanel
-        visible={recoveryMode || showAccount}
-        onClose={() => {
-          dismissRecovery();
-          setShowAccount(false);
-        }}
-      />
-      <AccountDataProvider key={user?.id || 'guest'}>
-        <RoutineProvider>
-          <PlatformProvider>
-            <SpotifyConnectionProvider>
-              <PostProvider>
-                <WorkoutProvider>
-                  <AppContent />
-                </WorkoutProvider>
-              </PostProvider>
-            </SpotifyConnectionProvider>
-          </PlatformProvider>
-        </RoutineProvider>
-      </AccountDataProvider>
+      <AdsProvider blocked={recoveryMode || showAccount || !!error}>
+        <AccountPanel
+          visible={recoveryMode || showAccount}
+          onClose={() => {
+            dismissRecovery();
+            setShowAccount(false);
+          }}
+        />
+        <AccountDataProvider key={user?.id || 'guest'}>
+          <RoutineProvider>
+            <PlatformProvider>
+              <SpotifyConnectionProvider>
+                <PostProvider>
+                  <WorkoutProvider>
+                    <AppContent />
+                  </WorkoutProvider>
+                </PostProvider>
+              </SpotifyConnectionProvider>
+            </PlatformProvider>
+          </RoutineProvider>
+        </AccountDataProvider>
+      </AdsProvider>
     </SubscriptionProvider>
   );
 }
