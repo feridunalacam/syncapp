@@ -16,6 +16,7 @@ export const supabase = isSupabaseConfigured
         persistSession: true,
         detectSessionInUrl: false,
         flowType: 'pkce',
+        experimental: { appendPkceFlowIdToRedirects: true },
       },
     })
   : null;

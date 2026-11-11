@@ -6,6 +6,7 @@ import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import { AUTH_REDIRECT, RECOVERY_REDIRECT, parseAuthLink } from '../lib/authLinks';
+import { authExchangeDiagnostic, createAuthCodeExchanger } from '../lib/authCodeExchange';
 
 const AuthContext = createContext({ user: null, ready: false, configured: false });
 export const useAuth = () => useContext(AuthContext);
@@ -16,7 +17,8 @@ export function AuthProvider({ children }) {
   const [error, setError] = useState(null);
   const currentUser = useRef(null);
   currentUser.current = session?.user?.id || null;
-  const exchanges = useRef(new Map());
+  const exchangeCode = useRef(null);
+  if (!exchangeCode.current && supabase) exchangeCode.current = createAuthCodeExchanger(supabase);
   const requireClient = () => {
     if (!supabase) throw new Error('Account services are being set up. Please try again later.');
     setError(null);
@@ -31,19 +33,9 @@ export function AuthProvider({ children }) {
     const parsed = parseAuthLink(url);
     if (!parsed) return;
     if (parsed.error) throw new Error(parsed.error);
-    if (exchanges.current.has(parsed.code)) return exchanges.current.get(parsed.code);
-    const operation = checked(supabase.auth.exchangeCodeForSession(parsed.code));
-    exchanges.current.set(parsed.code, operation);
-    try {
-      await operation;
-      setError(null);
-      if (parsed.recovery) setRecoveryMode(true);
-      if (exchanges.current.size > 20)
-        exchanges.current.delete(exchanges.current.keys().next().value);
-    } catch (failure) {
-      exchanges.current.delete(parsed.code);
-      throw failure;
-    }
+    await exchangeCode.current(parsed);
+    setError(null);
+    if (parsed.recovery) setRecoveryMode(true);
   };
   useEffect(() => {
     if (!supabase) return;
@@ -80,7 +72,9 @@ export function AuthProvider({ children }) {
       if (!parsed) return;
       try {
         await exchangeLink(value);
-      } catch {
+      } catch (failure) {
+        if (__DEV__)
+          console.warn('[auth] Account link exchange failed', authExchangeDiagnostic(failure));
         if (alive)
           setError(
             'This sign-in link could not be used. Request a new link and open it on this device.',

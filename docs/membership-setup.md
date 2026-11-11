@@ -16,7 +16,7 @@ Monthly and annual products map to a single RevenueCat entitlement named `sync_p
 - Owner RLS on profiles, service-written entitlements and Pro-only cloud backup; client backup RPC binds the snapshot owner to the JWT user and uses revision compare-and-swap.
 - Private avatar bucket reserved for future upload UI; current photo UI remains device-local.
 - `delete-account`, `sync-subscription` and `revenuecat-webhook` deployed. Their handlers authenticate requests themselves. Live POST requests without credentials return 401 for all three endpoints.
-- Auth site URL `syncapp://auth/callback`; exact callback and recovery redirects added in the hosted dashboard.
+- Auth site URL `syncapp://auth/callback`; exact callback and recovery redirects added in the hosted dashboard. Per-flow PKCE is enabled for the pinned auth-js SDK. Existing exact entries are retained, with additional patterns `syncapp://auth/callback\?sb_flow_id=*` and `syncapp://auth/recovery\?sb_flow_id=*`; the literal query separator is escaped and the wildcard is confined to the flow-ID query value, without widening the allowed host/path. The app only accepts the SDK-generated 32-character lowercase-hex flow IDs and passes the matching ID into code exchange; legacy callbacks without a flow ID retain their previous behavior.
 - Email confirmation remains enabled; the hosted minimum password length is set to 8 characters. Gmail custom SMTP is saved and enabled, and actual signup email delivery/confirmation has been verified in the Auth user record. Native sign-in verification is still pending.
 - The device's `.env.local` contains the Supabase publishable key, real iOS RevenueCat public SDK key and public legal URLs, never backend secret/service keys. It is ignored by Git. `.env.example` and the shared `eas.json` base profile carry the same public legal URLs for repeatable builds; other environment values must be configured for each build environment.
 - RevenueCat's production webhook and both required Supabase Edge Function secrets are configured. Its dashboard TEST delivery returned HTTP 200 with `{"ignored":"different_environment"}` for a sandbox sample, confirming production isolation without granting access.
@@ -43,6 +43,8 @@ Offline writes remain in account-scoped storage. Sync uploads use a persisted di
 ## Validation
 
 The public Privacy/Terms pages were verified without authentication; their effective date is 12 November 2026. Targeted checks confirm the two legal URL values match across the local env, example env and inherited EAS build configuration. Fresh iOS and Android exports both contain each canonical URL, and the simulator opened the public Privacy Policy anonymously in iOS Safari. App Store Connect Privacy/Support URLs are saved. No backend secret is added to those tracked public defaults.
+
+Offline regression checks exercise the installed auth-js client with the real chunked storage adapter, memory-only native storage and injected fake HTTP: a clean recovery, overlapping successful resets, and an earlier callback surviving a later rate-limited reset. These tests never access device credentials or send mail. Real native recovery still needs a fresh end-to-end attempt.
 
 Gmail custom SMTP settings persisted after reload. Actual signup email delivery and user confirmation passed; the Auth user record confirms `email_confirmed` is true. Native sign-in verification remains pending. Password-recovery delivery, cold-launch recovery and complete authenticated account lifecycle testing remain untested.
 
