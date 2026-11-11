@@ -188,6 +188,10 @@ export default function SubscriptionPanel({ visible, onClose, onSignIn }) {
             {action('Restore purchases', () => run(subscription.restore), {
               disabled: !subscription.configured || !subscription.ready,
             })}
+            {text(
+              'Restoring a store purchase may move Pro access to this Sync account. If access moves, the previous account loses Pro access. Each account keeps its own separate cloud data.',
+              styles.fine,
+            )}
             {action('Manage subscription', () => run(subscription.manage))}
           </>
         )}
