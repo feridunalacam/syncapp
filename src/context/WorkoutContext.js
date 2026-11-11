@@ -1,3 +1,4 @@
+import { useAccountData } from './AccountDataContext';
 import React, {
   createContext,
   useCallback,
@@ -89,6 +90,11 @@ export const WorkoutProvider = ({ children }) => {
   const running = timer.session?.status === 'running';
   const paused = timer.session?.status === 'paused';
   const active = running || paused;
+  const { setSyncPaused } = useAccountData();
+  useEffect(() => {
+    setSyncPaused(active);
+    return () => setSyncPaused(false);
+  }, [active, setSyncPaused]);
   useEffect(() => {
     if (!active) setSnapshot(null);
   }, [active]);

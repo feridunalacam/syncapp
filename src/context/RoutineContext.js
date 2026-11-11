@@ -1,6 +1,7 @@
+import { useAccountData } from './AccountDataContext';
 import { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
 import { normalizeRoutine } from '../domain/routines';
-import storage, { STORAGE_KEYS } from '../lib/storage';
+import { STORAGE_KEYS } from '../lib/storage';
 
 export const defaultRoutines = [
   { id: 'deneme', name: 'deneme', rounds: 3, workSec: 60, restSec: 30 },
@@ -21,6 +22,7 @@ const RoutineContext = createContext({
 });
 
 export const RoutineProvider = ({ children }) => {
+  const { storage } = useAccountData();
   const [routines, setRoutines] = useState(defaultRoutines);
   const [completedRoutines, setCompletedRoutines] = useState([]);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -35,7 +37,7 @@ export const RoutineProvider = ({ children }) => {
       if (Array.isArray(stored)) {
         setRoutines(stored.map(normalizeRoutine));
       } else {
-        setRoutines(defaultRoutines);
+        setRoutines(storage.userId ? [] : defaultRoutines);
       }
       setIsLoaded(true);
     })();
@@ -160,7 +162,7 @@ export const RoutineProvider = ({ children }) => {
   // Reset all routine data back to factory defaults. Used by Logout / "wipe
   // everything" so the next user starts from a clean slate.
   const resetRoutinesToDefaults = useCallback(() => {
-    setRoutines(defaultRoutines);
+    setRoutines(storage.userId ? [] : defaultRoutines);
     setCompletedRoutines([]);
   }, []);
 

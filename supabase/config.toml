@@ -1,0 +1,10 @@
+project_id = "syncapp"
+
+# These functions authenticate every request in their handler. getUser validates
+# account JWTs; the webhook uses a server-only bearer secret, never a client flag.
+[functions.delete-account]
+verify_jwt = false
+[functions.sync-subscription]
+verify_jwt = false
+[functions.revenuecat-webhook]
+verify_jwt = false

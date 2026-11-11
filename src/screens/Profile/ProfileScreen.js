@@ -18,6 +18,11 @@ import * as Clipboard from 'expo-clipboard';
 import { useRoutineContext } from '../../context/RoutineContext';
 import { usePostContext } from '../../context/PostContext';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
+import { useAccountData } from '../../context/AccountDataContext';
+import { useSubscription } from '../../context/SubscriptionContext';
+import AccountPanel from '../../components/account/AccountPanel';
+import SubscriptionPanel from '../../components/account/SubscriptionPanel';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
 import ScreenHeader from '../../components/common/ScreenHeader';
 import GlassSurface from '../../components/common/GlassSurface';
@@ -28,6 +33,9 @@ import useSpotifyConnection from './hooks/useSpotifyConnection';
 
 export default function ProfileScreen() {
   const { theme, isDark, toggleTheme } = useTheme();
+  const auth = useAuth();
+  const cloud = useAccountData();
+  const subscription = useSubscription();
   const { routines, completedRoutines } = useRoutineContext();
   const { posts, addPost, deletePost } = usePostContext();
   const profile = useProfileData();
@@ -36,6 +44,65 @@ export default function ProfileScreen() {
   const [caption, setCaption] = useState('');
   const [routineId, setRoutineId] = useState(null);
   const [category, setCategory] = useState('sport');
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const accountAction = async (action, success) => {
+    if (cloudBusy) return;
+    setCloudBusy(true);
+    try {
+      await action();
+      if (success) Alert.alert(success);
+    } catch (error) {
+      Alert.alert('Could not complete this action', error?.message || 'Please try again.');
+    } finally {
+      setCloudBusy(false);
+    }
+  };
+  const importDeviceData = () =>
+    Alert.alert(
+      'Import existing device data?',
+      'Copy guest routines, activity and profile into this account. Existing account records are kept. This device’s guest data can only be claimed by one account.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Import',
+          onPress: () => accountAction(cloud.importGuestData, 'Device data imported'),
+        },
+      ],
+    );
+  const syncDetail = !auth.user
+    ? 'Sign in to keep your data with your account.'
+    : !subscription.isPro
+      ? 'Sync Pro backs up your routines and activity across devices.'
+      : cloud.status === 'syncing'
+        ? 'Syncing your private backup…'
+        : cloud.status === 'paused'
+          ? 'Cloud sync will continue after your workout.'
+          : cloud.status === 'conflict'
+            ? 'Your backup changed on another device. Choose which version to keep.'
+            : cloud.status === 'error' || cloud.status === 'offline'
+              ? (typeof cloud.error === 'string' ? cloud.error : cloud.error?.message) ||
+                'Could not sync. Your data is saved on this device.'
+              : cloud.lastSyncedAt && Number.isFinite(new Date(cloud.lastSyncedAt).getTime())
+                ? `Last synced ${new Date(cloud.lastSyncedAt).toLocaleString()}`
+                : 'Your private cloud backup is ready.';
+  const resolveConflict = (choice) =>
+    Alert.alert(
+      choice === 'cloud' ? 'Use your cloud backup?' : 'Use this device’s data?',
+      choice === 'cloud'
+        ? 'Replace the account data on this device with your latest cloud backup. A local recovery copy of this device’s data will be kept.'
+        : 'Replace your cloud backup with the account data on this device. Other devices will receive this version when they next sync.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: choice === 'cloud' ? 'Use cloud backup' : 'Use this device',
+          onPress: () =>
+            accountAction(async () => {
+              await cloud.resolveConflict(choice);
+              setSheet(null);
+            }, 'Backup updated'),
+        },
+      ],
+    );
   const ownPosts = posts.filter((p) => p.authorId === 'current-user');
   const section = (title) => (
     <Text style={[styles.section, { color: theme.textSecondary }]}>{title}</Text>
@@ -192,6 +259,70 @@ export default function ProfileScreen() {
             ))}
           </View>
         </Surface>
+        {section('Account')}
+        <Surface variant="card" style={[styles.group, { backgroundColor: theme.card }]}>
+          {row(
+            'person-circle-outline',
+            auth.user ? 'Your account' : 'Sign in or create account',
+            auth.user?.email || 'Keep guest mode, or sign in to use account features.',
+            () => setSheet('account'),
+          )}
+          {row(
+            'sparkles-outline',
+            subscription.isPro ? 'Sync Pro' : 'Explore Sync Pro',
+            subscription.isPro
+              ? 'Your Pro membership is active.'
+              : subscription.pending
+                ? 'Confirming your purchase with the store…'
+                : 'Cloud backup and sync. Keep your local timer free.',
+            () => setSheet('subscription'),
+            <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>
+              {subscription.isPro ? 'Pro' : subscription.pending ? 'Verifying' : 'Free'}
+            </Text>,
+            true,
+          )}
+          {row(
+            cloud.status === 'error' || cloud.status === 'offline'
+              ? 'cloud-offline-outline'
+              : 'cloud-outline',
+            'Cloud backup',
+            syncDetail,
+            cloud.status === 'syncing' || cloudBusy
+              ? undefined
+              : !auth.user
+                ? () => setSheet('account')
+                : !subscription.isPro
+                  ? () => setSheet('subscription')
+                  : cloud.status === 'conflict'
+                    ? () => setSheet('cloud-conflict')
+                    : () => accountAction(cloud.syncNow),
+            <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>
+              {cloud.status === 'syncing' || cloudBusy
+                ? '…'
+                : cloud.status === 'conflict'
+                  ? 'Review'
+                  : subscription.isPro
+                    ? 'Sync now'
+                    : 'Pro'}
+            </Text>,
+            true,
+          )}
+          {!!auth.user &&
+            !!cloud.hasGuestData &&
+            !cloud.importComplete &&
+            row(
+              'download-outline',
+              'Import device data',
+              'Bring your existing guest routines and activity into this account.',
+              cloud.status === 'syncing' || cloudBusy ? undefined : importDeviceData,
+              null,
+              true,
+            )}
+          <Text style={[styles.cloudNote, { color: theme.textSecondary }]}>
+            Audio files and profile photos stay on this device. Re-select local files when using
+            another device.
+          </Text>
+        </Surface>
         {section('Music')}
         <Surface variant="card" style={[styles.group, { backgroundColor: theme.card }]}>
           {row(
@@ -247,7 +378,7 @@ export default function ProfileScreen() {
           {row(
             'information-circle-outline',
             'About this version',
-            'Local routines, music and activity.',
+            'Routines, music and your Sync account.',
             () => setSheet('about'),
             null,
             true,
@@ -301,6 +432,39 @@ export default function ProfileScreen() {
           </Text>
         )}
       </ScrollView>
+      <AccountPanel
+        visible={sheet === 'account'}
+        onClose={() => setSheet(null)}
+        onManageSubscription={() => setSheet('subscription')}
+      />
+      <SubscriptionPanel
+        visible={sheet === 'subscription'}
+        onClose={() => setSheet(null)}
+        onSignIn={() => setSheet('account')}
+      />
+      <Sheet
+        visible={sheet === 'cloud-conflict'}
+        title="Choose your backup"
+        onClose={cloudBusy ? () => {} : () => setSheet(null)}
+      >
+        <Text style={[styles.prose, { color: theme.textSecondary }]}>
+          Your account data changed on another device. Review which version to keep before syncing
+          again.
+        </Text>
+        <Text style={[styles.prose, { color: theme.textSecondary }]}>
+          Use the cloud version to update this device, or keep this device’s version and replace the
+          cloud backup.
+        </Text>
+        {!cloudBusy && (
+          <>
+            {button('Use cloud backup', () => resolveConflict('cloud'))}
+            {button('Use this device', () => resolveConflict('local'))}
+          </>
+        )}
+        {cloudBusy && (
+          <Text style={[styles.prose, { color: theme.textSecondary }]}>Updating your backup…</Text>
+        )}
+      </Sheet>
       <Sheet visible={sheet === 'profile'} title="Edit profile" onClose={() => setSheet(null)}>
         <ScrollView keyboardShouldPersistTaps="handled">
           <Text style={[styles.label, { color: theme.textSecondary }]}>BIO</Text>
@@ -438,10 +602,12 @@ export default function ProfileScreen() {
       </Sheet>
       <Sheet visible={sheet === 'about'} title="About Sync" onClose={() => setSheet(null)}>
         <Text style={[styles.prose, { color: theme.text }]}>
-          Sync brings intervals and music together for movement, study and focus.{'\n\n'}Your
-          routines, profile, activity and posts are stored on this device. Spotify credentials use
-          secure device storage.{'\n\n'}Cloud accounts, online community publishing and paid
-          subscriptions are not connected in this version.
+          Sync brings intervals and music together for movement, study and focus.{'\n\n'}Use Sync on
+          this device for free, or sign in to keep separate account data. Sync Pro adds private
+          cloud backups for routines, activity and profile details across devices. Local audio files
+          and Spotify credentials stay on this device.{'\n\n'}Discover posts are private saved
+          content, not public online publishing. Manage your membership and account in the Account
+          section above.
         </Text>
       </Sheet>
     </ScreenWrapper>
@@ -477,6 +643,7 @@ const styles = StyleSheet.create({
   stat: { alignItems: 'center', flex: 1, paddingVertical: 2 },
   section: { fontSize: 15, fontWeight: '600', marginTop: 23, marginBottom: 11 },
   group: { borderRadius: 20, paddingHorizontal: 15 },
+  cloudNote: { fontSize: 11, lineHeight: 17, paddingTop: 4, paddingBottom: 15 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 13 },
   rowIcon: {
     width: 34,

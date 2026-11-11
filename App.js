@@ -1,5 +1,8 @@
-import React from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
+import { SubscriptionProvider } from './src/context/SubscriptionContext';
+import { AccountDataProvider } from './src/context/AccountDataContext';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, View, Alert } from 'react-native';
 import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
@@ -14,6 +17,7 @@ import { WorkoutProvider } from './src/context/WorkoutContext';
 import { SpotifyConnectionProvider } from './src/context/SpotifyConnectionContext';
 import TabNavigator from './src/navigation/TabNavigator';
 import { getNavTheme } from './src/navigation/theme';
+import AccountPanel from './src/components/account/AccountPanel';
 
 // Complete web browser auth session
 WebBrowser.maybeCompleteAuthSession();
@@ -34,7 +38,8 @@ function AppContent() {
       theme={navTheme}
       linking={{
         prefixes: [Linking.createURL('/'), 'syncapp://'],
-        filter: (url) => !url.startsWith('syncapp://spotify-callback'),
+        filter: (url) =>
+          !url.startsWith('syncapp://spotify-callback') && !url.startsWith('syncapp://auth/'),
         config: { screens: { Home: 'routine/:routineId' } },
       }}
     >
@@ -44,22 +49,63 @@ function AppContent() {
   );
 }
 
+function AccountApp() {
+  const { ready, user, recoveryMode, dismissRecovery, error, clearError } = useAuth();
+  const [showAccount, setShowAccount] = useState(false);
+  useEffect(() => {
+    if (error)
+      Alert.alert('Account link', error, [
+        { text: 'Dismiss', onPress: clearError },
+        {
+          text: 'Open account',
+          onPress: () => {
+            clearError();
+            setShowAccount(true);
+          },
+        },
+      ]);
+  }, [error]);
+  const { theme } = useTheme();
+  if (!ready)
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', backgroundColor: theme.background }}>
+        <ActivityIndicator color={theme.accent} />
+      </View>
+    );
+  return (
+    <SubscriptionProvider>
+      <AccountPanel
+        visible={recoveryMode || showAccount}
+        onClose={() => {
+          dismissRecovery();
+          setShowAccount(false);
+        }}
+      />
+      <AccountDataProvider key={user?.id || 'guest'}>
+        <RoutineProvider>
+          <PlatformProvider>
+            <SpotifyConnectionProvider>
+              <PostProvider>
+                <WorkoutProvider>
+                  <AppContent />
+                </WorkoutProvider>
+              </PostProvider>
+            </SpotifyConnectionProvider>
+          </PlatformProvider>
+        </RoutineProvider>
+      </AccountDataProvider>
+    </SubscriptionProvider>
+  );
+}
+
 export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ThemeProvider>
-          <RoutineProvider>
-            <PlatformProvider>
-              <SpotifyConnectionProvider>
-                <PostProvider>
-                  <WorkoutProvider>
-                    <AppContent />
-                  </WorkoutProvider>
-                </PostProvider>
-              </SpotifyConnectionProvider>
-            </PlatformProvider>
-          </RoutineProvider>
+          <AuthProvider>
+            <AccountApp />
+          </AuthProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

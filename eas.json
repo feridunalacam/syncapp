@@ -1,0 +1,26 @@
+{
+  "build": {
+    "base": {
+      "env": {
+        "EXPO_PUBLIC_PRIVACY_URL": "https://sync-app-support.feridun.chatgpt.site/privacy",
+        "EXPO_PUBLIC_TERMS_URL": "https://sync-app-support.feridun.chatgpt.site/terms"
+      }
+    },
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "extends": "base"
+    },
+    "preview": {
+      "distribution": "internal",
+      "extends": "base"
+    },
+    "production": {
+      "autoIncrement": true,
+      "extends": "base"
+    }
+  }
+}

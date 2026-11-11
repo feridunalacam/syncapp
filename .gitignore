@@ -23,3 +23,9 @@ dist/
 .env.local
 .env.*.local
 
+
+# Supabase local CLI metadata
+supabase/.temp/
+
+# Legal/support Site uses its own managed source repository.
+/sites/sync-legal/

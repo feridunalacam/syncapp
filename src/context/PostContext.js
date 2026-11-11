@@ -1,5 +1,6 @@
+import { useAccountData } from './AccountDataContext';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import storage, { STORAGE_KEYS } from '../lib/storage';
+import { STORAGE_KEYS } from '../lib/storage';
 
 const PostContext = createContext({
   posts: [],
@@ -28,7 +29,8 @@ const examplePosts = [
     },
     type: 'new',
     category: 'sport',
-    caption: 'Perfect for building endurance! This boxing routine helped me get in shape. Try it out!',
+    caption:
+      'Perfect for building endurance! This boxing routine helped me get in shape. Try it out!',
     createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     likes: 0,
     liked: false,
@@ -182,6 +184,7 @@ const applyVote = (post, direction) => {
 };
 
 export const PostProvider = ({ children }) => {
+  const { storage } = useAccountData();
   const [posts, setPosts] = useState(examplePosts);
   const [hydrated, setHydrated] = useState(false);
 
@@ -281,7 +284,17 @@ export const PostProvider = ({ children }) => {
       votePost,
       searchPosts,
     }),
-    [posts, addPost, deletePost, clearAllPosts, likePost, upvotePost, downvotePost, votePost, searchPosts],
+    [
+      posts,
+      addPost,
+      deletePost,
+      clearAllPosts,
+      likePost,
+      upvotePost,
+      downvotePost,
+      votePost,
+      searchPosts,
+    ],
   );
 
   return <PostContext.Provider value={value}>{children}</PostContext.Provider>;

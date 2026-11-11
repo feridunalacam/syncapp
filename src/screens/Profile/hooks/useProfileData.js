@@ -1,10 +1,12 @@
+import { useAccountData } from '../../../context/AccountDataContext';
 import { useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import storage, { STORAGE_KEYS } from '../../../lib/storage';
+import { STORAGE_KEYS } from '../../../lib/storage';
 import { persistLocalMedia } from '../../../lib/localMedia';
 
 export default function useProfileData() {
+  const { storage } = useAccountData();
   const [picture, setPicture] = useState(null);
   const [bio, setBio] = useState('');
   const [links, setLinks] = useState({ instagram: '', twitter: '', tiktok: '', youtube: '' });

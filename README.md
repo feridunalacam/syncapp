@@ -1,6 +1,6 @@
 # SyncApp
 
-An Expo interval timer that coordinates work/rest rounds with local audio or Spotify playback. Routines, profile, posts and activity are stored on the device; there is no cloud account or subscription backend in this version.
+An Expo interval timer that coordinates work/rest rounds with local audio or Spotify playback. Core timer, music, routines and activity work offline for free. Supabase Auth adds accounts; server-verified Sync Pro subscriptions enable private cloud backup and device sync. See [membership setup](docs/membership-setup.md) for live service configuration and release gates.
 
 ## Run
 
@@ -45,7 +45,7 @@ Every round can have its own timing and music. Changing the global work/rest pic
 
 Starting a session snapshots the routine so edits cannot mutate the running session. Switching tabs preserves the active session. Ending early saves actual progress; cancelling during preparation does not create a workout. A replayed round counts only once toward completed rounds. Skipped intervals are recorded explicitly.
 
-Existing saved content is retained. Empty routine lists remain empty after restart. New installations do not receive fabricated workout history. Legacy history without actual duration uses its planned duration as a fallback, since past real elapsed time cannot be reconstructed.
+Account records are isolated from guest mode and from other accounts. Existing guest data is imported only after the user explicitly chooses Import in Profile. Existing saved content is retained. Empty routine lists remain empty after restart. New installations do not receive fabricated workout history. Legacy history without actual duration uses its planned duration as a fallback, since past real elapsed time cannot be reconstructed.
 
 Discover contains clearly marked sample routines and locally saved posts. Share images/text can be exported using the device clipboard/share sheet. Saving to Discover is not online publishing.
 
