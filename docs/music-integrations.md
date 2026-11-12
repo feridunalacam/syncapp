@@ -6,7 +6,7 @@ Source implementation added on 12 November 2026. This source has not been shippe
 | --- | --- | --- |
 | Device / Browser audio | Existing local import and permitted web audio playback | No music account required. |
 | Apple Music | Native iOS MusicKit authorization, subscription check, catalog song/playlist search, paginated library playlists and playlist tracks, per-round songs/playlists, shuffle distribution, pause/resume/stop, repeat and player state | iOS 16+, a newly built native client, MusicKit enabled for the Apple App ID and an active Apple Music subscription. Android/web and Expo Go offer the external Apple Music link. |
-| Spotify | Existing OAuth + PKCE and Connect controls in development; external Open Spotify link in Other music apps | Existing owner-development gate remains in place. Public/commercial access has not been granted. |
+| Spotify | Existing owner-development OAuth + PKCE/Connect controls, plus a separately labelled external **Open Spotify** link | The connection/playback release gate remains in place. The external link does not connect an account or control intervals. Public/commercial streaming access has not been granted. |
 | YouTube Music | Open the service or a shared song/playlist URL | No account OAuth, audio extraction or automatic interval playback. YouTube's API policies prohibit hidden/background players and separating audio/video. |
 | TIDAL | Open service/shared link | Public developer terms target noncommercial offerings and restrict mixing/integration with other services. An API client alone does not establish permission for Sync. |
 | SoundCloud | Open service/shared link | Public API access requires an application review; the public API help excludes general commercial use. |
@@ -30,7 +30,11 @@ Disconnect stops Sync's application music player and removes Sync's connection m
 
 ## Validation
 
-On this source, **518/518 automated tests passed**, iOS and Android Hermes exports passed, Expo autolinking discovered `SyncAppleMusic`, the generated permission purpose text was checked, and the actual `SyncAppleMusic` CocoaPods target built successfully for the arm64 iOS simulator. The MusicKit controller also passed standalone Swift type checking with warnings treated as errors. These checks do not establish Apple App ID activation, live subscription playback, physical-device behavior, or a delivered Store build.
+Source `585b64b` passed **557/557 automated tests** and iOS/Android Hermes exports. Independent real-SDK/storage checks also verified the three credential-entry races, native cancellation after lock wait and initialization/error paths. The actual whole-app CNG **Release** simulator build (arm64/x86_64) and a separate **Debug** development client (arm64) passed normal signing and strict/deep codesign; both Apple native modules are included. Their backend/RevenueCat values are explicit synthetic QA fixtures, not live service validation.
+
+Native iPhone Debug QA showed the Apple/Google/email/guest welcome choices, completed guest entry, exposed Spotify Connect and native Apple Music, and displayed all seven external services. **Open Spotify** reached its actual HTTPS homepage. After the owner completed Spotify authorization, playlists, catalog search and per-interval assignment worked. A 15-second Work / 10-second Rest / 15-second Work session completed with pause/resume; the real desktop Spotify player showed the different Rest song and paused at completion. A second session's early end also paused Spotify. This is one owner Premium account through a development client and Connect desktop device, observed through player UI; it is not an acoustic, physical-iPhone or public-access test. The owner has no Apple Music subscription. MusicKit App ID activation, physical subscribed-device playback and a new Store build remain unverified. See [sanitized QA evidence](music-auth-qa-evidence.json).
+
+Apple's review rules separately discuss rights for more complex MusicKit integrations, including timed song use; native compilation or enabling the app service does not establish those rights. Keep that release assessment open for per-round playback. [Apple MusicKit review rules](https://developer.apple.com/app-store/review/guidelines/#apple-sites-and-services)
 
 ## Primary references
 

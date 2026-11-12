@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUTC": "2026-11-12T12:04:43Z",
+  "sourceCommit": "585b64ba4aa50248dea685bf1d711f96af4940e1",
+  "postQASourceRevision": {
+    "commit": "d918565",
+    "changes": "opt-in Spotify authorization-read diagnostics and singular count text; native dependencies unchanged",
+    "testsPassed": 576,
+    "independentTargetedTestsPassed": 47,
+    "nativeAndLiveSpotifyEvidenceBelowAppliesTo": "585b64b",
+    "hermesExports": "iOS and Android passed, exit 0; exact six-file overlay matches commit",
+    "exportEnvironment": "synthetic public fixtures; production profile, Spotify/Ads disabled",
+    "nativeDependenciesChanged": false
+  },
+  "deliveredStoreBuildStill": "1.0.0 (2), source da7339f",
+  "newSourceUploadedToTestFlight": false,
+  "sourceValidation": {
+    "node": "22.23.4",
+    "testsPassed": 557,
+    "iOSAndAndroidHermesExportsPassed": true,
+    "independentRealSDKSyntheticStorageRacesPassed": 3,
+    "postLockCancellationAndIdentityChecksPassed": 2,
+    "initializationTimeoutErrorAndPKCEChecksPassed": 5,
+    "guestEntryRendererChecksPassed": 5,
+    "liveAccountAuthenticationEstablishedByTheseTests": false
+  },
+  "nativeBuilds": {
+    "releaseSimulator": {
+      "normalSignedWholeAppBuildPassed": true,
+      "strictDeepCodesignPassed": true,
+      "architectures": ["arm64", "x86_64"],
+      "sdk": "iphonesimulator26.5",
+      "localVersionAndBuild": "1.0.0 (1)",
+      "minimumIOS": "15.1",
+      "deviceFamilies": [1, 2],
+      "nativeModules": ["SyncAppleMusic 1.0.0", "ExpoAppleAuthentication 8.0.8"],
+      "spotifyEnabled": false,
+      "adsEnabled": false
+    },
+    "debugDevelopmentClient": {
+      "normalSignedWholeAppBuildPassed": true,
+      "strictDeepCodesignPassed": true,
+      "architectures": ["arm64"],
+      "localVersionAndBuild": "1.0.0 (1)",
+      "nativeModulesPresentInExecutable": true,
+      "expectsMetro": true,
+      "spotifyDevelopmentFlag": true,
+      "spotifyReleaseGuardUnmodified": true,
+      "adsEnabled": false
+    },
+    "configurationBoundary": {
+      "backendAndRevenueCat": "synthetic public fixtures; not live service validation",
+      "dotenvCopiedOrLoaded": false,
+      "rootNativeProjectPreservedSinceFreeze": true,
+      "priorBuildOutputsPreserved": true,
+      "independentDependenciesAndPods": true,
+      "appleMusicPurposeStringPresent": true,
+      "appleSignInSimulatedEntitlement": "Default",
+      "musicKitEntitlementInvented": false,
+      "physicalDeviceOrAppStoreSignatureVerifiedByTheseBuilds": false
+    }
+  },
+  "nativeUI": {
+    "device": "isolated iPhone simulator QA installation",
+    "debugClientInstalledAndConnectedToFrozenMetro": true,
+    "metroListener": "loopback only",
+    "welcomeAppleGoogleEmailAndGuestChoicesVisible": true,
+    "continueWithoutAccountPassed": true,
+    "spotifyConnectVisibleInDevelopment": true,
+    "appleMusicConnectVisibleWithNativeModule": true,
+    "externalServicesVisible": ["Spotify", "YouTube Music", "TIDAL", "SoundCloud", "Deezer", "Amazon Music", "Audius"],
+    "externalSpotifyHomepageOpened": true,
+    "spotifyAuthorizationWindowOpened": true,
+    "spotifyOwnerSignIn": "completed by owner; Connected observed",
+    "spotifyPlaylistsLoaded": true,
+    "spotifyCatalogSearchAndPerIntervalAssignmentPassed": true,
+    "actualNewSourceStreamingPlaybackVerified": true,
+    "spotifyLivePlaybackScope": "one owner Premium account, development client, Spotify Connect desktop device; player UI observed, no acoustic measurement",
+    "spotifyLiveSessionChecks": {
+      "workRestWorkSeconds": [15, 10, 15],
+      "automaticCompletionObserved": true,
+      "pauseAndResumePassed": true,
+      "differentRestSongObservedInDesktopPlayer": true,
+      "desktopPlayerPausedAfterCompletion": true,
+      "secondSessionEarlyEndAndPlayerPausePassed": true,
+      "physicalIPhoneOrPublicSpotifyAccessEstablished": false
+    },
+    "externalLinksAreConnectedAccounts": false
+  },
+  "iPadReleaseUI": {
+    "sourceCommit": "585b64b",
+    "installedOverPreviousQAAppWithoutDataReset": true,
+    "existingRoutinesPreserved": 5,
+    "existingSessionsPreserved": 4,
+    "existingDarkAppearancePreserved": true,
+    "guestWelcomeDismissalPassed": true,
+    "nativeAppleMusicAndSevenExternalServicesVisible": true,
+    "spotifyConnectHiddenInRelease": true,
+    "fiveSecondSessionCompletedAndFinished": true,
+    "liveBackendOrSubscriptionValidation": false
+  },
+  "remoteSignInConfiguration": {
+    "specificOwnerApprovalReceived": true,
+    "appleAppIDCapabilityAndSupabaseProviderEnabled": "observed by coordinating provider-setup chat",
+    "googleWebClientCreatedInExistingProject": true,
+    "googleProviderEnabled": true,
+    "liveGoogleAppleAccountLoginVerified": false,
+    "googleSecretRotationAndOwnerEntryCompleted": true,
+    "exposedInitialSecretInvalidationVerified": "coordinating setup chat observed old Disabled/new Enabled; no secret values retained here",
+    "appleProfileRegeneratedWithSameCertificate": true,
+    "downloadedProfileContainsDefaultAppleSignIn": true,
+    "appleProfileImportToEAS": "completed; same profile record, certificate and Store binding preserved; returned profile bytes match owner download SHA256",
+    "newDistributionArchiveProfileVerified": false
+  },
+  "publicSourceDependencyAudit": {
+    "total": 21,
+    "high": 2,
+    "moderate": 18,
+    "low": 1,
+    "critical": 0,
+    "newAdvisoryOrVulnerablePackageVersusDa7339f": false,
+    "newPackage": "expo-apple-authentication 8.0.8",
+    "privateWorkspaceUploaded": false,
+    "validJSONPreserved": true,
+    "processExitCodePreserved": false,
+    "cleanAudit": false
+  },
+  "remainingGates": [
+    "live Google/Apple account tests in an appropriately configured native client",
+    "import regenerated Apple Sign In Store profile into EAS and verify the next distribution archive",
+    "MusicKit App ID activation and physical subscribed-device playback; owner currently has Spotify Premium only",
+    "public/commercial streaming and timed-playback permissions are not established by these tests",
+    "real Apple purchase/renewal/refund/restore-to-Pro and authorized sandbox/review configuration",
+    "owner completes Apple merchant declarations and final release privacy/rating review"
+  ]
+}

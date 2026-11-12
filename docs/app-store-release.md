@@ -25,6 +25,18 @@ Source `a6099d3` corrects Profile accessibility: non-actionable rows use a non-g
 
 This change is not in uploaded Store **1.0.0 (2)**. Its isolated CNG simulator Release rebuild passed strict/deep codesign. On the QA iPad the native accessibility tree exposes a separate enabled Dark appearance switch, and activating it changed its value **1 → 0 → 1** with matching light/dark UI. Existing five routines and four recorded sessions remained after installation. This is a native AX activation check, not a full VoiceOver audit or a new delivered TestFlight build. Later concurrent worktree edits are outside the `a6099d3` build/test evidence.
 
+## Latest music/auth source — not delivered to the store
+
+Source `585b64b` adds the native MusicKit adapter, native Apple/browser Google sign-in, first-launch guest choice and silent local-file look-ahead. Three SDK credential writers now share the refresh lock, with cancellation checked after acquisition. **557/557 tests**, both Hermes exports and independent real-SDK/storage regressions pass. Full normally signed CNG Release and Debug simulator apps include both Apple modules and pass strict/deep codesign. These builds use synthetic backend/RevenueCat values; the existing Store build remains **1.0.0 (2)** from `da7339f`.
+
+Native Debug iPhone QA completed guest entry, exposed Spotify Connect and native Apple Music, and showed all seven external-link services. External **Open Spotify** reached its real homepage. The owner completed Spotify authorization; playlists, catalog search, per-interval assignments, a full Work/Rest/Work session, pause/resume, completion and early end passed against a real Connect desktop player. This validates one owner Premium account in development, not physical-iPhone playback or public Spotify access. Live Google/Apple account login remains unverified. Public Spotify account/playback remains gated; its ordinary external link is separate. MusicKit App ID activation, physical subscribed-device behavior and timed-use rights remain open; the owner has Spotify Premium only.
+
+The owner specifically approved Google/Apple provider setup. The coordinating setup chat enabled both providers and checked their redirects. After the initial Google secret appeared in setup tool output, the owner directly rotated it; the setup chat verified old **Disabled** and new **Enabled**. No secret value is recorded here. Apple Sign In's Store profile is now regenerated, owner-downloaded and imported into the same EAS profile record. Matching bundle/team, the same distribution certificate, new entitlement, exact returned profile bytes and unchanged Store binding were verified. Next distribution-archive verification remains pending.
+
+The same `585b64b` Release app was installed over the isolated iPad QA installation without a data reset. It preserved five routines, four sessions and dark appearance, completed guest entry and a five-second session, showed native Apple Music plus the seven external links, and kept Spotify Connect hidden in Release. Subsequent source `d918565` preserves actionable Spotify 401/403 errors during session reads and corrects singular count text; **576/576 tests**, an independent 47-test subset and separate iOS/Android Hermes exports pass. Native dependencies did not change. Those exports used synthetic public fixtures with production Spotify/Ads disabled; the native/live QA above remains scoped to `585b64b`.
+
+No new Store build or public release was performed. Current screenshot comparisons, privacy/rating and real Pro lifecycle gates still apply. [Current sanitized evidence](music-auth-qa-evidence.json)
+
 ## Actual iOS configuration
 
 | Setting | Repository value |
@@ -67,7 +79,7 @@ The existing App Manager API key, Apple Distribution certificate and app-specifi
 | [Terms of Use](https://sync-app-support.feridun.chatgpt.site/terms) | Canonical in-app paywall terms URL; published previously. This does not establish whether a custom App Store EULA field has been configured. |
 | [Support/marketing site](https://sync-app-support.feridun.chatgpt.site/) | Existing public site; App Store Support URL and v1.0 Marketing URL persistence were recorded earlier. Verify exact current Support field before submission. |
 
-The Apple/Google Sync-account provider flags remain disabled; main accounts use email/password. Spotify is an owner-development-only music connection and is excluded from release builds. Keep all disabled integrations out of release screenshots and copy.
+Google and native Apple Sync-account providers are now enabled remotely for the upcoming client; successful owner account login still needs runtime validation. The delivered Store build predates those buttons. Spotify is an owner-development-only music connection; release exposes only its separately labelled external link. Keep unavailable account/playback claims out of release screenshots and copy.
 
 ## Proposed English metadata
 
