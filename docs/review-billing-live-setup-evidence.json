@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "recordedOn": "2026-11-12",
-  "snapshotBoundary": "Store5 prices owner-reported correct and metadata saved. RecoveryV2 source151/0734 targeted119/full721/Hermes/archive150 PASS; local actual-public native UI retains1routine/1session and shows new reset guidance, no reset sent. Physical B recovery/fresh reviewer credentials and Store6 remain pending.",
+  "snapshotBoundary": "Store6 source18c41c151/0734 FINISHED30IPAchecks/rootreview/single official Apple upload/VALID/betaReady/existing-group IN_BETA_TESTING verified19:34:26Z;1tester4builds,8groupchecks preserving prior settings/membership/builds. Store5 prices remain owner-reported history. Physical6Breset/freshreviewcreds/purchase unverified.",
   "status": "Approved live setup partially complete; no purchase-to-Pro proof",
   "evidenceSources": [
     "Root-relayed supported CUA/service observations and EAS peer readback",
@@ -756,7 +756,7 @@
     "purchaseOrProUnlockVerified": false
   },
   "reviewCredentialRecoveryBlocker": {
-    "status": "CURRENT BLOCKER; physical B recovery link fails and fresh reviewer credentials are not ready",
+    "status": "CURRENT VALIDATION GATE: Store6 available in existing group; same-phone B reset/new password/cold restart and fresh reviewer credentials not yet verified",
     "reportedPhysicalError": "This sign-in link couldn't be used. Request a new link",
     "sameIPhoneRequestAndOpenReported": true,
     "reportedOpenPath": "Chrome to Sync",
@@ -785,8 +785,10 @@
       "targetedTestsPassed": 119,
       "independentIntegrationReview": "PASS",
       "fullSuiteAndHermesFinalResultEstablished": true,
-      "newBinaryOrPhoneRecoverySuccessEstablished": false,
-      "fullTestsPassed": 721
+      "fullTestsPassed": 721,
+      "newStore6BinaryBuildAndUploadEstablished": true,
+      "physicalPhoneRecoverySuccessEstablished": false,
+      "store6AppleProcessingAndGroupDeliveryEstablished": true
     },
     "credentialHandoff": {
       "generatedReviewPasswordsWereMemoryOnly": true,
@@ -799,10 +801,13 @@
     },
     "sourceFreezeComplete": true,
     "recoveryTestsPassedEstablished": true,
-    "build6SuccessEstablished": false,
+    "build6SuccessEstablished": true,
     "physicalRecoverySuccessEstablished": false,
     "targetedRecoveryTestsPassedEstablished": true,
-    "fullReleaseSuiteAndHermesPassedEstablished": true
+    "fullReleaseSuiteAndHermesPassedEstablished": true,
+    "store6PhysicalRecoverySuccessEstablished": false,
+    "reportedFailureClientBuild": "5",
+    "store6PhysicalRetestPending": true
   },
   "savedCategoryAndSubtitleReceipt": {
     "approvedByOwner": true,
@@ -824,7 +829,7 @@
     "operationsFile": "artifacts/app-store/store-metadata-2026-11-12/approved-category-subtitle-operations.json"
   },
   "authRecoveryV2SourceEvidence": {
-    "status": "SOURCE FROZEN; targeted119/full721/Hermes/local archive PASS; new Store6 and physical recovery pending",
+    "status": "SOURCE151/0734 targeted119/full721/Hermes/archive PASS; Store6 FINISHED30checks/single Apple upload/VALID/existing-group Testing PASS; physical B recovery and fresh credentials pending",
     "sourceFreezeFile": "/private/tmp/syncapp-auth-recovery-fix-vpagjaot/auth-recovery-source-freeze-v2.json",
     "sourceFreezeSHA256": "35a5d6da8b9f20da2dda41bccaa1b4aa5cea43464fc41f561f5256c4e5c30a19",
     "runtimeFiles": 151,
@@ -845,7 +850,7 @@
     "physicalCauseConclusivelyAttributed": false,
     "fullSuiteAndHermesFinalResultEstablished": true,
     "fullSuiteAndHermesRunDirectory": "/private/tmp/syncapp-recovery-final-6a73bbj1",
-    "newBinaryBuiltOrUploaded": false,
+    "newBinaryBuiltOrUploaded": true,
     "physicalSameDeviceRecoverySuccess": false,
     "fullTestsPassed": 721,
     "fullTestsFailed": 0,
@@ -880,6 +885,65 @@
       }
     },
     "finalHandoffFile": "/private/tmp/syncapp-recovery-final-6a73bbj1/final-handoff-evidence.json",
-    "finalHandoffSHA256": "3d0bd6a2dcdda607d7af2be17a573540efe41582c99485d3973ea65d66133a68"
+    "finalHandoffSHA256": "3d0bd6a2dcdda607d7af2be17a573540efe41582c99485d3973ea65d66133a68",
+    "sourceCommit": "18c41c0116dba0d8d3e13c0a7a97b3de8e43b17c"
+  },
+  "store6BuildAndUpload": {
+    "version": "1.0.0",
+    "buildNumber": "6",
+    "sourceCommit": "18c41c0116dba0d8d3e13c0a7a97b3de8e43b17c",
+    "runtimeFiles": 151,
+    "runtimeManifestCanonicalSHA256": "0734ab863cd1acd63df1f50d0832941ab8412a58525ec1dc48784a0e7b47b05f",
+    "fullTestsPassed": 721,
+    "targetedAuthTestsPassed": 119,
+    "easBuildID": "baab63bd-221a-48dd-b9fd-aab34191e9fb",
+    "easBuildStatus": "FINISHED",
+    "easFinishedAtUTC": "2026-11-12T19:21:55Z",
+    "ipaSHA256": "438d5bd8fa100de4a30406ece734eae88288af3fb9314f831ccadba45d5b0af1",
+    "hermesSHA256": "15a2963a38d51cac0b1f14654d2226656cb9ce891d3d7b6ff1d9bc5a622c88c5",
+    "checksPassed": 30,
+    "checksTotal": 30,
+    "rootIndependentReviewPassed": true,
+    "actualApprovedPublicFieldsMatched": 5,
+    "recoveryMarkersMatched": 3,
+    "historicalCoachRecordingsAbsent": 14,
+    "ownedCueWavsPresent": 8,
+    "sameApprovedSigningProfileAndCertificate": true,
+    "syntheticFixturesAbsent": true,
+    "allFourReleaseFlagsOff": true,
+    "officialAppleValidationPassed": true,
+    "validationObservedAtUTC": "2026-11-12T19:27:12Z",
+    "officialAppleDirectUploadPassed": true,
+    "uploadObservedAtUTC": "2026-11-12T19:29:47.074Z",
+    "singleUploadOnly": true,
+    "easSubmitUsed": false,
+    "deliveryID": "336d87da-d55d-4c30-91bb-d1ee62cb5447",
+    "appleProcessingVALIDVerified": true,
+    "internalBetaReadyVerified": true,
+    "existingGroupTestingVerified": true,
+    "downloadableToOwnerEstablished": true,
+    "physicalRecoveryFixedClaim": false,
+    "freshReviewerCredentialsReady": false,
+    "purchaseOrProLifecycleVerified": false,
+    "externalBetaOrAppReviewOrPublicRelease": false,
+    "candidateEvidenceFile": "artifacts/app-store/testflight-1.0.0-6/candidate-evidence.json",
+    "ipaVerificationFile": "artifacts/app-store/testflight-1.0.0-6/ipa-verification.json",
+    "rootIndependentReviewFile": "artifacts/app-store/testflight-1.0.0-6/root-upload-review.json",
+    "appleUploadSummaryFile": "/private/tmp/sync-testflight-build6/apple-upload-summary.json",
+    "candidateHoldIsHistoricalSupersededByRootReadyAndUpload": true,
+    "status": "DELIVERED_EXISTING_OWNER_INTERNAL_TESTFLIGHT",
+    "appleInternalState": "IN_BETA_TESTING",
+    "groupName": "Sync Internal QA",
+    "testerCount": 1,
+    "buildCount": 4,
+    "groupChecksPassed": 8,
+    "priorBuildsSettingsAndMembershipPreserved": true,
+    "onlyBuild6Added": true,
+    "deliveryVerifiedAtUTC": "2026-11-12T19:34:26.241Z",
+    "deliveryEvidenceFile": "artifacts/app-store/testflight-1.0.0-6/delivery-evidence.json",
+    "groupProofFile": "artifacts/app-store/testflight-1.0.0-6/group-delivery-proof.json",
+    "groupProofSHA256": "52953f14716a7b49d40ad21f453fb7efcfbbffbc02a65fb6284a7b5bb46577e6",
+    "ownerInstalledStore6Confirmed": false,
+    "freshSamePhoneBResetAndColdRestartPending": true
   }
 }
