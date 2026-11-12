@@ -1,6 +1,6 @@
 # iOS App Store privacy draft
 
-Updated on 12 November 2026 with the actual signed Store IPA **1.0.0 (2)** from source `da7339f`. Its signature/profile checks passed, upload succeeded and Apple processing reports `VALID` / internally `READY_FOR_BETA_TESTING`; tester access is not yet configured. **No App Store privacy questionnaire was changed or published.** This maps inspected code and shipped SDK manifest declarations to proposed answers. It is a manifest inventory, not an official Xcode aggregated privacy report, final privacy label or legal determination; runtime/provider and owner review remain required.
+Updated on 12 November 2026 with the actual signed Store IPA **1.0.0 (2)** from source `da7339f`. Its signature/profile checks passed, upload succeeded and Apple processing reports `VALID` / internally `READY_FOR_BETA_TESTING`. The owner-only internal group has this build and one tester marked **Invited**; acceptance/installation remain unobserved. **No App Store privacy questionnaire was changed or published.** This maps inspected code and shipped SDK manifest declarations to proposed answers. It is a manifest inventory, not an official Xcode aggregated privacy report, final privacy label or legal determination; runtime/provider and owner review remain required.
 
 ## Scope and interpretation
 
@@ -25,6 +25,17 @@ Apple's label concerns retained off-device data, including partners and optional
 The Purchase History row intentionally differs from the generic installed RevenueCat manifest: it declares `linked=false` and App Functionality only, while **this app supplies an account UUID joinable to email**. RevenueCat's [Apple disclosure guide](https://www.revenuecat.com/docs/platform-resources/apple-platform-resources/apple-app-privacy) calls for Purchase History, includes Analytics and explains linked custom identifiers. Optional attribution integrations can change the answer. No billing-card/bank data is collected by Sync's inspected code; Apple handles payment entry, while purchase history remains a separate category.
 
 No dedicated real-name or telephone input was found. A reserved `profiles.display_name` schema field is not evidence that the current UI uploads real names. Profile photos and imported audio/video remain local; no media bytes are included in the current backup allowlist. Do not select Photos/Videos or Audio Data solely because local permission is requested. Generic bio/post text is covered as user content; specific requested fields/history require their own classification. Recheck if avatar upload or media backup is added.
+
+## Upcoming music and social sign-in — unshipped source
+
+These observations concern the active music/auth source work, **not Store build 2**. Its final native archive, provider setup and live account behavior are not yet verified. Reconcile this section with the selected binary before changing public disclosures.
+
+- Native Apple Music requests Music access when the person explicitly connects, checks catalog-subscription access, and uses MusicKit for catalog search, library playlists and playback. The current bridge returns song/playlist metadata, not MusicKit credentials. JavaScript/SecureStore retain only a device-local connection marker; selected routine track IDs/metadata can enter the existing Pro backup allowlist. Inspect final framework/Apple service behavior and retained data before choosing listening/search-history categories; absence of an app-side history table does not establish all partner behavior.
+- Other music-service entries currently open approved external HTTPS destinations. They do not import an account/library or control its interval playback. Those pages/apps have their own network/data flows; do not describe the links as connected accounts or assume no destination receives a request.
+- New social sign-in exchanges identity credentials through Supabase Auth. The native Apple path requests **email only** and sends its identity token plus nonce for verification; it does not request a real name or persist a separate Apple credential in music storage. Google uses the configured OAuth provider. Review its final scopes and retained Supabase identity/profile metadata: a screen without a name field is insufficient evidence that a provider does not supply a name or profile-picture URL. Keep this as an open verification item while providers are disabled/unverified.
+- The Store build 2 inventory of 15 privacy manifests predates these native additions. Repeat archive inspection/report generation for the actual new build; do not carry the old manifest count or disclosure decisions forward without checking.
+
+The existing email/User ID/User Content rows remain relevant; this section does not add a verified collection category, claim live provider success, or publish a questionnaire answer. Native permission setup is separate from service/content authorization and paid-release readiness.
 
 ## Exact installed Google manifest matrix
 
