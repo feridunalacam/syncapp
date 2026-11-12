@@ -5,6 +5,10 @@
   },
   "build": {
     "base": {
+      "node": "22.23.4",
+      "ios": {
+        "image": "macos-tahoe-26.5-xcode-26.6"
+      },
       "env": {
         "EXPO_PUBLIC_PRIVACY_URL": "https://sync-app-support.feridun.chatgpt.site/privacy",
         "EXPO_PUBLIC_TERMS_URL": "https://sync-app-support.feridun.chatgpt.site/terms",

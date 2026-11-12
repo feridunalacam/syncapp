@@ -5,7 +5,7 @@ import { createSubscriptionConfig } from '../src/services/subscriptions/config.j
 
 const profiles = ['development', 'preview', 'production'];
 const platforms = ['ios', 'android'];
-const messages = {
+export const releaseConfigMessages = {
   profile: 'Choose an existing development, preview or production EAS profile.',
   platform: 'Choose --platform ios or --platform android.',
   inheritance: 'The EAS profile inheritance is missing, invalid or circular.',
@@ -32,7 +32,7 @@ function httpsPublic(value) {
       !url.password &&
       !/^(?:localhost|127\.|0\.0\.0\.0|\[::1\])/.test(url.hostname) &&
       !/(?:^|\.)(?:example\.(?:com|org|net)|invalid|localhost)$/.test(url.hostname) &&
-      !/YOUR_PROJECT|REPLACE_ME/i.test(value)
+      !/YOUR[_-]?PROJECT|REPLACE[_-]?ME|PLACEHOLDER/i.test(value)
     );
   } catch {
     return false;
@@ -43,7 +43,7 @@ function publicSupabaseKey(value) {
   if (
     typeof value !== 'string' ||
     value.trim() !== value ||
-    /REPLACE_ME|YOUR_KEY|PLACEHOLDER/i.test(value)
+    /REPLACE[_-]?ME|YOUR[_-]?KEY|PLACEHOLDER/i.test(value)
   )
     return false;
   if (/^sb_publishable_[A-Za-z0-9_-]+$/.test(value)) return true;
@@ -60,32 +60,27 @@ function publicSupabaseKey(value) {
 }
 
 export function resolveProfile(eas, profile, visited = new Set()) {
-  if (visited.has(profile) || !eas?.build?.[profile]) throw new Error(messages.inheritance);
+  if (visited.has(profile) || !eas?.build?.[profile])
+    throw new Error(releaseConfigMessages.inheritance);
   visited.add(profile);
   const current = eas.build[profile];
   const parent = current.extends ? resolveProfile(eas, current.extends, visited) : {};
   return { ...parent, ...current, env: { ...parent.env, ...current.env } };
 }
 
-export function checkReleaseConfig({ platform, profile = 'production', env = {}, eas = {} } = {}) {
+// Cloud builds must validate their actual environment without filling missing
+// values from eas.json or a local dotenv file. The manual checker below still
+// resolves local/profile precedence explicitly.
+export function checkReleaseValues({ platform, profile = 'production', env: values = {} } = {}) {
   const errors = [];
-  const warnings = [];
   if (!platforms.includes(platform)) errors.push('platform');
-  if (!profiles.includes(profile) || !eas?.build?.[profile]) errors.push('profile');
-  let selected;
-  try {
-    if (!errors.includes('profile')) selected = resolveProfile(eas, profile);
-  } catch {
-    errors.push('inheritance');
-  }
-  if (!selected || errors.includes('platform')) return { errors, warnings };
-  // EAS profile env overrides the local process env. This does not fetch the
-  // remote environment or imply that ignored local files reach cloud builds.
-  const values = { ...env, ...selected.env };
+  if (!profiles.includes(profile)) errors.push('profile');
+  if (errors.length) return errors;
   const release = profile !== 'development';
   if (!httpsPublic(values.EXPO_PUBLIC_SUPABASE_URL)) errors.push('supabaseUrl');
   if (!publicSupabaseKey(values.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY)) errors.push('supabaseKey');
-  if (!createSubscriptionConfig({ platform, profile, dev: !release, env: values }).enabled)
+  const subscription = createSubscriptionConfig({ platform, profile, dev: !release, env: values });
+  if (!subscription.enabled || /REPLACE[_-]?ME|YOUR[_-]?KEY|PLACEHOLDER/i.test(subscription.apiKey))
     errors.push('revenuecat');
   if (!httpsPublic(values.EXPO_PUBLIC_PRIVACY_URL) || !httpsPublic(values.EXPO_PUBLIC_TERMS_URL))
     errors.push('legal');
@@ -116,6 +111,24 @@ export function checkReleaseConfig({ platform, profile = 'production', env = {},
     if (!app || app[1] === '3940256099942544' || units.some((unit) => !unit || app[1] !== unit[1]))
       errors.push('adIds');
   }
+  return errors;
+}
+
+export function checkReleaseConfig({ platform, profile = 'production', env = {}, eas = {} } = {}) {
+  const errors = [];
+  const warnings = [];
+  if (!platforms.includes(platform)) errors.push('platform');
+  if (!profiles.includes(profile) || !eas?.build?.[profile]) errors.push('profile');
+  let selected;
+  try {
+    if (!errors.includes('profile')) selected = resolveProfile(eas, profile);
+  } catch {
+    errors.push('inheritance');
+  }
+  if (!selected || errors.includes('platform')) return { errors, warnings };
+  // EAS profile env overrides the local process env. This does not fetch the
+  // remote environment or imply that ignored local files reach cloud builds.
+  errors.push(...checkReleaseValues({ platform, profile, env: { ...env, ...selected.env } }));
   if (selected.environment !== profile) warnings.push('environment');
   warnings.push('cloud');
   return { errors, warnings };
@@ -144,8 +157,8 @@ export function runPreflight(
     return 1;
   }
   const { errors, warnings } = checkReleaseConfig({ ...options, env, eas });
-  for (const code of errors) write(`FAIL: ${messages[code]}`);
-  for (const code of warnings) write(`NOTE: ${messages[code]}`);
+  for (const code of errors) write(`FAIL: ${releaseConfigMessages[code]}`);
+  for (const code of warnings) write(`NOTE: ${releaseConfigMessages[code]}`);
   if (!errors.length) write('PASS: Selected local/profile configuration format checks passed.');
   return errors.length ? 1 : 0;
 }

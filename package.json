@@ -9,6 +9,7 @@
     "web": "expo start --web",
     "test": "node --test tests/*.test.js",
     "check:release": "node --env-file-if-exists=.env.local scripts/check-release-config.mjs",
+    "eas-build-post-install": "node scripts/eas-build-preflight.mjs",
     "format": "prettier --write App.js src tests"
   },
   "dependencies": {

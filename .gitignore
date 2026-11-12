@@ -7,6 +7,8 @@ npm-debug.*
 *.p12
 *.key
 *.mobileprovision
+/credentials.json
+/credentials/
 *.orig.*
 web-build/
 dist/
@@ -22,6 +24,8 @@ dist/
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 
 
 # Supabase local CLI metadata
