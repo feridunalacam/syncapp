@@ -4,7 +4,6 @@ import {
   View,
   Text,
   Pressable,
-  Image,
   ScrollView,
   TextInput,
   ActivityIndicator,
@@ -13,30 +12,9 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../../../context/ThemeContext';
 import GlassSurface from '../../../../components/common/GlassSurface';
+import MusicArtwork from '../../../../components/common/MusicArtwork';
 
-export function Artwork({ item, size = 44, icon = 'musical-note' }) {
-  const { theme } = useTheme();
-  const uri = item?.image;
-  return (
-    <View
-      style={{
-        width: size,
-        height: size,
-        borderRadius: Math.min(18, size / 4),
-        overflow: 'hidden',
-        backgroundColor: theme.cardSecondary,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}
-    >
-      {uri ? (
-        <Image source={{ uri }} style={{ width: '100%', height: '100%' }} />
-      ) : (
-        <Ionicons name={icon} size={Math.min(30, size / 2)} color={theme.accent} />
-      )}
-    </View>
-  );
-}
+export const Artwork = MusicArtwork;
 export function PickerTabs({ items, value, onChange }) {
   const { theme } = useTheme();
   return (

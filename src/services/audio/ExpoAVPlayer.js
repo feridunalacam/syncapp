@@ -20,6 +20,8 @@ class ExpoAVPlayer {
     this.prepared = null;
     this.preparationVersion = 0;
     this.initializing = null;
+    this.resumeVersion = 0;
+    this.wantsPlayback = false;
   }
 
   /**
@@ -89,6 +91,7 @@ class ExpoAVPlayer {
    * @returns {Promise<{success: boolean, error?: string}>}
    */
   async loadAndPlay(uri, options = {}) {
+    this.resumeVersion++;
     try {
       await this.initialize();
 
@@ -126,6 +129,7 @@ class ExpoAVPlayer {
       }
 
       this.sound = sound;
+      this.wantsPlayback = options.shouldPlay !== false;
       this.currentTrack = {
         uri,
         name: options.name || 'Audio Track',
@@ -133,7 +137,7 @@ class ExpoAVPlayer {
         album: options.album || 'Unknown Album',
         image: options.image || null,
       };
-      this.isPlaying = options.shouldPlay !== false;
+      this.isPlaying = false;
 
       // Set up status update listener
       sound.setOnPlaybackStatusUpdate((status) => {
@@ -141,25 +145,16 @@ class ExpoAVPlayer {
       });
 
       if (options.shouldPlay !== false) {
-        let status = await sound.playAsync();
-        const deadline = Date.now() + 8000;
-        // playAsync can resolve while a web file is still buffering.
-        while (status?.isLoaded && (!status.isPlaying || status.isBuffering)) {
-          if (options.isCancelled?.()) {
-            await this.unload();
-            return { success: true, cancelled: true };
-          }
-          if (Date.now() >= deadline)
-            throw new Error('Audio is still buffering. Check the source and resume.');
-          await new Promise((resolve) => setTimeout(resolve, 50));
-          status = await sound.getStatusAsync();
-        }
-        if (status?.isLoaded === false)
-          throw new Error(status.error || 'Audio could not be loaded.');
-        if (options.isCancelled?.()) {
+        const ready = await this.waitForPlayback(
+          sound,
+          await sound.playAsync(),
+          options.isCancelled,
+        );
+        if (!ready) {
           await this.unload();
           return { success: true, cancelled: true };
         }
+        this.isPlaying = true;
       }
 
       return { success: true };
@@ -168,6 +163,22 @@ class ExpoAVPlayer {
       console.error('❌ Error loading audio:', error);
       return { success: false, error: error.message };
     }
+  }
+
+  // Native playAsync may acknowledge a start or resume before buffering ends.
+  async waitForPlayback(sound, status, isCancelled) {
+    const deadline = Date.now() + 8000;
+    while (status?.isLoaded && (!status.isPlaying || status.isBuffering)) {
+      if (isCancelled?.()) return false;
+      if (Date.now() >= deadline)
+        throw new Error('Audio is still buffering. Check the source and resume.');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (isCancelled?.()) return false;
+      status = await sound.getStatusAsync();
+    }
+    if (isCancelled?.()) return false;
+    if (status?.isLoaded === false) throw new Error(status.error || 'Audio could not be loaded.');
+    return true;
   }
 
   /**
@@ -186,9 +197,12 @@ class ExpoAVPlayer {
    * @returns {Promise<{success: boolean, error?: string}>}
    */
   async pause() {
+    this.resumeVersion++;
+    this.wantsPlayback = false;
     try {
       if (!this.sound) {
-        return { success: false, error: 'No track loaded' };
+        this.isPlaying = false;
+        return { success: true };
       }
 
       await this.sound.pauseAsync();
@@ -204,16 +218,35 @@ class ExpoAVPlayer {
    * Resume playback
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  async play() {
+  async play(options = {}) {
+    const version = ++this.resumeVersion;
+    const sound = this.sound;
+    const isCancelled = () =>
+      version !== this.resumeVersion || this.sound !== sound || options.isCancelled?.();
     try {
-      if (!this.sound) {
+      if (options.isCancelled?.()) return { success: true, cancelled: true };
+      if (!sound) {
         return { success: false, error: 'No track loaded' };
       }
 
-      await this.sound.playAsync();
+      this.wantsPlayback = true;
+      this.isPlaying = false;
+      const ready = await this.waitForPlayback(sound, await sound.playAsync(), isCancelled);
+      if (!ready) {
+        if (this.sound === sound && (version === this.resumeVersion || !this.wantsPlayback)) {
+          this.wantsPlayback = false;
+          await sound.pauseAsync();
+          this.isPlaying = false;
+        }
+        return { success: true, cancelled: true };
+      }
       this.isPlaying = true;
       return { success: true };
     } catch (error) {
+      if (isCancelled()) return { success: true, cancelled: true };
+      this.wantsPlayback = false;
+      this.isPlaying = false;
+      await sound?.pauseAsync().catch(() => {});
       console.error('❌ Error playing:', error);
       return { success: false, error: error.message };
     }
@@ -224,6 +257,8 @@ class ExpoAVPlayer {
    * @returns {Promise<void>}
    */
   async unload() {
+    this.resumeVersion++;
+    this.wantsPlayback = false;
     try {
       if (this.sound) {
         await this.sound.unloadAsync();
@@ -324,7 +359,7 @@ class ExpoAVPlayer {
    */
   _handleStatusUpdate(status) {
     if (status.isLoaded) {
-      this.isPlaying = status.isPlaying;
+      this.isPlaying = status.isPlaying && !status.isBuffering;
 
       if (this.onStatusUpdate) {
         this.onStatusUpdate({

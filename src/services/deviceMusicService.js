@@ -51,8 +51,8 @@ class DeviceMusicPlayer {
   }
 
   // Resume playback
-  async play(accessToken, deviceId = null) {
-    return await this.player.play();
+  async play(accessToken, deviceId = null, options = {}) {
+    return await this.player.play(options);
   }
 
   // Get current playback status
@@ -92,10 +92,10 @@ const deviceMusicService = {
 
   // Playback Controls
   play: (accessToken, deviceId, uris, positionMs) => {
-    if (uris && uris.length > 0) {
+    if (Array.isArray(uris) && uris.length > 0) {
       return deviceMusicPlayer.playTrack(accessToken, uris[0], deviceId, { positionMs });
     }
-    return deviceMusicPlayer.play(accessToken, deviceId);
+    return deviceMusicPlayer.play(accessToken, deviceId, uris && !Array.isArray(uris) ? uris : {});
   },
 
   playTrack: (accessToken, trackUri, deviceId, options) =>

@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
+import { View, Text, StyleSheet } from 'react-native';
 import PlaybackProgress from './PlaybackProgress';
 import { useTheme } from '../../../context/ThemeContext';
+import MusicArtwork from '../../../components/common/MusicArtwork';
+import { resolveRoundAudio } from '../../../domain/audio';
 
 export const MusicPlayerPreview = ({
   track,
@@ -14,21 +15,25 @@ export const MusicPlayerPreview = ({
   currentPhase,
 }) => {
   const { theme } = useTheme();
-  const round = selectedRoutine?.roundsData?.[currentRound - 1];
-  const song = currentPhase === 'rest' ? round?.restSong : round?.workSong;
+  const selection = resolveRoundAudio(
+    selectedRoutine,
+    currentPhase === 'beforeStart' || currentPhase === 'rest' ? currentPhase : 'work',
+    currentRound || 1,
+    selectedRoutine?.platform,
+  );
+  const song = selection?.source;
   const name = track?.title || song?.name || song?.title;
   const artist = track?.artist || song?.artist;
-  const artwork = track?.coverUrl || song?.image;
   const duration = track?.duration || song?.duration || 0;
   return (
     <View style={styles.row}>
-      <View style={[styles.artwork, { backgroundColor: theme.cardSecondary }]}>
-        {artwork ? (
-          <Image source={{ uri: artwork }} style={StyleSheet.absoluteFill} resizeMode="cover" />
-        ) : (
-          <Ionicons name="musical-notes-outline" size={22} color={theme.textSecondary} />
-        )}
-      </View>
+      <MusicArtwork
+        item={track}
+        fallbackItem={song}
+        size={46}
+        icon={selection?.kind === 'playlist' ? 'albums-outline' : 'musical-notes-outline'}
+        iconColor={theme.textSecondary}
+      />
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text numberOfLines={1} style={{ color: theme.text, fontSize: 14, fontWeight: '600' }}>
           {name || 'No music selected'}
@@ -60,12 +65,4 @@ export const MusicPlayerPreview = ({
 };
 const styles = StyleSheet.create({
   row: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  artwork: {
-    width: 46,
-    height: 46,
-    borderRadius: 13,
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
 });

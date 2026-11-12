@@ -203,13 +203,13 @@ final class AppleMusicController {
   private func songData(_ song: Song) -> [String: Any] {
     ["id": song.id.rawValue, "name": song.title, "artist": song.artistName,
      "album": song.albumTitle ?? "", "duration": song.duration ?? 0,
-     "image": song.artwork?.url(width: 300, height: 300)?.absoluteString ?? "",
+     "image": AppleMusicArtwork.url(song.artwork),
      "uri": "apple-music:song:\(song.id.rawValue)", "platform": "appleMusic", "type": "track"]
   }
 
   private func playlistData(_ playlist: Playlist) -> [String: Any] {
     ["id": playlist.id.rawValue, "name": playlist.name, "artist": playlist.curatorName ?? "Apple Music",
-     "image": playlist.artwork?.url(width: 300, height: 300)?.absoluteString ?? "",
+     "image": AppleMusicArtwork.url(playlist.artwork),
      "platform": "appleMusic", "type": "playlist"]
   }
 
