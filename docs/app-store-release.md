@@ -1,6 +1,6 @@
 # iOS App Store release draft
 
-Updated on 12 November 2026 from repository configuration, recorded native QA and the inspected cloud Store IPA. Source `da7339f` produced **1.0.0 (2)**; EAS Build `015a6833…` finished and EAS Submit `771ac1eb…` uploaded it to Apple. Apple reports `VALID` and `READY_FOR_BETA_TESTING` internally. Tester-group access is not yet configured, and no App Review or public release is established. The listing copy below remains a draft. Current work is iOS only; there is no Google Play account in scope. Apple banking, tax and seller setup remain partly incomplete and deferred. The owner declined a new Supabase project/test backend.
+Updated on 12 November 2026 from repository configuration, recorded native QA and the inspected cloud Store IPA. Source `da7339f` produced **1.0.0 (2)**; EAS Build `015a6833…` finished and EAS Submit `771ac1eb…` uploaded it to Apple. Apple reports `VALID` and `READY_FOR_BETA_TESTING` internally. Tester-group access is not yet configured, and no App Review or public release is established. The listing copy below remains a draft. Current work is iOS only; there is no Google Play account in scope. Apple banking, tax and seller setup remain partly incomplete and deferred. The owner declined an additional Supabase QA project. The possible review path within the existing project is documented, but not implemented, in `subscription-validation.md`.
 
 ## Release state and remaining gates
 

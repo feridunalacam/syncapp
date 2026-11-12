@@ -1,6 +1,6 @@
 # iOS subscription validation
 
-This checklist distinguishes source coverage, hosted verification and actual Apple billing. It does not establish that paid subscriptions are ready to release. The current scope is **iOS only**. Apple banking, tax and seller/commercial setup remain partially complete and deferred by the owner. No new Supabase project or test backend is authorized.
+This checklist distinguishes source coverage, hosted verification and actual Apple billing. It does not establish that paid subscriptions are ready to release. The current scope is **iOS only**. Apple banking, tax and seller/commercial setup remain partially complete and deferred by the owner. The owner declined a new Supabase QA project; keep using the existing project. The production-only receipt boundary below is the current implementation and release policy, not a separate quotation of that user answer.
 
 ## Environment boundaries
 
@@ -10,6 +10,24 @@ This checklist distinguishes source coverage, hosted verification and actual App
 - Normal lifecycle events also refresh valid UUIDs in `original_app_user_id` and `aliases`, because the last-seen `app_user_id` can be anonymous. Each UUID is checked against Auth and then verified canonically; an alias by itself grants nothing.
 - An Apple sandbox transaction against this production backend must remain pending/inactive for server-backed Pro. It cannot validate the successful purchase-to-Pro path in this configuration. Do not describe an SDK-only unlock, mock or manually inserted entitlement as that result.
 - RevenueCat Test Store can exercise SDK behavior, but does not validate StoreKit, Apple's billing lifecycle or Apple server notifications. Xcode StoreKit testing also does not establish RevenueCat cancellation/refund webhook delivery.
+
+## Review-path investigation — not implemented
+
+The current configuration cannot prove purchase-to-Pro in TestFlight or App Review. Read-only investigation identified the following possible way to retain production isolation without another Supabase project. This is a design proposal, not evidence of an available review environment or a completed purchase.
+
+RevenueCat supports both a single project and separate environment projects. Separate projects provide different keys and greater data isolation, with duplicate catalog/configuration maintenance. The existing Apple In-App Purchase credential can be reused within the same App Store Connect account. [RevenueCat environment strategies](https://www.revenuecat.com/docs/guides/environment-strategies)
+
+The same bundle ID can be configured in another RevenueCat project while the original remains active. Customers are project-scoped; matching App User IDs do not automatically share records. This supports investigating a separate review project rather than sharing restore ownership with production, but it is not a live guarantee established in our accounts. [RevenueCat project migration and customer scope](https://www.revenuecat.com/docs/revenuecat-support/common-tickets/merging-projects)
+
+The proposed implementation would require:
+
+- An initially empty, server-managed review-account reservation in the existing Supabase project, separate entitlement/backup storage and authorization checks. Expired/revoked reservations must remain fenced from production; lookup failures must not select production by default.
+- Separate RevenueCat review app/catalog, SDK key, server secret and authenticated webhook. Review access must still require canonical active **App Store sandbox** transactions for the permitted monthly/yearly products; a project key alone does not enforce the store environment. No Test Store or manual production grant.
+- A new client build with server-derived account scope, separate local queues/cache namespaces and protection against stale account callbacks. RN Purchases 11.0.1 exposes no public teardown/drain contract; use a cold process restart when crossing SDK project-key boundaries rather than assuming a JS reload clears native work.
+- An explicit Apple notification decision: Apple has one production and one sandbox URL. Routing sandbox notifications to the review project affects all sandbox notifications for this bundle. Do not assume duplicate delivery to both RevenueCat projects. [Apple server notification URLs](https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/enter-server-urls-for-app-store-server-notifications/)
+- Actual purchase, renewal, refund, restore/transfer, revocation and account/data-isolation checks before declaring the path usable.
+
+No review project, key, reservation, account, migration, function or notification setting was created by this investigation. Build **1.0.0 (2)** contains none of this proposal. Any new credential access and notification cutover must be reviewed as concrete actions before execution; the owner's deferred Apple commercial declarations remain a separate release gate.
 
 ## Evidence matrix
 
