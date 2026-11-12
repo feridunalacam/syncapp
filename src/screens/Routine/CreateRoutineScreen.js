@@ -260,13 +260,15 @@ export default function CreateRoutineScreen({ navigation, route }) {
             }}
           />
 
-          <PlaylistCard
-            roundsOrder={form.roundsOrder}
-            onShuffleForWork={form.handleShuffleForWork}
-            onShuffleForRest={form.handleShuffleForRest}
-            onConnect={spotify.connect}
-            connecting={spotify.connecting}
-          />
+          {spotify.available && (
+            <PlaylistCard
+              roundsOrder={form.roundsOrder}
+              onShuffleForWork={form.handleShuffleForWork}
+              onShuffleForRest={form.handleShuffleForRest}
+              onConnect={spotify.connect}
+              connecting={spotify.connecting}
+            />
+          )}
           <View
             style={{
               flexDirection: 'row',

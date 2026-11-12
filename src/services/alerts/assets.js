@@ -1,6 +1,5 @@
 // Original synthesized effects; no third-party recordings or system TTS exports.
 // Speech cues use the English coach recordings or the device's Turkish voice.
-// The older voice_*.mp3 assets contain a beep, not speech.
 export const CUE_ASSETS = Object.freeze({
   'voices://cue_tick': require('../../../assets/sounds/cues/tick.wav'),
   'voices://cue_gong': require('../../../assets/sounds/cues/gong.wav'),
@@ -8,22 +7,24 @@ export const CUE_ASSETS = Object.freeze({
   'voices://cue_chime': require('../../../assets/sounds/cues/finish-chime.wav'),
 });
 
-// Preserve sound IDs stored in older routines. Both audio players use this registry.
+// Preserve every saved URI while replacing the former unverified recordings
+// with original synthesized effects. Legacy countdown_go/start were tones, not
+// speech; spoken coaching continues through the separate coach registry.
 export const LEGACY_CUE_ASSETS = Object.freeze({
-  'voices://beep_short': require('../../../assets/sounds/beep_short.mp3'),
-  'voices://beep_long': require('../../../assets/sounds/beep_long.mp3'),
-  'voices://tone_high': require('../../../assets/sounds/beep_short.mp3'),
-  'voices://tone_low': require('../../../assets/sounds/beep_long.mp3'),
-  'voices://bell': require('../../../assets/sounds/bell.mp3'),
-  'voices://gong': require('../../../assets/sounds/gong.mp3'),
-  'voices://boxing_bell': require('../../../assets/sounds/boxing_bell.mp3'),
-  'voices://whistle': require('../../../assets/sounds/whistle.mp3'),
-  'voices://buzzer': require('../../../assets/sounds/buzzer.mp3'),
-  'voices://air_horn': require('../../../assets/sounds/air_horn.mp3'),
-  'voices://countdown_321': require('../../../assets/sounds/countdown_321.mp3'),
-  'voices://countdown_go': require('../../../assets/sounds/voice_go.mp3'),
-  'voices://countdown_start': require('../../../assets/sounds/voice_ready.mp3'),
-  'voices://success': require('../../../assets/sounds/chime.mp3'),
+  'voices://beep_short': CUE_ASSETS['voices://cue_tick'],
+  'voices://beep_long': require('../../../assets/sounds/cues/long-beep.wav'),
+  'voices://tone_high': CUE_ASSETS['voices://cue_tick'],
+  'voices://tone_low': require('../../../assets/sounds/cues/long-beep.wav'),
+  'voices://bell': CUE_ASSETS['voices://cue_boxing_bell'],
+  'voices://gong': CUE_ASSETS['voices://cue_gong'],
+  'voices://boxing_bell': CUE_ASSETS['voices://cue_boxing_bell'],
+  'voices://whistle': require('../../../assets/sounds/cues/whistle.wav'),
+  'voices://buzzer': require('../../../assets/sounds/cues/buzzer.wav'),
+  'voices://air_horn': require('../../../assets/sounds/cues/air-horn.wav'),
+  'voices://countdown_321': CUE_ASSETS['voices://cue_tick'],
+  'voices://countdown_go': CUE_ASSETS['voices://cue_tick'],
+  'voices://countdown_start': CUE_ASSETS['voices://cue_tick'],
+  'voices://success': CUE_ASSETS['voices://cue_chime'],
 });
 
 export const CUE_SOUND_OPTIONS = Object.freeze([

@@ -4,6 +4,7 @@ import {
   View,
   Text,
   ScrollView,
+  SectionList,
   Pressable,
   TextInput,
   Image,
@@ -23,6 +24,8 @@ import { formatTime } from '../../utils/timeFormatters';
 import { useLogData } from './hooks/useLogData';
 import SessionShareCard from './components/SessionShareCard';
 
+const SHARE_CAPTURE_OPTIONS = { format: 'png', quality: 1, result: 'data-uri' };
+
 export default function LogScreen({ embedded = false }) {
   const { theme } = useTheme();
   const { state, setters, refs, derived, handlers } = useLogData();
@@ -38,6 +41,11 @@ export default function LogScreen({ embedded = false }) {
     isGenerating,
     isCapturing,
   } = state;
+  const sections = React.useMemo(
+    () =>
+      Object.entries(derived.groupedRoutines).map(([title, data]) => ({ key: title, title, data })),
+    [derived.groupedRoutines],
+  );
   const action = (label, icon, onPress, primary = false) => {
     const ActionSurface = primary ? View : GlassSurface;
     return (
@@ -94,123 +102,130 @@ export default function LogScreen({ embedded = false }) {
           description="Start a routine and your sessions will appear here."
         />
       ) : (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={[styles.stats, { borderColor: theme.border }]}>
-            {[
-              [derived.stats.totalWorkouts, 'Sessions'],
-              [derived.stats.totalRounds, 'Rounds'],
-              [derived.stats.totalTime, 'Time'],
-            ].map(([value, label], index) => (
-              <View
-                key={label}
-                style={[
-                  styles.stat,
-                  index > 0 && {
-                    borderLeftWidth: StyleSheet.hairlineWidth,
-                    borderLeftColor: theme.border,
-                  },
-                ]}
-              >
-                <Text
-                  numberOfLines={1}
-                  adjustsFontSizeToFit
-                  minimumFontScale={0.75}
-                  style={{
-                    fontSize: 26,
-                    fontWeight: '600',
-                    letterSpacing: -0.7,
-                    color: theme.text,
-                  }}
-                >
-                  {value}
-                </Text>
-                <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 5 }}>
-                  {label}
-                </Text>
-              </View>
-            ))}
-          </View>
-          {isEditMode && (
-            <Pressable onPress={handlers.handleClearAll} style={{ paddingVertical: 16 }}>
-              <Text style={{ color: theme.error }}>Clear all activity</Text>
-            </Pressable>
-          )}
-          {Object.entries(derived.groupedRoutines).map(([group, logs]) => (
-            <View key={group}>
-              <Text style={[styles.section, { color: theme.textSecondary }]}>{group}</Text>
-              {logs.map((log, index) => (
-                <Surface
-                  variant="card"
-                  key={log.sessionId || `${log.id}-${log.completedAt}-${index}`}
-                  style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-                >
-                  <Pressable
-                    style={styles.row}
-                    onPress={() => handlers.handleLogPress(log)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`View ${log.name} session`}
+        <SectionList
+          sections={sections}
+          keyExtractor={(log, index) => log.sessionId || `${log.id}-${log.completedAt}-${index}`}
+          extraData={isEditMode}
+          stickySectionHeadersEnabled={false}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <>
+              <View style={[styles.stats, { borderColor: theme.border }]}>
+                {[
+                  [derived.stats.totalWorkouts, 'Sessions'],
+                  [derived.stats.totalRounds, 'Rounds'],
+                  [derived.stats.totalTime, 'Time'],
+                ].map(([value, label], index) => (
+                  <View
+                    key={label}
+                    style={[
+                      styles.stat,
+                      index > 0 && {
+                        borderLeftWidth: StyleSheet.hairlineWidth,
+                        borderLeftColor: theme.border,
+                      },
+                    ]}
                   >
-                    <View style={[styles.icon, { backgroundColor: theme.cardSecondary }]}>
-                      <Ionicons
-                        name={log.status === 'aborted' ? 'pause-outline' : 'checkmark'}
-                        size={20}
-                        color={log.status === 'aborted' ? theme.textSecondary : theme.accent}
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text
-                        numberOfLines={2}
-                        style={{
-                          color: theme.text,
-                          fontSize: 16,
-                          lineHeight: 21,
-                          fontWeight: '600',
-                        }}
-                      >
-                        {log.name}
-                      </Text>
-                      <Text
-                        style={{
-                          color: theme.textSecondary,
-                          fontSize: 11,
-                          lineHeight: 16,
-                          marginTop: 4,
-                        }}
-                      >
-                        {formatTime(getLogDuration(log))} · {getLogRounds(log)} rounds ·{' '}
-                        {handlers.formatTime(log)}
-                      </Text>
-                      <Text
-                        style={{
-                          color: theme.textSecondary,
-                          fontSize: 10,
-                          lineHeight: 14,
-                          marginTop: 3,
-                        }}
-                      >
-                        {log.status === 'aborted'
-                          ? 'Ended early'
-                          : log.skippedPhases
-                            ? 'Finished with skipped intervals'
-                            : 'Completed'}
-                      </Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={16} color={theme.textTertiary} />
-                  </Pressable>
-                  {isEditMode && (
-                    <Pressable
-                      onPress={() => handlers.handleDeleteLog(log)}
-                      accessibilityLabel={`Delete ${log.name} session`}
-                      style={styles.delete}
+                    <Text
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.75}
+                      style={{
+                        fontSize: 26,
+                        fontWeight: '600',
+                        letterSpacing: -0.7,
+                        color: theme.text,
+                      }}
                     >
-                      <Ionicons name="trash-outline" color={theme.error} size={19} />
-                    </Pressable>
-                  )}
-                </Surface>
-              ))}
-            </View>
-          ))}
-        </ScrollView>
+                      {value}
+                    </Text>
+                    <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 5 }}>
+                      {label}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+              {isEditMode && (
+                <Pressable onPress={handlers.handleClearAll} style={{ paddingVertical: 16 }}>
+                  <Text style={{ color: theme.error }}>Clear all activity</Text>
+                </Pressable>
+              )}
+            </>
+          }
+          renderSectionHeader={({ section }) => (
+            <Text style={[styles.section, { color: theme.textSecondary }]}>{section.title}</Text>
+          )}
+          renderItem={({ item: log }) => (
+            <Surface
+              variant="card"
+              style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+            >
+              <Pressable
+                style={styles.row}
+                onPress={() => handlers.handleLogPress(log)}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${log.name} session`}
+              >
+                <View style={[styles.icon, { backgroundColor: theme.cardSecondary }]}>
+                  <Ionicons
+                    name={log.status === 'aborted' ? 'pause-outline' : 'checkmark'}
+                    size={20}
+                    color={log.status === 'aborted' ? theme.textSecondary : theme.accent}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text
+                    numberOfLines={2}
+                    style={{
+                      color: theme.text,
+                      fontSize: 16,
+                      lineHeight: 21,
+                      fontWeight: '600',
+                    }}
+                  >
+                    {log.name}
+                  </Text>
+                  <Text
+                    style={{
+                      color: theme.textSecondary,
+                      fontSize: 11,
+                      lineHeight: 16,
+                      marginTop: 4,
+                    }}
+                  >
+                    {formatTime(getLogDuration(log))} · {getLogRounds(log)} rounds ·{' '}
+                    {handlers.formatTime(log)}
+                  </Text>
+                  <Text
+                    style={{
+                      color: theme.textSecondary,
+                      fontSize: 10,
+                      lineHeight: 14,
+                      marginTop: 3,
+                    }}
+                  >
+                    {log.status === 'aborted'
+                      ? 'Ended early'
+                      : log.skippedPhases
+                        ? 'Finished with skipped intervals'
+                        : 'Completed'}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={16} color={theme.textTertiary} />
+              </Pressable>
+              {isEditMode && (
+                <Pressable
+                  onPress={() => handlers.handleDeleteLog(log)}
+                  accessibilityLabel={`Delete ${log.name} session`}
+                  style={styles.delete}
+                >
+                  <Ionicons name="trash-outline" color={theme.error} size={19} />
+                </Pressable>
+              )}
+            </Surface>
+          )}
+        />
       )}
       <Sheet
         visible={showDetailModal}
@@ -327,10 +342,10 @@ export default function LogScreen({ embedded = false }) {
           importantForAccessibility="no-hide-descendants"
           style={styles.capture}
         >
-          <ViewShot ref={refs.shareCardRef}>
+          <ViewShot ref={refs.shareCardRef} options={SHARE_CAPTURE_OPTIONS}>
             <SessionShareCard session={selectedLog} />
           </ViewShot>
-          <ViewShot ref={refs.shareCardTransparentRef}>
+          <ViewShot ref={refs.shareCardTransparentRef} options={SHARE_CAPTURE_OPTIONS}>
             <SessionShareCard session={selectedLog} transparent />
           </ViewShot>
         </View>

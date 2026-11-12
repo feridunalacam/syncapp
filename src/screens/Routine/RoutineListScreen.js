@@ -1,6 +1,6 @@
 import Surface from '../../components/common/Surface';
 import React, { useState } from 'react';
-import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, Pressable, FlatList, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useRoutineContext } from '../../context/RoutineContext';
 import IntervalPreview from '../../components/common/IntervalPreview';
@@ -61,18 +61,25 @@ export default function RoutineListScreen({ navigation, embedded = false }) {
           onAction={() => navigateToCreateRoutine(navigation)}
         />
       ) : (
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.section}>
-            <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-              {routines.length} saved routines
-            </Text>
-            <Pressable onPress={() => setOrganizing(!organizing)} hitSlop={12}>
-              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.accent }}>
-                {organizing ? 'Done' : 'Organize'}
+        <FlatList
+          data={routines}
+          keyExtractor={(routine) => routine.id}
+          extraData={organizing}
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
+          ListHeaderComponent={
+            <View style={styles.section}>
+              <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
+                {routines.length} saved routines
               </Text>
-            </Pressable>
-          </View>
-          {routines.map((r, index) => (
+              <Pressable onPress={() => setOrganizing(!organizing)} hitSlop={12}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: theme.accent }}>
+                  {organizing ? 'Done' : 'Organize'}
+                </Text>
+              </Pressable>
+            </View>
+          }
+          renderItem={({ item: r, index }) => (
             <Surface
               variant="card"
               key={r.id}
@@ -168,8 +175,8 @@ export default function RoutineListScreen({ navigation, embedded = false }) {
                 </View>
               )}
             </Surface>
-          ))}
-        </ScrollView>
+          )}
+        />
       )}
     </Frame>
   );

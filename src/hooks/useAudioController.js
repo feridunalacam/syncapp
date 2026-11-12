@@ -10,6 +10,7 @@ export const useAudioController = ({
   selectedRoutine,
   services,
   countdownSoundPlayer,
+  stopLocalCues,
   onPlaybackInterrupted,
 }) => {
   const [track, setTrack] = useState(null);
@@ -18,6 +19,8 @@ export const useAudioController = ({
   const [isShuffled, setIsShuffled] = useState(false);
   const [isRepeating, setIsRepeating] = useState(false);
   const [audioError, setAudioError] = useState(null);
+  const [localCuesAllowed, setLocalCuesAllowed] = useState(true);
+  const localCuesAllowedRef = useRef(true);
   const active = useRef(null);
   const pendingPhase = useRef(null);
   const wantsPaused = useRef(false);
@@ -37,10 +40,15 @@ export const useAudioController = ({
     selectedRoutine,
     services,
     countdownSoundPlayer,
+    stopLocalCues,
     onPlaybackInterrupted,
     isShuffled,
     isRepeating,
   };
+  const allowLocalCues = useCallback((allowed) => {
+    localCuesAllowedRef.current = allowed;
+    if (mounted.current) setLocalCuesAllowed(allowed);
+  }, []);
   useEffect(() => {
     mounted.current = true;
     return () => {
@@ -107,7 +115,6 @@ export const useAudioController = ({
   const stopActive = useCallback(async () => {
     const current = active.current;
     if (!current) return;
-    active.current = null;
     if (current.platform === 'voices') await params.current.countdownSoundPlayer?.stop();
     else {
       const { service, token, refresh } = await connection(current.platform);
@@ -117,9 +124,13 @@ export const useAudioController = ({
           if (result?.code !== 'DEVICE_CHANGED') check(result);
         } finally {
           await service.cleanup?.();
+          // Local cleanup unloads the sound even if its pause failed. Spotify
+          // has no unload operation: retain ownership until pause succeeds.
+          if (current.platform === 'device' && active.current === current) active.current = null;
         }
       }
     }
+    if (active.current === current) active.current = null;
   }, [connection]);
   const fetchPlayback = useCallback(async () => {
     const current = active.current;
@@ -187,6 +198,9 @@ export const useAudioController = ({
       interruption.current = null;
       wantsPaused.current = paused;
       pendingPhase.current = paused ? { phase, roundNum } : null;
+      // Do not let a local cue overlap a Spotify start or an unfinished pause
+      // during a source change. The old source must release playback first.
+      allowLocalCues(false);
       return enqueue(
         async () => {
           if (version !== revision.current) return;
@@ -194,6 +208,11 @@ export const useAudioController = ({
           const routine = p.selectedRoutine;
           if (!routine) return;
           const resolved = resolveRoundAudio(routine, phase, roundNum, p.selectedPlatform);
+          if (resolved?.platform === 'spotify') {
+            await p.stopLocalCues?.();
+            await p.countdownSoundPlayer?.stop();
+            if (version !== revision.current || !mounted.current) return;
+          }
           const volume = getPhaseMusicVolume(routine, phase);
           const current = active.current;
           // Preparation is the intro of the first Work track, not a separate playback.
@@ -214,11 +233,14 @@ export const useAudioController = ({
             if (version !== revision.current || !mounted.current) return;
             if (service?.setVolume) await service.setVolume(token, volume, current.deviceId);
             if (version !== revision.current || !mounted.current) return;
+            allowLocalCues(current.platform !== 'spotify');
             setAudioError(null);
             await fetchPlayback();
             return;
           }
           await stopActive();
+          if (version !== revision.current || !mounted.current) return;
+          allowLocalCues(resolved?.platform !== 'spotify');
           if (!resolved) {
             if (mounted.current) {
               setTrack(null);
@@ -320,7 +342,7 @@ export const useAudioController = ({
         if (loadingVersion.current === version) loadingVersion.current = null;
       });
     },
-    [enqueue, connection, stopActive, fetchPlayback],
+    [enqueue, connection, stopActive, fetchPlayback, allowLocalCues],
   );
   const pauseMusic = useCallback(() => {
     wantsPaused.current = true;
@@ -385,7 +407,7 @@ export const useAudioController = ({
   }, [enqueue, connection, handlePhaseChange]);
   const stopMusic = useCallback(() => {
     wantsPaused.current = true;
-    revision.current++;
+    const version = ++revision.current;
     pendingPhase.current = null;
     params.current.countdownSoundPlayer?.stop();
     const current = active.current;
@@ -396,6 +418,7 @@ export const useAudioController = ({
     return enqueue(async () => {
       try {
         await stopActive();
+        if (version === revision.current) allowLocalCues(true);
       } finally {
         await params.current.countdownSoundPlayer?.stop();
         if (mounted.current) {
@@ -405,7 +428,7 @@ export const useAudioController = ({
         }
       }
     });
-  }, [enqueue, stopActive, connection]);
+  }, [enqueue, stopActive, connection, allowLocalCues]);
   const control = useCallback(
     (method, ...args) =>
       enqueue(async () => {
@@ -445,6 +468,7 @@ export const useAudioController = ({
     });
   }, [enqueue, connection]);
   const playCountdownSound = useCallback((type) => {
+    if (!localCuesAllowedRef.current) return;
     const p = params.current;
     const key =
       type === 'beforeStart'
@@ -464,6 +488,7 @@ export const useAudioController = ({
     isShuffled,
     isRepeating,
     audioError,
+    localCuesAllowed,
     handlePhaseChange,
     pauseMusic,
     resumeMusic,

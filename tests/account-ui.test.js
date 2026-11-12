@@ -5,6 +5,7 @@ import { Script } from 'node:vm';
 import { createRequire } from 'node:module';
 import React, { act } from 'react';
 import { create } from 'react-test-renderer';
+import { recoverySessionIdentity } from '../src/lib/authRecoveryState.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -60,6 +61,7 @@ async function mount(overrides = {}) {
     StyleSheet: { create: (value) => value },
     Sheet: ({ children }) => React.createElement('Sheet', null, children),
     useAuth: () => auth,
+    recoverySessionIdentity,
     useTheme: () => ({
       theme: { text: '#111', textSecondary: '#555', accent: '#345', error: '#f00' },
     }),
@@ -100,6 +102,10 @@ async function mount(overrides = {}) {
     },
     async visible(value) {
       props = { ...props, visible: value };
+      await act(async () => renderer.update(React.createElement(context.Component, props)));
+    },
+    async changeAuth(values) {
+      Object.assign(auth, values);
       await act(async () => renderer.update(React.createElement(context.Component, props)));
     },
     async close() {
@@ -177,6 +183,53 @@ test('unconfigured account services cannot send authentication requests', async 
     assert.match(ui.text(), /Account services are being set up/);
     await ui.press('Sign in');
     assert.deepEqual(ui.events, []);
+  } finally {
+    await ui.close();
+  }
+});
+
+test('a delayed sign-in cannot dismiss a recovery accepted while its request was pending', async () => {
+  let finish;
+  const pending = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const ui = await mount({ signIn: () => pending });
+  try {
+    await ui.fill('Email address', 'person@example.com');
+    await ui.fill('Password', 'offline-password');
+    await ui.press('Sign in');
+    await ui.changeAuth({
+      recoveryMode: true,
+      user: { id: 'recovery', email: 'recovery@example.test' },
+    });
+    await act(async () => finish());
+    assert.deepEqual(ui.events, []);
+    assert.match(ui.text(), /Set a new password/);
+    assert.equal(ui.button('Update password').props.disabled, false);
+  } finally {
+    await ui.close();
+  }
+});
+
+test('an earlier recovery completion cannot replace the next account recovery form', async () => {
+  let finish;
+  const pending = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const ui = await mount({
+    recoveryMode: true,
+    user: { id: 'earlier', email: 'earlier@example.test' },
+    updatePassword: () => pending,
+  });
+  try {
+    await ui.fill('New password', 'replacement-password');
+    await ui.fill('Confirm password', 'replacement-password');
+    await ui.press('Update password');
+    await ui.changeAuth({ user: { id: 'newer', email: 'newer@example.test' } });
+    await act(async () => finish());
+    assert.match(ui.text(), /Set a new password/);
+    assert.doesNotMatch(ui.text(), /Your password has been updated/);
+    assert.ok(ui.button('Update password'));
   } finally {
     await ui.close();
   }

@@ -84,14 +84,9 @@ export function createSubscriptionController({
       listener = () => {
         // A listener event may belong to the previous identity. Fetch again in
         // the identity queue rather than trusting its unscoped payload.
-        const version = epoch;
-        const target = userId;
-        if (target) {
-          beginVerification(version, target);
-          enqueue(() =>
-            current(version, target) ? read(version, target, { sync: true }) : null,
-          ).catch(() => {});
-        }
+        // This also retains a newly completed background purchase as pending
+        // when canonical server verification is temporarily unavailable.
+        if (userId) refresh({ sync: true }).catch(() => {});
       };
       if (!disposed) sdk.addCustomerInfoUpdateListener?.(listener);
     } else if (initialized && sdkUserId !== id) {

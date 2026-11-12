@@ -11,6 +11,8 @@ import React, {
 import { AppState, Alert } from 'react-native';
 import { STORAGE_KEYS } from '../lib/storage';
 import spotifyService from '../services/spotify';
+import { SPOTIFY_AVAILABLE } from '../services/spotify/config';
+import { SPOTIFY_UNAVAILABLE_MESSAGE } from '../services/spotify/availability';
 import deviceMusicService from '../services/deviceMusicService';
 import { loadPlatforms, savePlatforms } from '../lib/platformStorage';
 import { createMusicConnections } from '../lib/musicConnections';
@@ -61,7 +63,10 @@ export function PlatformProvider({ children }) {
       });
       store.current = manager;
       setConnectedPlatforms(initial);
-      selected.current = initial[selection]?.connected ? selection : null;
+      selected.current =
+        initial[selection]?.connected && (selection !== 'spotify' || SPOTIFY_AVAILABLE)
+          ? selection
+          : null;
       setSelected(selected.current);
       setReady(true);
     })();
@@ -71,6 +76,7 @@ export function PlatformProvider({ children }) {
     };
   }, []);
   const connectPlatform = useCallback(async (id, data) => {
+    if (id === 'spotify' && !SPOTIFY_AVAILABLE) throw new Error(SPOTIFY_UNAVAILABLE_MESSAGE);
     if (!store.current) throw new Error('Music is still loading.');
     await store.current.connect(id, data);
     setConnectionError(null);
@@ -86,6 +92,7 @@ export function PlatformProvider({ children }) {
   }, []);
   const refreshToken = useCallback(async (id = null) => {
     const target = id || selected.current;
+    if (target === 'spotify' && !SPOTIFY_AVAILABLE) return null;
     if (!target || target === 'device') return target === 'device' ? 'device' : null;
     try {
       const token = await store.current?.refresh(target);
@@ -98,6 +105,7 @@ export function PlatformProvider({ children }) {
   }, []);
   const getValidAccessToken = useCallback(
     async (id) => {
+      if (id === 'spotify' && !SPOTIFY_AVAILABLE) throw new Error(SPOTIFY_UNAVAILABLE_MESSAGE);
       if (id === 'device') return 'device';
       const connection = store.current?.getState()[id];
       if (!connection?.connected) return null;
@@ -108,6 +116,7 @@ export function PlatformProvider({ children }) {
     [refreshToken],
   );
   const handleSetSelectedPlatform = useCallback(async (id) => {
+    if (id === 'spotify' && !SPOTIFY_AVAILABLE) return;
     if (id && !store.current?.getState()[id]?.connected) return;
     selected.current = id;
     setSelected(id);
@@ -117,7 +126,12 @@ export function PlatformProvider({ children }) {
     if (!ready) return;
     const check = () => {
       Object.entries(store.current.getState()).forEach(([id, data]) => {
-        if (id !== 'device' && data.connected && (!data.expiresAt || data.expiresAt <= Date.now()))
+        if (
+          id !== 'device' &&
+          (id !== 'spotify' || SPOTIFY_AVAILABLE) &&
+          data.connected &&
+          (!data.expiresAt || data.expiresAt <= Date.now())
+        )
           refreshToken(id);
       });
     };
@@ -134,7 +148,9 @@ export function PlatformProvider({ children }) {
   const value = useMemo(
     () => ({
       PLATFORMS,
-      connectedPlatforms,
+      connectedPlatforms: SPOTIFY_AVAILABLE
+        ? connectedPlatforms
+        : Object.fromEntries(Object.entries(connectedPlatforms).filter(([id]) => id !== 'spotify')),
       selectedPlatform,
       musicPlayer: services[selectedPlatform] || services.device,
       services,
@@ -143,7 +159,8 @@ export function PlatformProvider({ children }) {
       connectPlatform,
       disconnectPlatform,
       setSelectedPlatform: handleSetSelectedPlatform,
-      isPlatformConnected: (id) => !!connectedPlatforms[id]?.connected,
+      isPlatformConnected: (id) =>
+        (id !== 'spotify' || SPOTIFY_AVAILABLE) && !!connectedPlatforms[id]?.connected,
       refreshToken,
       getValidAccessToken,
       refreshSpotifyToken: () => refreshToken('spotify'),

@@ -255,10 +255,10 @@ test('stale file completion and errors cannot settle the next file', async () =>
   assert.equal(h.sounds[1].unloads, 1);
 });
 
-test('saved legacy cues and current cues keep their original sounds', async () => {
+test('saved legacy cues and current cues resolve to original synthesized replacements', async () => {
   const h = harness();
   for (const [uri, asset] of [
-    ['voices://boxing_bell', '../../../assets/sounds/boxing_bell.mp3'],
+    ['voices://boxing_bell', '../../../assets/sounds/cues/boxing-bell.wav'],
     ['voices://cue_boxing_bell', '../../../assets/sounds/cues/boxing-bell.wav'],
   ]) {
     const playing = h.api.playWorkoutCue(cue(uri));

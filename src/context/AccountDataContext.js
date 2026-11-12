@@ -7,7 +7,7 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { AppState, ActivityIndicator, View } from 'react-native';
+import { AppState, ActivityIndicator, Pressable, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from './AuthContext';
 import { useSubscription } from './SubscriptionContext';
@@ -24,7 +24,9 @@ export function AccountDataProvider({ children }) {
   authSession.current = session;
   const { isPro, ready: subscriptionReady } = useSubscription();
   const { theme } = useTheme();
-  const [ready, setReady] = useState(false);
+  const [preparedStorage, setPreparedStorage] = useState(null);
+  const [localError, setLocalError] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [epoch, setEpoch] = useState(0);
   const [state, setState] = useState({ status: 'local', error: null, lastSyncedAt: null });
   const [guest, setGuest] = useState({ hasGuestData: false, importComplete: false });
@@ -36,6 +38,11 @@ export function AccountDataProvider({ children }) {
     () => createAccountStore(AsyncStorage, user?.id, () => schedule.current()),
     [user?.id],
   );
+  const localReady = preparedStorage === storage;
+  const reportLoadFailure = useCallback(() => {
+    setPreparedStorage(null);
+    setLocalError(true);
+  }, []);
   const syncNow = useCallback(async () => {
     if (!user) throw new Error('Sign in to use cloud backup.');
     if (!isPro) throw new Error('Cloud backup is included with Sync Pro.');
@@ -43,7 +50,23 @@ export function AccountDataProvider({ children }) {
     return engine.current?.sync();
   }, [user?.id, isPro]);
   useEffect(() => {
-    if (!subscriptionReady) return;
+    let alive = true;
+    setPreparedStorage(null);
+    setLocalError(false);
+    storage.prepare().then(
+      () => {
+        if (alive) setPreparedStorage(storage);
+      },
+      () => {
+        if (alive) setLocalError(true);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [storage, loadAttempt]);
+  useEffect(() => {
+    if (!localReady || !subscriptionReady) return;
     let alive = true;
     const updateGuest = () =>
       storage.guestImportState().then((value) => {
@@ -52,7 +75,6 @@ export function AccountDataProvider({ children }) {
     updateGuest().catch(() => {});
     if (!user || !isPro || !supabase) {
       setState({ status: 'local', error: null, lastSyncedAt: null });
-      setReady(true);
       return () => {
         alive = false;
       };
@@ -105,12 +127,7 @@ export function AccountDataProvider({ children }) {
       clearTimeout(timer.current);
       timer.current = setTimeout(safelySync, 1500);
     };
-    sync
-      .sync()
-      .catch(() => {})
-      .finally(() => {
-        if (alive) setReady(true);
-      });
+    sync.sync().catch(() => {});
     const active = AppState.addEventListener('change', (value) => {
       if (value === 'active') safelySync();
     });
@@ -124,7 +141,7 @@ export function AccountDataProvider({ children }) {
       sync.stop();
       engine.current = null;
     };
-  }, [user?.id, isPro, subscriptionReady, storage]);
+  }, [user?.id, isPro, subscriptionReady, storage, localReady]);
   const importGuestData = async () => {
     if (paused.current) throw new Error('Finish your active workout before importing records.');
     await storage.importGuestData();
@@ -143,21 +160,37 @@ export function AccountDataProvider({ children }) {
   }, []);
   const value = {
     storage,
-    ready,
+    ready: localReady,
     ...state,
     ...guest,
     importGuestData,
     syncNow,
     resolveConflict,
     setSyncPaused,
+    reportLoadFailure,
   };
   return (
     <Context.Provider value={value}>
-      {ready ? (
+      {localReady ? (
         <React.Fragment key={epoch}>{children}</React.Fragment>
       ) : (
         <View style={{ flex: 1, justifyContent: 'center', backgroundColor: theme.background }}>
-          <ActivityIndicator color={theme.accent} />
+          {localError ? (
+            <View style={{ padding: 24, gap: 16, alignItems: 'center' }}>
+              <Text accessibilityRole="alert" style={{ color: theme.text, textAlign: 'center' }}>
+                Saved records could not be opened. Retry to recover this device’s data.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => setLoadAttempt((value) => value + 1)}
+                style={{ padding: 16, borderRadius: 16, backgroundColor: theme.accent }}
+              >
+                <Text style={{ color: theme.accentText, fontWeight: '600' }}>Retry</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <ActivityIndicator color={theme.accent} />
+          )}
         </View>
       )}
     </Context.Provider>

@@ -4,8 +4,7 @@ import { normalizeRoutine } from '../domain/routines';
 import { STORAGE_KEYS } from '../lib/storage';
 
 export const defaultRoutines = [
-  { id: 'deneme', name: 'deneme', rounds: 3, workSec: 60, restSec: 30 },
-  { id: 'deneme-copy', name: 'deneme (copy)', rounds: 3, workSec: 60, restSec: 30 },
+  { id: 'interval-starter', name: 'Interval Starter', rounds: 3, workSec: 60, restSec: 30 },
   { id: 'quick-burst', name: 'Quick Burst', rounds: 5, workSec: 45, restSec: 15 },
   { id: 'endurance', name: 'Endurance', rounds: 4, workSec: 90, restSec: 30 },
 ];
@@ -22,7 +21,7 @@ const RoutineContext = createContext({
 });
 
 export const RoutineProvider = ({ children }) => {
-  const { storage } = useAccountData();
+  const { storage, reportLoadFailure } = useAccountData();
   const [routines, setRoutines] = useState(defaultRoutines);
   const [completedRoutines, setCompletedRoutines] = useState([]);
   const [isLoaded, setIsLoaded] = useState(false);
@@ -31,32 +30,27 @@ export const RoutineProvider = ({ children }) => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const stored = await storage.getJSON(STORAGE_KEYS.ROUTINES, null);
-      if (cancelled) return;
-
-      if (Array.isArray(stored)) {
-        setRoutines(stored.map(normalizeRoutine));
-      } else {
-        setRoutines(storage.userId ? [] : defaultRoutines);
+      try {
+        const [stored, completed] = await Promise.all([
+          storage.getJSON(STORAGE_KEYS.ROUTINES, null),
+          storage.getJSON(STORAGE_KEYS.COMPLETED_ROUTINES, null),
+        ]);
+        if (cancelled) return;
+        setRoutines(
+          Array.isArray(stored)
+            ? stored.map(normalizeRoutine)
+            : storage.userId
+              ? []
+              : defaultRoutines,
+        );
+        if (Array.isArray(completed)) setCompletedRoutines(completed);
+        setIsLoaded(true);
+        setCompletedHydrated(true);
+      } catch {
+        // A read failure is not a new installation. Keep writes disabled until
+        // the account's retry gate remounts these providers after recovery.
+        if (!cancelled) reportLoadFailure?.();
       }
-      setIsLoaded(true);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  // Hydrate completed routines (workout history). Without this, the Log
-  // screen wiped itself on every app restart.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const stored = await storage.getJSON(STORAGE_KEYS.COMPLETED_ROUTINES, null);
-      if (cancelled) return;
-      if (Array.isArray(stored)) {
-        setCompletedRoutines(stored);
-      }
-      setCompletedHydrated(true);
     })();
     return () => {
       cancelled = true;
@@ -148,11 +142,12 @@ export const RoutineProvider = ({ children }) => {
     setCompletedRoutines([]);
   }, []);
 
-  const removeCompletedRoutine = useCallback((routineId, completedAt) => {
+  const removeCompletedRoutine = useCallback((routineId, completedAt, sessionId) => {
     setCompletedRoutines((prev) =>
       prev.filter((routine) => {
+        if (sessionId) return routine.sessionId !== sessionId;
         if (completedAt) {
-          return routine.completedAt !== completedAt;
+          return routine.id !== routineId || routine.completedAt !== completedAt;
         }
         return routine.id !== routineId;
       }),

@@ -1,4 +1,8 @@
 {
+  "cli": {
+    "version": ">= 27.7.2",
+    "appVersionSource": "remote"
+  },
   "build": {
     "base": {
       "env": {
@@ -7,6 +11,7 @@
         "ADMOB_IOS_APP_ID": "ca-app-pub-6450876479080332~3587231996",
         "EXPO_PUBLIC_ADMOB_IOS_BANNER_ID": "ca-app-pub-6450876479080332/9078718471",
         "EXPO_PUBLIC_ADS_ENABLED": "false",
+        "EXPO_PUBLIC_SPOTIFY_ENABLED": "false",
         "ADMOB_ANDROID_APP_ID": "ca-app-pub-6450876479080332~6260983443",
         "EXPO_PUBLIC_ADMOB_ANDROID_BANNER_ID": "ca-app-pub-6450876479080332/8476083240",
         "EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID": "ca-app-pub-6450876479080332/7535195808",
@@ -23,7 +28,8 @@
       "extends": "base",
       "env": {
         "EXPO_PUBLIC_BUILD_PROFILE": "development",
-        "EXPO_PUBLIC_ADS_ENABLED": "true"
+        "EXPO_PUBLIC_ADS_ENABLED": "true",
+        "EXPO_PUBLIC_SPOTIFY_ENABLED": "true"
       }
     },
     "preview": {
@@ -40,6 +46,13 @@
       "extends": "base",
       "env": {
         "EXPO_PUBLIC_BUILD_PROFILE": "production"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "ascAppId": "6833659501"
       }
     }
   }

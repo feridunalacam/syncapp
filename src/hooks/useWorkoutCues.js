@@ -3,12 +3,19 @@ import { planSessionCues } from '../domain/alerts';
 import { playWorkoutCue, stopWorkoutCues } from '../services/alerts/player';
 
 /** Session time is the source of truth; audio never advances the workout clock. */
-export default function useWorkoutCues(session) {
+export default function useWorkoutCues(session, localCuesAllowed = true) {
   const previous = useRef(null);
   const played = useRef(new Set());
   const revision = useRef(0);
   const [alertError, setAlertError] = useState(null);
   useEffect(() => {
+    if (!localCuesAllowed) {
+      revision.current++;
+      stopWorkoutCues().catch(() => {});
+    }
+  }, [localCuesAllowed]);
+  useEffect(() => {
+    if (!localCuesAllowed) return;
     const before = previous.current;
     previous.current = session;
     const newRun =
@@ -46,7 +53,7 @@ export default function useWorkoutCues(session) {
             setAlertError(error.message || 'An alert could not be played.');
         });
     }
-  }, [session]);
+  }, [session, localCuesAllowed]);
   useEffect(
     () => () => {
       revision.current++;

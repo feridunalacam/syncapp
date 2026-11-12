@@ -8,9 +8,17 @@ export const resolveRoundAudio = (routine, phase, roundNumber, selectedPlatform)
   const round = routine.roundsData?.[roundNumber - 1] || {};
   const work = phase === 'work';
   const song = work ? round.workSong : round.restSong;
+  // Edited routines have complete, visible round assignments. Retain legacy
+  // playlist metadata without reviving music the user removed from a round.
+  const fallbackPlaylist =
+    routine.roundAudioOnly === true
+      ? null
+      : work
+        ? routine.workoutPlaylistId
+        : routine.restPlaylistId;
   const playlistId = work
-    ? round.workPlaylistId || routine.workoutPlaylistId
-    : round.restPlaylistId || routine.restPlaylistId;
+    ? round.workPlaylistId || fallbackPlaylist
+    : round.restPlaylistId || fallbackPlaylist;
   if (!song && !playlistId) return null;
   const source = song || {
     id: playlistId,

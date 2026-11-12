@@ -52,7 +52,11 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
       selectedRoutine: configuration.routine || routine,
       services: { device: service, spotify: service },
       connectedPlatforms: { spotify: { connected: true, accessToken: 'test-token' } },
-      countdownSoundPlayer: { stop: async () => {}, play: async () => {} },
+      countdownSoundPlayer: configuration.countdownSoundPlayer || {
+        stop: async () => {},
+        play: async () => {},
+      },
+      stopLocalCues: configuration.stopLocalCues,
       onPlaybackInterrupted: configuration.onPlaybackInterrupted,
     });
     return null;
@@ -85,6 +89,144 @@ test('a phase selected while paused waits for resume before starting audio', asy
     h.calls.find((c) => c[0] === 'play'),
     ['play', 'file:///one.mp3'],
   );
+});
+
+test('Spotify preparation stops local cues before playback and blocks legacy overlay alerts', async (t) => {
+  const cuesStopped = deferred();
+  const calls = [];
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      routine: {
+        countdownBeforeStartSound: { uri: 'voices://beep_short' },
+        roundsData: [{ workSong: { uri: 'spotify:track:one', platform: 'spotify' } }],
+      },
+      stopLocalCues: () => {
+        calls.push('stop-cues');
+        return cuesStopped.promise;
+      },
+      countdownSoundPlayer: {
+        stop: async () => calls.push('stop-legacy'),
+        play: async () => calls.push('play-legacy'),
+      },
+    },
+  );
+  let operation;
+  await act(async () => {
+    operation = h.audio.handlePhaseChange('beforeStart', 0);
+  });
+  assert.equal(h.audio.localCuesAllowed, false);
+  assert.equal(h.calls.filter((call) => call[0] === 'play').length, 0);
+  await act(async () => h.audio.playCountdownSound('beforeStart'));
+  assert.equal(calls.includes('play-legacy'), false);
+  await act(async () => {
+    cuesStopped.resolve();
+    await operation;
+  });
+  assert.equal(h.calls.filter((call) => call[0] === 'play').length, 1);
+  assert.equal(h.audio.localCuesAllowed, false);
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  assert.equal(h.audio.localCuesAllowed, false);
+});
+
+test('Device preparation keeps local cues available when the same song continues into Work', async (t) => {
+  const h = await mountAudio(t);
+  await act(async () => h.audio.handlePhaseChange('beforeStart', 0));
+  assert.equal(h.audio.localCuesAllowed, true);
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  assert.equal(h.audio.localCuesAllowed, true);
+  assert.equal(h.calls.filter((call) => call[0] === 'play').length, 1);
+});
+
+test('mixed routines wait for Spotify pause before local music and cues become eligible', async (t) => {
+  const paused = deferred();
+  let holdPause = false;
+  const h = await mountAudio(
+    t,
+    { pause: () => (holdPause ? paused.promise : Promise.resolve(success)) },
+    {
+      routine: {
+        roundsData: [
+          {
+            workSong: { uri: 'spotify:track:one', platform: 'spotify' },
+            restSong: { uri: 'file:///rest.mp3', platform: 'device' },
+          },
+        ],
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  holdPause = true;
+  let operation;
+  await act(async () => {
+    operation = h.audio.handlePhaseChange('rest', 1);
+  });
+  assert.equal(h.audio.localCuesAllowed, false);
+  assert.equal(h.calls.filter((call) => call[0] === 'play').length, 1);
+  await act(async () => {
+    paused.resolve(success);
+    await operation;
+  });
+  assert.equal(h.audio.localCuesAllowed, true);
+  assert.deepEqual(
+    h.calls.filter((call) => call[0] === 'play').map((call) => call[1]),
+    ['spotify:track:one', 'file:///rest.mp3'],
+  );
+});
+
+test('a failed Spotify pause retains ownership until a successful retry', async (t) => {
+  let failing = true;
+  let pauses = 0;
+  const h = await mountAudio(
+    t,
+    {
+      pause: async () => {
+        pauses++;
+        return failing ? { success: false, error: 'Offline' } : success;
+      },
+    },
+    { routine: { roundsData: [{ workSong: { uri: 'spotify:track:one', platform: 'spotify' } }] } },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  await act(async () => {
+    const result = await h.audio.handlePhaseChange('rest', 1);
+    assert.equal(result.success, false);
+  });
+  assert.equal(h.audio.localCuesAllowed, false);
+  failing = false;
+  await act(async () => h.audio.handlePhaseChange('rest', 1));
+  assert.equal(pauses, 2);
+  assert.equal(h.audio.localCuesAllowed, true);
+});
+
+test('an older stop cannot re-enable cues for a newer Spotify start', async (t) => {
+  const paused = deferred();
+  const h = await mountAudio(
+    t,
+    { pause: () => paused.promise },
+    {
+      routine: {
+        roundsData: [
+          { workSong: { uri: 'spotify:track:first', platform: 'spotify' } },
+          { workSong: { uri: 'spotify:track:second', platform: 'spotify' } },
+        ],
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  let stopped;
+  let started;
+  await act(async () => {
+    stopped = h.audio.stopMusic();
+    started = h.audio.handlePhaseChange('work', 2);
+  });
+  await act(async () => {
+    paused.resolve(success);
+    await Promise.all([stopped, started]);
+  });
+  assert.equal(h.audio.localCuesAllowed, false);
+  assert.equal(h.audio.track.id, 'spotify:track:second');
 });
 
 test('rapid phase changes only load the latest requested source', async (t) => {

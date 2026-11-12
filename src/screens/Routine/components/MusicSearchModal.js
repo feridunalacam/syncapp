@@ -130,7 +130,9 @@ export const MusicSearchModal = ({
       ]
     : [
         { id: 'device', label: 'Device', icon: 'phone-portrait-outline' },
-        { id: 'spotify', label: 'Spotify', icon: 'musical-notes-outline' },
+        ...(spotify.available
+          ? [{ id: 'spotify', label: 'Spotify', icon: 'musical-notes-outline' }]
+          : []),
         { id: 'browser', label: 'Browser', icon: 'globe-outline' },
       ];
   const deviceTracks = music.popularSongs.filter((item) =>

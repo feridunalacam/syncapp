@@ -12,6 +12,13 @@ export const ACCOUNT_KEYS = [
   'connectedPlatforms',
   'selectedPlatform',
 ];
+const JSON_KEYS = new Set([
+  'routines',
+  'completedRoutines',
+  'profileSocialLinks',
+  'posts',
+  'connectedPlatforms',
+]);
 const OWNER_KEY = '@syncapp_guest_import_owner';
 const IMPORT_CLAIM_KEY = '@syncapp_guest_import_claim';
 const IMPORT_CLEANUP_KEY = '@syncapp_guest_import_cleanup';
@@ -39,6 +46,16 @@ const decode = (raw, fallback = null) => {
     return raw == null ? fallback : JSON.parse(raw);
   } catch {
     return fallback;
+  }
+};
+// Missing records are different from damaged records. Never turn a recoverable
+// raw value into first-install defaults that a consumer would persist over it.
+const parseSavedJSON = (raw, fallback = null) => {
+  if (raw == null) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('Saved records could not be read. Retry to recover this device’s data.');
   }
 };
 const prefixFor = (userId) => (userId ? `@syncapp/account/${userId}/` : '');
@@ -325,9 +342,20 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
   };
   return {
     userId,
+    // Resolve interrupted replacement before mounting consumers. Read every
+    // personal key without cloud sanitization, normalization or a size limit so
+    // guest/Free content remains available independently of backup eligibility.
+    prepare: () =>
+      serial(async () => {
+        ensureOpen();
+        for (const key of ACCOUNT_KEYS) {
+          const raw = await base.getItem(keyFor(key));
+          if (JSON_KEYS.has(key)) parseSavedJSON(raw);
+        }
+      }),
     getString: (key) => serial(() => base.getItem(keyFor(key))),
     getJSON: (key, fallback = null) =>
-      serial(async () => decode(await base.getItem(keyFor(key)), fallback)),
+      serial(async () => parseSavedJSON(await base.getItem(keyFor(key)), fallback)),
     setString: (key, value) =>
       serial(() => write(key, value == null ? null : String(value))).catch(() => false),
     setJSON: (key, value) =>
@@ -399,6 +427,12 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
               if (pending || claim === userId) await base.removeItem(IMPORT_CLAIM_KEY);
               return;
             }
+            // Reject damaged guest/account JSON before reserving, copying or
+            // cleaning up an import. Keep the original raw records recoverable.
+            for (const key of BACKUP_KEYS.filter((key) => JSON_KEYS.has(key))) {
+              parseSavedJSON(await base.getItem(key));
+              parseSavedJSON(await base.getItem(keyFor(key)));
+            }
             // Reserve before the first account copy. The separate cleanup
             // journal is written only after all copies have become durable.
             if (!claim) await base.setItem(IMPORT_CLAIM_KEY, userId);
@@ -414,8 +448,8 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
               const current = await base.getItem(keyFor(key));
               let raw = current == null ? guest : current;
               if (['routines', 'completedRoutines', 'posts'].includes(key)) {
-                const localRows = decode(current, []);
-                const guestRows = decode(guest, []);
+                const localRows = parseSavedJSON(current, []);
+                const guestRows = parseSavedJSON(guest, []);
                 if (!Array.isArray(localRows) || !Array.isArray(guestRows))
                   throw new Error('Device data could not be imported.');
                 const rows = combine(localRows, guestRows, (r) =>

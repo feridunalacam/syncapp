@@ -14,7 +14,9 @@ Deno.serve(async (req: Request) => {
     if (!validateWebhook(payload)) return json({ error: 'invalid_event' }, 400);
     const { event } = payload;
     const { environment } = subscriptionConfig();
-    if (event.environment !== environment) return json({ ignored: 'different_environment' });
+    // RevenueCat may omit environment on TRANSFER. In that case refresh both
+    // owners canonically; canonicalEntitlement still rejects sandbox receipts.
+    if (event.environment != null && event.environment !== environment) return json({ ignored: 'different_environment' });
     const admin = adminClient();
     for (const userId of webhookUsers(event)) {
       const { data, error } = await admin.auth.admin.getUserById(userId);

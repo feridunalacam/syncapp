@@ -8,7 +8,9 @@ Deno.serve(async (req: Request) => {
     const admin = adminClient();
     const auth = await authenticatedUser(req, admin);
     if (!auth) return json({ error: 'unauthorized' }, 401);
-    if (!requireRecentSignIn(auth.user)) return json({ error: 'reauthentication_required', message: 'Sign in again before deleting your account.' }, 403);
+    const { data: verified, error: claimsError } = await admin.auth.getClaims(auth.token);
+    if (claimsError || verified?.claims.sub !== auth.user.id || !requireRecentSignIn(verified?.claims))
+      return json({ error: 'reauthentication_required', message: 'Sign in again before deleting your account.' }, 403);
     let confirmation;
     try { confirmation = await req.json(); } catch { return json({ error: 'invalid_confirmation' }, 400); }
     if (confirmation?.confirmation !== 'DELETE') return json({ error: 'invalid_confirmation' }, 400);

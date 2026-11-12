@@ -461,6 +461,36 @@ test('listener-triggered verification also invalidates access and handles failur
   assert.equal(controller.getState().error, 'Listener verification failed');
 });
 
+test('a background store update re-reads the current identity and retains pending access while backend is offline', async () => {
+  let received = false;
+  let backendOffline = false;
+  let infoReads = 0;
+  const { controller, callbacks } = setup({
+    sdk: {
+      getCustomerInfo: async () => {
+        infoReads++;
+        return received ? activeInfo : emptyInfo;
+      },
+    },
+    verify: async () => {
+      if (backendOffline) throw new Error('Backend offline');
+      return { entitlement: null };
+    },
+  });
+  await controller.identify('user-a');
+  received = true;
+  backendOffline = true;
+  // The unscoped callback payload is deliberately stale; fresh SDK identity
+  // information must be used before deciding whether another checkout is safe.
+  [...callbacks][0](emptyInfo);
+  await settle();
+  assert.equal(infoReads, 2);
+  assert.equal(controller.getState().customerInfo, activeInfo);
+  assert.equal(controller.getState().pending, true);
+  assert.equal(controller.getState().accessVerified, false);
+  assert.throws(() => controller.purchase(monthly), /awaiting verification/);
+});
+
 test('an incomplete backend response cannot be mistaken for verified Free', async () => {
   const { controller } = setup({ verify: async () => undefined });
   await assert.rejects(controller.identify('user-a'), /Could not verify/);

@@ -6,7 +6,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View, Alert } from 'react-native';
 import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, getStateFromPath } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import * as WebBrowser from 'expo-web-browser';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -18,10 +18,12 @@ import { WorkoutProvider } from './src/context/WorkoutContext';
 import { SpotifyConnectionProvider } from './src/context/SpotifyConnectionContext';
 import TabNavigator from './src/navigation/TabNavigator';
 import { getNavTheme } from './src/navigation/theme';
+import { createSafeStateFromPath } from './src/navigation/safeLinking';
 import AccountPanel from './src/components/account/AccountPanel';
 
 // Complete web browser auth session
 WebBrowser.maybeCompleteAuthSession();
+const safeStateFromPath = createSafeStateFromPath(getStateFromPath);
 
 function AppContent() {
   const { theme, isDark } = useTheme();
@@ -42,6 +44,7 @@ function AppContent() {
         filter: (url) =>
           !url.startsWith('syncapp://spotify-callback') && !url.startsWith('syncapp://auth/'),
         config: { screens: { Home: 'routine/:routineId' } },
+        getStateFromPath: safeStateFromPath,
       }}
     >
       <StatusBar style={isDark ? 'light' : 'dark'} />

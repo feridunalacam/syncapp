@@ -119,3 +119,7 @@ The earlier SMTP/auth tests and canonical Free subscription sync remain valid fo
 - [Apple tracking permission and user choice](https://developer.apple.com/app-store/user-privacy-and-data-use/)
 
 The saved iOS and Android ad-unit lists both show the new interstitial and its one-impression-per-two-minute cap. Video was disabled in the submitted creation settings; text/image/rich-media stayed enabled. Production serving remains disabled and store/app review is still required.
+
+### iOS guest native follow-up, 12 November 2026
+
+The isolated iOS 26.1 QA device displayed a Google test interstitial before a new five-second session. Closing the native ad released Start at the full duration and the session completed. A subsequent session inside the cooldown started without another ad. After the cooldown, pressing Finish on the completed-session summary opened a real test interstitial; closing it returned to Ready without starting playback or another workout. No ad content was clicked. This completes the previously unverified guest Close→Start and Finish→Close boundaries using the existing signed Debug ads binary/current JavaScript. It does not establish regional consent, real Pro/account-switch/music transitions, physical-device behavior or distribution readiness. Production ads remain off.

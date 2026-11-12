@@ -6,11 +6,15 @@ import { createRequire } from 'node:module';
 import React, { act } from 'react';
 import { create } from 'react-test-renderer';
 import { createAuthRecoveryState } from '../src/lib/authRecoveryState.js';
+import { recoverySessionIdentity } from '../src/lib/authRecoveryState.js';
+import { createAuthOperationQueue } from '../src/lib/authOperations.js';
+import { createAuthFetch, AUTH_REQUEST_TIMEOUT_MS } from '../src/lib/authFetch.js';
 import { AUTH_REDIRECT, RECOVERY_REDIRECT, parseAuthLink } from '../src/lib/authLinks.js';
 import { authExchangeDiagnostic, createAuthCodeExchanger } from '../src/lib/authCodeExchange.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
+const { FunctionsClient } = require('@supabase/functions-js');
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const source = readFileSync(new URL('../src/context/AuthContext.js', import.meta.url), 'utf8')
   .replace(/^import[\s\S]*?from ['"][^'"]+['"];?\n/gm, '')
@@ -67,6 +71,8 @@ async function harness(options = {}) {
       return { data: { session: next }, error: null };
     },
     updateUser: options.updateUser || (async () => ({ data: {}, error: null })),
+    signInWithPassword: options.signInWithPassword || (async () => ({ data: {}, error: null })),
+    signOut: options.signOut || (async () => ({ data: {}, error: null })),
   };
   const context = {
     React,
@@ -76,7 +82,7 @@ async function harness(options = {}) {
     useRef: React.useRef,
     useState: React.useState,
     AsyncStorage: {},
-    clearAccountPlatforms: () => {},
+    clearAccountPlatforms: options.clearAccountPlatforms || (() => {}),
     AppState: { currentState: 'active', addEventListener: () => ({ remove: () => {} }) },
     Linking: {
       getInitialURL: () => Promise.resolve(null),
@@ -86,7 +92,10 @@ async function harness(options = {}) {
       },
     },
     WebBrowser: {},
-    supabase: { auth },
+    supabase: {
+      auth,
+      functions: { invoke: options.invoke || (() => assert.fail('Unexpected account mutation')) },
+    },
     isSupabaseConfigured: true,
     authStorage: store,
     AUTH_REDIRECT,
@@ -95,6 +104,8 @@ async function harness(options = {}) {
     authExchangeDiagnostic,
     createAuthCodeExchanger,
     createAuthRecoveryState,
+    recoverySessionIdentity,
+    createAuthOperationQueue,
     __DEV__: false,
   };
   new Script(compiled).runInNewContext(context);
@@ -121,6 +132,8 @@ async function harness(options = {}) {
     async link(url) {
       await act(async () => urlListener({ url }));
     },
+    dispatchLink: (url) => urlListener({ url }),
+    dispatchAuth: (event, next) => listener(event, next),
     async close() {
       await act(async () => renderer.unmount());
     },
@@ -194,5 +207,203 @@ test('a password update from an earlier account cannot dismiss a newer account r
     assert.equal(app.value.recoveryMode, true);
   } finally {
     await app.close();
+  }
+});
+
+test('an incoming recovery waits for an older password update to finish before replacing its session', async () => {
+  const update = deferred();
+  const app = await harness({ updateUser: () => update.promise });
+  try {
+    await app.emit('PASSWORD_RECOVERY', session(accountB, sessionB));
+    let completing, receiving;
+    await act(async () => {
+      completing = app.value.updatePassword('offline-new-password');
+      receiving = app.dispatchLink(`${RECOVERY_REDIRECT}?code=next-recovery`);
+    });
+    assert.equal(app.exchanges(), 0);
+    await act(async () => {
+      update.resolve({ data: {}, error: null });
+      await completing;
+      await receiving;
+    });
+    assert.equal(app.exchanges(), 1);
+    assert.equal(app.value.user.id, accountA);
+    assert.equal(app.value.recoveryMode, true);
+  } finally {
+    await app.close();
+  }
+});
+
+test('a queued account-bound action cannot sign out a newer accepted session', async () => {
+  const login = deferred();
+  let signOuts = 0;
+  const app = await harness({
+    signInWithPassword: () => login.promise,
+    signOut: async () => {
+      signOuts++;
+      return { error: null };
+    },
+  });
+  try {
+    await app.emit('SIGNED_IN', session());
+    let signingIn, signingOut;
+    await act(async () => {
+      signingIn = app.value.signIn('offline@example.test', 'offline-password');
+      signingOut = app.value.signOut();
+    });
+    const rejected = assert.rejects(signingOut, /account changed/);
+    await app.emit('SIGNED_IN', session(accountB, sessionB));
+    await act(async () => {
+      login.resolve({ data: {}, error: null });
+      await signingIn;
+      await rejected;
+    });
+    assert.equal(signOuts, 0);
+    assert.equal(app.value.user.id, accountB);
+  } finally {
+    await app.close();
+  }
+});
+
+test('unreachable account services settle initial readiness and show a friendly explicit-action error', async () => {
+  const app = await harness({
+    signInWithPassword: async () => ({
+      data: {},
+      error: { name: 'AuthRetryableFetchError', message: 'Offline transport fixture' },
+    }),
+  });
+  try {
+    await act(async () =>
+      app.initial.resolve({ data: { session: null }, error: { name: 'AuthRetryableFetchError' } }),
+    );
+    assert.equal(app.value.ready, true);
+    assert.equal(app.value.user, null);
+    assert.match(app.value.error, /could not reconnect/);
+    await act(async () => {
+      await assert.rejects(
+        app.value.signIn('offline@example.test', 'offline-fixture'),
+        /Check your connection and retry/,
+      );
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test('queued deletion is bound to the confirmed session even when the account UUID is unchanged', async () => {
+  const pending = deferred();
+  let deletions = 0;
+  const app = await harness({
+    signInWithPassword: () => pending.promise,
+    invoke: () => {
+      deletions++;
+      return { error: null };
+    },
+  });
+  try {
+    await app.emit('SIGNED_IN', session());
+    let signingIn, deleting;
+    await act(async () => {
+      signingIn = app.value.signIn('offline@example.test', 'offline-fixture');
+      deleting = app.value.deleteAccount();
+    });
+    const rejected = assert.rejects(deleting, /account changed/);
+    await app.emit('SIGNED_IN', session(accountA, sessionB));
+    await act(async () => {
+      pending.resolve({ data: {}, error: null });
+      await signingIn;
+      await rejected;
+    });
+    assert.equal(deletions, 0);
+    assert.equal(app.value.user.id, accountA);
+  } finally {
+    await app.close();
+  }
+});
+
+test('held deletion success and error bodies abort before queued sign-out/sign-in, without claiming deletion', async () => {
+  for (const status of [200, 503]) {
+    let expire,
+      calls = 0,
+      signOuts = 0,
+      localCleanups = 0,
+      clears = 0;
+    const reached = deferred();
+    const target = session();
+    const project = 'https://offline-test.invalid';
+    const functions = new FunctionsClient(`${project}/functions/v1`, {
+      customFetch: createAuthFetch(
+        async (input, options) => {
+          calls++;
+          assert.equal(input, `${project}/functions/v1/delete-account`);
+          assert.equal(options.headers.Authorization, `Bearer ${target.access_token}`);
+          return {
+            status,
+            statusText: 'Offline fixture',
+            headers: new Headers({ 'Content-Type': 'application/json' }),
+            text: () => {
+              reached.resolve();
+              return new Promise((_resolve, reject) =>
+                options.signal.addEventListener('abort', () =>
+                  reject(new Error('Native deletion request cancelled fixture')),
+                ),
+              );
+            },
+          };
+        },
+        project,
+        {
+          setTimer(callback, delay) {
+            expire = callback;
+            assert.equal(delay, AUTH_REQUEST_TIMEOUT_MS);
+            return 1;
+          },
+          clearTimer() {
+            clears++;
+          },
+        },
+      ),
+    });
+    let app;
+    app = await harness({
+      invoke: functions.invoke.bind(functions),
+      clearAccountPlatforms: () => {
+        localCleanups++;
+      },
+      signOut: async () => {
+        signOuts++;
+        app.dispatchAuth('SIGNED_OUT', null);
+        return { error: null };
+      },
+      signInWithPassword: async () => {
+        app.dispatchAuth('SIGNED_IN', session(accountB, sessionB));
+        return { data: { user: { id: accountB } }, error: null };
+      },
+    });
+    try {
+      await app.emit('SIGNED_IN', target);
+      let deleting, signingOut, signingIn;
+      await act(async () => {
+        deleting = app.value.deleteAccount();
+      });
+      await reached.promise;
+      const rejected = assert.rejects(deleting, /deletion could not be confirmed/);
+      await act(async () => {
+        signingOut = app.value.signOut();
+        signingIn = app.value.signIn('offline-b@example.test', 'offline-fixture');
+      });
+      assert.equal(signOuts, 0);
+      await act(async () => {
+        expire();
+        await Promise.all([rejected, signingOut, signingIn]);
+      });
+      assert.equal(calls, 1);
+      assert.equal(clears, 1);
+      assert.equal(signOuts, 1);
+      assert.equal(localCleanups, 0);
+      assert.equal(app.value.user.id, accountB);
+    } finally {
+      await app.close();
+    }
   }
 });

@@ -71,6 +71,36 @@ test('queued writes keep snapshot and dirty counter consistent', async () => {
   assert.equal((await account.snapshot()).meta.counter, 3);
 });
 
+test('damaged local JSON fails closed while missing and valid null records keep their fallback semantics', async () => {
+  for (const userId of [null, 'a']) {
+    const key = userId ? scopedKey(userId, 'routines') : 'routines';
+    const raw = '[{"id":"recoverable"},';
+    const base = memoryStorage({ [key]: raw });
+    const before = new Map(base.values);
+    const storage = createAccountStore(base, userId);
+    await assert.rejects(storage.prepare(), /Saved records could not be read/);
+    await assert.rejects(storage.getJSON('routines', []), /Saved records could not be read/);
+    assert.deepEqual(base.values, before);
+    base.values.set(key, 'null');
+    await storage.prepare();
+    assert.equal(await storage.getJSON('routines', []), null);
+    base.values.delete(key);
+    assert.deepEqual(await storage.getJSON('routines', []), []);
+  }
+});
+
+test('damaged guest or account JSON cannot be reserved, imported or removed', async () => {
+  for (const key of ['routines', 'posts', 'profileSocialLinks', scopedKey('a', 'routines')]) {
+    const base = memoryStorage({ routines: '[{"id":"guest"}]', [key]: '{recoverable' });
+    const before = new Map(base.values);
+    await assert.rejects(
+      createAccountStore(base, 'a').importGuestData(),
+      /Saved records could not be read/,
+    );
+    assert.deepEqual(base.values, before);
+  }
+});
+
 test('guest import preserves account edits, merges identities, and imports only once', async () => {
   const base = memoryStorage({
     routines: JSON.stringify([{ id: 'same', name: 'Guest name' }, { id: 'guest-only' }]),

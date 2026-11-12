@@ -1,5 +1,7 @@
 import { spotifyAPI } from './api';
 import { createCommandQueue } from './queue.js';
+import { SPOTIFY_AVAILABLE } from './config';
+import { SPOTIFY_UNAVAILABLE_MESSAGE } from './availability';
 
 const spotifyService = {
   // Authentication
@@ -53,6 +55,17 @@ const spotifyService = {
 
 // The workout, picker and profile share one mutation stream. Reads stay independent.
 const enqueue = createCommandQueue();
+// Guard every entry point, including reads and token refreshes. Saved local
+// credentials and routine assignments are retained without contacting Spotify.
+if (!SPOTIFY_AVAILABLE) {
+  for (const method of Object.keys(spotifyService)) {
+    spotifyService[method] = async () => ({
+      success: false,
+      code: 'SPOTIFY_UNAVAILABLE',
+      error: SPOTIFY_UNAVAILABLE_MESSAGE,
+    });
+  }
+}
 for (const method of [
   'play',
   'playTrack',

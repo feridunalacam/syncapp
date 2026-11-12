@@ -2,7 +2,7 @@ import * as MediaLibrary from 'expo-media-library';
 
 // Called only after the user explicitly chooses the device library.
 export async function loadDeviceMusic() {
-  const { status } = await MediaLibrary.requestPermissionsAsync();
+  const { status } = await MediaLibrary.requestPermissionsAsync(false, ['audio']);
   if (status !== 'granted') {
     const error = new Error('Permission denied');
     error.userMessage = 'Library access is off. You can still import from Files.';

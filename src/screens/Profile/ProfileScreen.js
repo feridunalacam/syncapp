@@ -387,24 +387,25 @@ export default function ProfileScreen() {
         </Surface>
         {section('Music')}
         <Surface variant="card" style={[styles.group, { backgroundColor: theme.card }]}>
-          {row(
-            'logo-spotify',
-            'Spotify',
-            spotify.connected
-              ? 'Connected · controls playback on your Spotify device'
-              : spotify.connecting
-                ? 'Connecting…'
-                : 'Connect your music account',
-            spotify.connected
-              ? spotify.disconnect
-              : spotify.ready && !spotify.connecting
-                ? spotify.connect
-                : undefined,
-            <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>
-              {spotify.connected ? 'Disconnect' : spotify.connecting ? '…' : 'Connect'}
-            </Text>,
-          )}
-          <SpotifyDevicePicker />
+          {spotify.available &&
+            row(
+              'logo-spotify',
+              'Spotify',
+              spotify.connected
+                ? 'Connected · controls playback on your Spotify device'
+                : spotify.connecting
+                  ? 'Connecting…'
+                  : 'Connect your music account',
+              spotify.connected
+                ? spotify.disconnect
+                : spotify.ready && !spotify.connecting
+                  ? spotify.connect
+                  : undefined,
+              <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>
+                {spotify.connected ? 'Disconnect' : spotify.connecting ? '…' : 'Connect'}
+              </Text>,
+            )}
+          {spotify.available && <SpotifyDevicePicker />}
           {row(
             'musical-notes-outline',
             'Device audio',
@@ -679,8 +680,8 @@ export default function ProfileScreen() {
           a local alert sound.{'\n\n'}2. Choose it in Timer and press Start. You can pause, resume
           or skip intervals. Switching tabs keeps the session running.{'\n\n'}3. Open Activity
           inside Training to review actual session time, then create an image to share.{'\n\n'}
-          Spotify needs an eligible account and an active playback device. Local files play directly
-          in Sync.
+          {spotify.available && 'Spotify needs an eligible account and an active playback device. '}
+          Local files play directly in Sync.
         </Text>
       </Sheet>
       <Sheet visible={sheet === 'about'} title="About Sync" onClose={() => setSheet(null)}>

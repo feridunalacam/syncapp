@@ -7,7 +7,8 @@ import * as WebBrowser from 'expo-web-browser';
 import { supabase, isSupabaseConfigured, authStorage } from '../lib/supabase';
 import { AUTH_REDIRECT, RECOVERY_REDIRECT, parseAuthLink } from '../lib/authLinks';
 import { authExchangeDiagnostic, createAuthCodeExchanger } from '../lib/authCodeExchange';
-import { createAuthRecoveryState } from '../lib/authRecoveryState';
+import { createAuthRecoveryState, recoverySessionIdentity } from '../lib/authRecoveryState';
+import { createAuthOperationQueue } from '../lib/authOperations';
 
 const AuthContext = createContext({ user: null, ready: false, configured: false });
 export const useAuth = () => useContext(AuthContext);
@@ -25,6 +26,19 @@ export function AuthProvider({ children }) {
     recovery.current = createAuthRecoveryState({ storage: authStorage, onChange: setRecoveryMode });
   const exchangeCode = useRef(null);
   if (!exchangeCode.current && supabase) exchangeCode.current = createAuthCodeExchanger(supabase);
+  const operations = useRef(null);
+  if (!operations.current) operations.current = createAuthOperationQueue();
+  const assertCurrentSession = (target) => {
+    const expected = recoverySessionIdentity(target);
+    const current = recoverySessionIdentity(currentSession.current);
+    if (
+      !target ||
+      (expected
+        ? expected.userId !== current?.userId || expected.sessionId !== current?.sessionId
+        : target !== currentSession.current)
+    )
+      throw new Error('Your account changed. Please retry.');
+  };
   const requireClient = () => {
     if (!supabase) throw new Error('Account services are being set up. Please try again later.');
     setError(null);
@@ -32,14 +46,18 @@ export function AuthProvider({ children }) {
   };
   const checked = async (promise) => {
     const result = await promise;
-    if (result.error) throw result.error;
+    if (result.error) {
+      if (result.error.name === 'AuthRetryableFetchError')
+        throw new Error('Account services could not be reached. Check your connection and retry.');
+      throw result.error;
+    }
     return result.data;
   };
   const exchangeLink = async (url) => {
     const parsed = parseAuthLink(url);
     if (!parsed) return;
     if (parsed.error) throw new Error(parsed.error);
-    await exchangeCode.current(parsed);
+    await operations.current(() => exchangeCode.current(parsed));
   };
   useEffect(() => {
     if (!supabase) return;
@@ -69,7 +87,8 @@ export function AuthProvider({ children }) {
       .then(({ data, error: failure }) => {
         if (!alive || receivedEvent) return;
         receiveSession(data.session, 'INITIAL_SESSION');
-        if (failure) setError(failure.message);
+        if (failure)
+          setError('Your account could not reconnect. You can keep using Sync on this device.');
       })
       .catch((failure) => {
         if (alive && !receivedEvent) {
@@ -111,28 +130,46 @@ export function AuthProvider({ children }) {
       supabase.auth.stopAutoRefresh();
     };
   }, []);
-  const signIn = (email, password) =>
-    checked(requireClient().auth.signInWithPassword({ email: email.trim(), password }));
-  const signUp = async (email, password) => {
-    const data = await checked(
-      requireClient().auth.signUp({
-        email: email.trim(),
-        password,
-        options: { emailRedirectTo: AUTH_REDIRECT },
-      }),
+  const signIn = (email, password) => {
+    const client = requireClient();
+    return operations.current(() =>
+      checked(client.auth.signInWithPassword({ email: email.trim(), password })),
     );
-    return { requiresConfirmation: !data.session };
+  };
+  const signUp = (email, password) => {
+    const client = requireClient();
+    return operations.current(async () => {
+      const data = await checked(
+        client.auth.signUp({
+          email: email.trim(),
+          password,
+          options: { emailRedirectTo: AUTH_REDIRECT },
+        }),
+      );
+      return { requiresConfirmation: !data.session };
+    });
   };
   const sendPasswordReset = (email) =>
     checked(
       requireClient().auth.resetPasswordForEmail(email.trim(), { redirectTo: RECOVERY_REDIRECT }),
     );
   const updatePassword = async (password) => {
+    const client = requireClient();
     const target = currentSession.current;
-    await checked(requireClient().auth.updateUser({ password }));
-    recovery.current.finish(target);
+    return operations.current(async () => {
+      assertCurrentSession(target);
+      await checked(client.auth.updateUser({ password }));
+      recovery.current.finish(target);
+    });
   };
-  const signOut = () => checked(requireClient().auth.signOut({ scope: 'local' }));
+  const signOut = () => {
+    const client = requireClient();
+    const target = currentSession.current;
+    return operations.current(() => {
+      assertCurrentSession(target);
+      return checked(client.auth.signOut({ scope: 'local' }));
+    });
+  };
   const signInWithOAuth = async (provider) => {
     if (!['apple', 'google'].includes(provider)) throw new Error('Unsupported sign-in provider.');
     const data = await checked(
@@ -151,29 +188,34 @@ export function AuthProvider({ children }) {
   };
   const deleteAccount = async () => {
     const client = requireClient();
-    const targetId = session?.user.id;
+    const target = currentSession.current;
+    const targetId = target?.user.id;
     if (!targetId) throw new Error('Sign in before deleting your account.');
-    const { error: failure } = await client.functions.invoke('delete-account', {
-      body: { confirmation: 'DELETE' },
-      headers: { Authorization: `Bearer ${session.access_token}` },
+    return operations.current(async () => {
+      assertCurrentSession(target);
+      const { error: failure } = await client.functions.invoke('delete-account', {
+        body: { confirmation: 'DELETE' },
+        headers: { Authorization: `Bearer ${target.access_token}` },
+      });
+      if (failure) {
+        const body = await failure.context?.json?.().catch(() => null);
+        throw new Error(
+          body?.message ||
+            'Account deletion could not be confirmed. Sign in again to check your account.',
+        );
+      }
+      // Remote deletion is confirmed before this device forgets its account data.
+      const { clearAccountStore } = await import('../lib/accountStore');
+      const cleanup = Promise.allSettled([
+        clearAccountStore(AsyncStorage, targetId),
+        clearAccountPlatforms(targetId),
+      ]);
+      if (currentUser.current === targetId) {
+        await client.auth.signOut({ scope: 'local' });
+        if (currentUser.current === targetId) setSession(null);
+      }
+      await cleanup;
     });
-    if (failure) {
-      const body = await failure.context?.json?.().catch(() => null);
-      throw new Error(
-        body?.message || 'Your account could not be deleted. Sign in again and retry.',
-      );
-    }
-    // Remote deletion is confirmed before this device forgets its account data.
-    const { clearAccountStore } = await import('../lib/accountStore');
-    const cleanup = Promise.allSettled([
-      clearAccountStore(AsyncStorage, targetId),
-      clearAccountPlatforms(targetId),
-    ]);
-    if (currentUser.current === targetId) {
-      await client.auth.signOut({ scope: 'local' });
-      setSession(null);
-    }
-    await cleanup;
   };
   return (
     <AuthContext.Provider

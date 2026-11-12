@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "syncapp",
+    "name": "Sync",
     "slug": "syncapp",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -11,19 +11,20 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#151816"
     },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.feridun.syncapp"
+      "bundleIdentifier": "com.feridun.syncapp",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#151816"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.syncapp.app",
@@ -36,10 +37,7 @@
               "scheme": "syncapp"
             }
           ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
+          "category": ["BROWSABLE", "DEFAULT"]
         }
       ]
     },
@@ -51,12 +49,28 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "The app accesses your photos to let you set your profile picture.",
-          "cameraPermission": "The app accesses your camera to let you take a photo for your profile picture."
+          "photosPermission": "Sync lets you choose a profile photo and select audio or video from your library for routine music.",
+          "cameraPermission": "Sync uses the camera only when you choose to take a profile photo.",
+          "microphonePermission": false
         }
       ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Sync lets you choose a profile photo and select audio or video from your library for routine music.",
+          "savePhotosPermission": false,
+          "granularPermissions": ["audio"]
+        }
+      ],
+      ["expo-av", { "microphonePermission": false }],
       "expo-video",
-      "expo-secure-store"
-    ]
+      ["expo-secure-store", { "faceIDPermission": false }]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2b38178c-60e8-4fe2-94da-f51dc14f4efc"
+      }
+    },
+    "owner": "feridunalacam"
   }
 }

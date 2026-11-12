@@ -50,6 +50,7 @@ export const WorkoutProvider = ({ children }) => {
     ...platform,
     selectedRoutine: activeRoutine,
     countdownSoundPlayer,
+    stopLocalCues: () => Promise.all([stopWorkoutCues(), stopCuePreview()]),
     onPlaybackInterrupted: (reason) => {
       if (timerRef.current?.session?.status !== 'running') return;
       setInterruptionReason(reason);
@@ -95,7 +96,7 @@ export const WorkoutProvider = ({ children }) => {
     },
   });
   timerRef.current = timer;
-  const { alertError } = useWorkoutCues(timer.session);
+  const { alertError } = useWorkoutCues(timer.session, audio.localCuesAllowed);
   const running = timer.session?.status === 'running';
   const paused = timer.session?.status === 'paused';
   const active = running || paused;
@@ -125,7 +126,14 @@ export const WorkoutProvider = ({ children }) => {
   const alertKey = useRef(null);
   useEffect(() => {
     const s = timer.session;
-    if (!running || !s || s.audioPending || s.routine.audioAlerts != null) return;
+    if (
+      !running ||
+      !s ||
+      s.audioPending ||
+      s.routine.audioAlerts != null ||
+      !audio.localCuesAllowed
+    )
+      return;
     const phase = s.timeline[s.index];
     const key =
       phase.phase === 'beforeStart'
@@ -148,7 +156,7 @@ export const WorkoutProvider = ({ children }) => {
       alertKey.current = unique;
       audio.playCountdownSound(key);
     }
-  }, [timer.session, running, audio.playCountdownSound]);
+  }, [timer.session, running, audio.playCountdownSound, audio.localCuesAllowed]);
   const stop = useCallback(() => {
     stopWorkoutCues().catch(() => {});
     const next = timer.stop();
@@ -163,19 +171,34 @@ export const WorkoutProvider = ({ children }) => {
     },
     [active, stop, timer.reset],
   );
-  const beginSession = useCallback((expectedRoutine) => {
-    if (
-      !mounted.current ||
-      !expectedRoutine ||
-      selectedRef.current !== expectedRoutine ||
-      ['running', 'paused'].includes(timerRef.current?.session?.status)
-    )
-      return false;
-    setInterruptionReason(null);
-    setSnapshot(JSON.parse(JSON.stringify(expectedRoutine)));
-    alertKey.current = null;
-    return !!timerRef.current.start();
-  }, []);
+  const beginSession = useCallback(
+    (expectedRoutine) => {
+      if (
+        !mounted.current ||
+        !expectedRoutine ||
+        selectedRef.current !== expectedRoutine ||
+        ['running', 'paused'].includes(timerRef.current?.session?.status)
+      )
+        return false;
+      // Cloud replacement checks this ref before committing. Reserve it in the
+      // Start action, before React's later render/effect can announce activity.
+      setSyncPaused(true);
+      let started;
+      try {
+        setInterruptionReason(null);
+        setSnapshot(JSON.parse(JSON.stringify(expectedRoutine)));
+        alertKey.current = null;
+        started = timerRef.current.start();
+        return !!started;
+      } finally {
+        if (!started) {
+          setSnapshot(null);
+          setSyncPaused(['running', 'paused'].includes(timerRef.current?.session?.status));
+        }
+      }
+    },
+    [setSyncPaused],
+  );
   const toggle = useCallback(async () => {
     setInterruptionReason(null);
     if (paused) {

@@ -17,7 +17,9 @@ preparation stays musically silent. Existing routines receive these defaults.
 Local files and browser audio load at the requested volume before playback.
 Spotify volume is requested on the active Connect device; devices that do not
 support remote volume keep their own level. Countdown voice plays independently
-at the local media level, over the quieter preparation music. Music settings
+at the local media level with Device or Browser music. Spotify intervals, including
+preparation that uses the first Spotify Work source, use the visual timer without
+local voice, effects or legacy alerts. Music settings
 do not raise the physical device's media-volume setting for local files.
 
 - **Voice:** spoken countdown, then Go, Rest, Start and Workout complete.
@@ -36,7 +38,7 @@ the same instant.
 
 New and legacy routines keep `audioAlerts: null` until explicitly configured.
 The older preparation/end-work/end-rest alerts remain available and retain their
-previous behavior in this state. A non-null coaching configuration replaces
+previous behavior with Device/Browser audio in this state. A non-null coaching configuration replaces
 that legacy alert path, including when explicitly set to Silent. Saving preserves
 other routine metadata. Configuration changes apply to the next session: a
 running workout uses its starting snapshot.
@@ -51,9 +53,11 @@ sounds. Spoken cues follow the device's media volume, so setting Effects volume
 to zero does not mute spoken countdowns. Disable coaching or select None/Off to
 silence those cues.
 
-All alerts play locally on the device running SyncApp. Spotify music may be
-playing on another Spotify Connect device; alerts are not sent to that remote
-device. No Spotify track can be selected as a custom alert. Custom file and web
+All alerts play locally on the device running SyncApp. Local alerts are suppressed
+while Spotify owns playback, including on another Spotify Connect device. Starting
+Spotify first stops local cues; returning to a Device, Browser or silent interval
+waits for the prior source to stop before local cues become eligible again. Saved
+cue settings remain unchanged. No Spotify track can be selected as a custom alert. Custom file and web
 audio use the local player; remote files require network access.
 
 Each file cue ends on its playback-completion callback, or at a bounded safety
@@ -94,7 +98,8 @@ All timer pause paths share audio cancellation, including phone interruptions,
 locking and leaving the foreground. Returning does not automatically resume.
 Music pause is sent immediately when another command is pending and confirmed
 again after that command settles; legacy cues and coaching are cancelled too.
-Completion stops music but permits the completion cue. Reset and abort stop both.
+Completion stops music before allowing any local completion cue. A stale cue is
+discarded if remote pause takes too long. Reset and abort stop both.
 An unloaded workout provider also requests remote pause and releases local sounds.
 
 While running, sequential playback checks treat two stopped/missing snapshots,
@@ -110,6 +115,10 @@ pause, and loss of connectivity can prevent pausing a remote Spotify player.
 
 References: [Expo AV playback status](https://docs.expo.dev/versions/v54.0.0/sdk/av/)
 and [Spotify playback commands](https://developer.spotify.com/documentation/web-api/reference/start-a-users-playback).
+Spotify's [Developer Policy, section III.7](https://developer.spotify.com/policy)
+prohibits overlap with other audio; its [Developer Terms, section II.14](https://developer.spotify.com/terms)
+include background Spotify control in Streaming. These playback safeguards do not
+establish approval for public or commercial Spotify use.
 
 ## New workout cues
 
@@ -133,18 +142,63 @@ metadata live in `src/services/alerts/assets.js`.
 
 The reproducible Python generator is saved in the workspace's
 `work/generate-alert-cues.py` beside the repository. It uses the Python standard
-library and fixed random seeds only. It never changes the older files.
+library and fixed random seeds only. This earlier generator never changed the
+older files; their later removal is recorded below.
 
 English countdown numbers and phase names now use `assets/sounds/coach-en/`.
 Turkish spoken cues continue to use the runtime speech engine.
-Do not map spoken labels to any `voice_*.mp3` file in the older inventory: those
-files contain the same audio as the older short beep.
+The old `voice_*.mp3` files were tones, not speech, and have now been removed.
 
-## Audit of the existing files
+## Original replacements for saved legacy cues
 
-The 15 older MP3s were already present in the repository. This change preserves
-them for legacy routine compatibility. SHA-256 comparison identifies only five
-different recordings; filenames alone do not establish their contents.
+On 12 November 2026 the 14 existing `LEGACY_CUE_ASSETS` URIs were retained while
+all old recording references were replaced with original synthesized effects.
+Both the older countdown player and the current cue adapter use this registry.
+Saved routines, URI strings and IDs need no migration. Exact timbre and clip
+duration change; this deliberately does not preserve the unverified recordings.
+Existing saved duration metadata does not change the workout timeline, and
+native completion still releases each short effect.
+
+| Saved URI suffix after `voices://` | Original WAV replacement | Duration |
+| --- | --- | --- |
+| `beep_short`, `tone_high`, `countdown_321`, `countdown_go`, `countdown_start` | `tick.wav` | 0.10 s |
+| `beep_long`, `tone_low` | `long-beep.wav` | 0.80 s |
+| `bell`, `boxing_bell` | `boxing-bell.wav` | 1.00 s |
+| `gong` | `gong.wav` | 1.85 s |
+| `whistle` | `whistle.wav` | 0.75 s |
+| `buzzer` | `buzzer.wav` | 0.65 s |
+| `air_horn` | `air-horn.wav` | 0.85 s |
+| `success` | `finish-chime.wav` | 0.65 s |
+
+The four new compatibility effects are original code-generated timbres, not
+recordings of physical instruments. `scripts/generate-legacy-cues.py` uses only
+Python's standard library (`math`, `wave`, `struct` and file/hash utilities):
+
+- Long beep: 660 Hz sine with a quiet second harmonic.
+- Whistle: a smooth 1700–1980 Hz sweep with gentle vibrato and a quiet harmonic.
+- Buzzer: a 150 Hz odd-harmonic sum with mild amplitude modulation.
+- Air horn: a 220/275/330 Hz synthesized chord with quiet second harmonics.
+
+Raised-cosine attack/release envelopes remove abrupt PCM edges. The four new
+files are mono PCM WAV, 44,100 Hz, signed 16-bit, with peak amplitude normalized
+to 0.60 of full scale and zero-valued first/last samples. They contain no
+third-party samples, external audio inputs or exported speech. The source
+generator and generated WAVs are versioned together. Regenerate with
+`python3 scripts/generate-legacy-cues.py`; verify exact committed bytes without
+writing with `python3 scripts/generate-legacy-cues.py --check`.
+
+All 15 former MP3s under `assets/sounds/` and the two unused MP3 examples under
+`assets/audio/` were removed after application/test/config searches found no
+remaining references. This prevents broad asset inclusion from retaining the
+unverified recordings. The owner's English ElevenLabs coach recordings and
+their separate plan/terms caveat in `coach-voice.md` are unchanged.
+
+## Historical audit of the removed recordings
+
+The 15 older MP3s were already present in the repository before the replacement
+above. They are no longer shipped. The following inventory explains the removal;
+filenames alone did not establish contents or redistribution rights. The earlier
+SHA-256 comparison identified only five different recordings.
 
 | File group                                                                                                                     | Estimated encoded duration | Finding                                                                                    |
 | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------ |
@@ -160,6 +214,6 @@ slightly shorter. Envelope measurements were taken after decoding with
 
 The short-beep group and buzzer embed a `SoundJay.com Sound Effects` artist tag.
 Older source comments instead refer to Mixkit preview URLs. No provenance or
-redistribution license was established for those existing files in this audit;
-they must not be documented as newly licensed Mixkit recordings. New default
-effects use the original generated files above.
+redistribution license was established for those files in the earlier audit.
+They were removed instead of being described as licensed Mixkit recordings.
+Both new default effects and saved legacy URIs now use original synthesis above.

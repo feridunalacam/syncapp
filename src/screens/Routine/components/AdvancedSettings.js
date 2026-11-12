@@ -197,6 +197,10 @@ export const AdvancedSettings = ({
             )}
             {volume('Work music volume', workVolume, onWorkVolumeChange)}
             {volume('Rest music volume', restVolume, onRestVolumeChange)}
+            <Text style={[styles.note, { color: theme.textSecondary }]}>
+              Voice cues and alert sounds play with Device or Browser audio. Spotify intervals use
+              the visual timer.
+            </Text>
             <View style={[styles.section, { borderColor: theme.border }]}>
               {title('Workout cues')}
               <View style={styles.presets}>
@@ -440,8 +444,7 @@ export const AdvancedSettings = ({
                   update({ ...config, volume: next }),
                 )}
                 <Text style={[styles.note, { color: theme.textSecondary }]}>
-                  Spoken cues use your device’s media volume. Alerts play on this device; Spotify
-                  music may play elsewhere.
+                  Spoken cues use your device’s media volume. Alerts play on this device.
                 </Text>
               </>
             )}

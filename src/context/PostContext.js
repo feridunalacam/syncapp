@@ -24,8 +24,6 @@ const examplePosts = [
       workSec: 180,
       restSec: 60,
       description: 'High intensity boxing routine',
-      workoutPlaylistId: 'spotify-playlist-boxing',
-      spotifyPlaylist: 'Workout Hits 2024',
     },
     type: 'new',
     category: 'sport',
@@ -71,8 +69,6 @@ const examplePosts = [
       workSec: 1800,
       restSec: 300,
       description: 'Pomodoro technique study routine',
-      workoutPlaylistId: 'spotify-playlist-focus',
-      spotifyPlaylist: 'Focus & Study',
     },
     type: 'completed',
     category: 'study',
@@ -184,7 +180,7 @@ const applyVote = (post, direction) => {
 };
 
 export const PostProvider = ({ children }) => {
-  const { storage } = useAccountData();
+  const { storage, reportLoadFailure } = useAccountData();
   const [posts, setPosts] = useState(examplePosts);
   const [hydrated, setHydrated] = useState(false);
 
@@ -192,12 +188,14 @@ export const PostProvider = ({ children }) => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const stored = await storage.getJSON(STORAGE_KEYS.POSTS, null);
-      if (cancelled) return;
-      if (Array.isArray(stored)) {
-        setPosts(stored);
+      try {
+        const stored = await storage.getJSON(STORAGE_KEYS.POSTS, null);
+        if (cancelled) return;
+        if (Array.isArray(stored)) setPosts(stored);
+        setHydrated(true);
+      } catch {
+        if (!cancelled) reportLoadFailure?.();
       }
-      setHydrated(true);
     })();
     return () => {
       cancelled = true;

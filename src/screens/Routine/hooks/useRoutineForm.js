@@ -30,7 +30,6 @@ const validateRoutineName = (rawName) => {
  * @param {Function} params.onSave - Callback after successful save
  */
 export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onSave }) => {
-  const playlistStateRef = useRef({ work: {}, rest: {} });
   const templateRoutineIdRef = useRef(templateRoutine?.id);
 
   // Initialize values from template
@@ -59,33 +58,40 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     const workPlaylists = {};
     const restPlaylists = {};
 
-    if (templateRoutine.roundsData && Array.isArray(templateRoutine.roundsData)) {
-      templateRoutine.roundsData.forEach((round) => {
+    // Make legacy routine-wide playlists visible on each affected round. Saving
+    // uses only these explicit assignments, so removing music really silences it.
+    const normalized = normalizeRoutine(templateRoutine);
+    const fallbackWorkPlaylist =
+      normalized.roundAudioOnly === true ? null : normalized.workoutPlaylistId;
+    const fallbackRestPlaylist =
+      normalized.roundAudioOnly === true ? null : normalized.restPlaylistId;
+    if (Array.isArray(normalized.roundsData)) {
+      normalized.roundsData.forEach((round) => {
         const roundNum = round.roundNumber;
 
         // Work music: Song has priority over playlist
         if (round.workSong) {
           workSongs[roundNum] = round.workSong;
-        } else if (round.workPlaylistId) {
+        } else if (round.workPlaylistId || fallbackWorkPlaylist) {
           workPlaylists[roundNum] = {
-            id: round.workPlaylistId,
-            name: round.workPlaylistName || 'Playlist',
+            id: round.workPlaylistId || fallbackWorkPlaylist,
+            name: round.workPlaylistName || normalized.spotifyPlaylist || 'Playlist',
             image: round.workPlaylistImage || null,
             tracksCount: round.workPlaylistTracksCount || 0,
-            platform: round.workPlaylistPlatform || null,
+            platform: round.workPlaylistPlatform || normalized.platform || null,
           };
         }
 
         // Rest music: Song has priority over playlist
         if (round.restSong) {
           restSongs[roundNum] = round.restSong;
-        } else if (round.restPlaylistId) {
+        } else if (round.restPlaylistId || fallbackRestPlaylist) {
           restPlaylists[roundNum] = {
-            id: round.restPlaylistId,
+            id: round.restPlaylistId || fallbackRestPlaylist,
             name: round.restPlaylistName || 'Playlist',
             image: round.restPlaylistImage || null,
             tracksCount: round.restPlaylistTracksCount || 0,
-            platform: round.restPlaylistPlatform || null,
+            platform: round.restPlaylistPlatform || normalized.platform || null,
           };
         }
 
@@ -94,7 +100,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
       });
     }
 
-    const numRounds = templateRoutine.rounds || 1;
+    const numRounds = normalized.rounds;
     const roundsOrder = Array.from({ length: numRounds }, (_, i) => i + 1);
 
     // If templateRoutine has an ID, it means we're editing an existing routine
@@ -151,8 +157,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
   const [roundWorkPlaylists, setRoundWorkPlaylists] = useState(initialValues.roundWorkPlaylists);
   const [roundRestPlaylists, setRoundRestPlaylists] = useState(initialValues.roundRestPlaylists);
 
-  // Playlist IDs for shuffle. Hydrate from template so editing an existing
-  // routine doesn't silently drop its attached playlists.
+  // Keep legacy playlist metadata while playback uses the explicit assignments.
   const [workoutPlaylistId, setWorkoutPlaylistId] = useState(
     templateRoutine?.workoutPlaylistId ?? null,
   );
@@ -176,15 +181,6 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
   // Phase transition sounds - just sound, no duration (sound plays at transition, overlays music)
   const [endWorkSound, setEndWorkSound] = useState(templateRoutine?.endWorkSound ?? null);
   const [endRestSound, setEndRestSound] = useState(templateRoutine?.endRestSound ?? null);
-
-  // Track playlist state changes
-  useEffect(() => {
-    playlistStateRef.current.work = roundWorkPlaylists;
-  }, [roundWorkPlaylists]);
-
-  useEffect(() => {
-    playlistStateRef.current.rest = roundRestPlaylists;
-  }, [roundRestPlaylists]);
 
   // A reused editor must load the entire newly selected routine.
   useEffect(() => {
@@ -295,13 +291,21 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
   const handleShuffleForWork = useCallback((playlist, roundSongs) => {
     if (!roundSongs) return;
     setRoundWorkSongs((prev) => ({ ...prev, ...roundSongs }));
-    setWorkoutPlaylistId(playlist.id);
+    setRoundWorkPlaylists((prev) => {
+      const next = { ...prev };
+      Object.keys(roundSongs).forEach((round) => delete next[round]);
+      return next;
+    });
   }, []);
 
   const handleShuffleForRest = useCallback((playlist, roundSongs) => {
     if (!roundSongs) return;
     setRoundRestSongs((prev) => ({ ...prev, ...roundSongs }));
-    setRestPlaylistId(playlist.id);
+    setRoundRestPlaylists((prev) => {
+      const next = { ...prev };
+      Object.keys(roundSongs).forEach((round) => delete next[round]);
+      return next;
+    });
   }, []);
 
   const handleRemoveRound = useCallback(
@@ -421,6 +425,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
       targetDurationMin: totalDurationMin ? parseInt(totalDurationMin) : null,
       workoutPlaylistId: workoutPlaylistId || null,
       restPlaylistId: restPlaylistId || null,
+      roundAudioOnly: true,
       restVolume: restVolume,
       preparationVolume,
       workVolume,
