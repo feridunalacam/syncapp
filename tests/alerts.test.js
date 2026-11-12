@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   normalizeAlertConfig,
+  resolveAlertConfig,
+  resolveAlertSound,
   createAlertPreset,
   planSessionCues,
   buildCuePreview,
@@ -86,12 +88,12 @@ test('presets are independent configurations and boxing selects real sound effec
   assert.equal(createAlertPreset('silent').enabled, false);
   boxing.signals.start.name = 'Changed';
   assert.equal(createAlertPreset('boxing').signals.start.name, 'Boxing bell');
-  assert.equal(createAlertPreset('hiit').signals.work.uri, 'speech://start');
+  assert.equal(createAlertPreset('hiit').signals.work.uri, 'voices://cue_boxing_bell');
 });
 
-test('preparation counts actual remaining seconds then first work announces go', () => {
+test('preparation ticks actual remaining seconds then first work rings the bell', () => {
   let previous = makeSession({ countdownBeforeStartDuration: 3 });
-  assert.equal(onlyCue(null, previous).sound.uri, 'speech://count/3');
+  assert.equal(onlyCue(null, previous).sound.uri, 'voices://cue_tick');
   for (const [now, number] of [
     [2000, 2],
     [3000, 1],
@@ -101,7 +103,7 @@ test('preparation counts actual remaining seconds then first work announces go',
     previous = next;
   }
   const work = advanceSession(previous, 4000);
-  assert.equal(onlyCue(previous, work).sound.uri, 'speech://go');
+  assert.equal(onlyCue(previous, work).sound.uri, 'voices://cue_boxing_bell');
 });
 
 test('200 ms ticks emit one cue at each countdown boundary', () => {
@@ -120,7 +122,7 @@ test('200 ms ticks emit one cue at each countdown boundary', () => {
   assert.equal(new Set(ids).size, 3);
 });
 
-test('pause and resume do not repeat a spoken number', () => {
+test('pause and resume do not repeat a countdown tick', () => {
   const initial = makeSession();
   const three = advanceSession(initial, 8000);
   const cue = onlyCue(initial, three);
@@ -140,7 +142,7 @@ test('a clock jump emits the current number only, never three stale countdowns',
   const next = advanceSession(previous, 10200);
   const cue = onlyCue(previous, next);
   assert.equal(cue.number, 1);
-  assert.equal(cue.sound.uri, 'speech://count/1');
+  assert.equal(cue.sound.uri, 'voices://cue_tick');
 });
 
 test('catch-up across phases does not announce a late start signal', () => {
@@ -156,9 +158,9 @@ test('transition signals refer to the newly entered phase', () => {
   const first = makeSession();
   assert.equal(onlyCue(null, first).signalKey, 'start');
   const rest = advanceSession(first, 11000);
-  assert.equal(onlyCue(first, rest).sound.uri, 'speech://rest');
+  assert.equal(onlyCue(first, rest).sound.uri, 'voices://cue_gong');
   const work = advanceSession(rest, 16000);
-  assert.equal(onlyCue(rest, work).sound.uri, 'speech://start');
+  assert.equal(onlyCue(rest, work).sound.uri, 'voices://cue_boxing_bell');
   assert.deepEqual(planSessionCues(work, advanceSession(work, 16200)), []);
 });
 
@@ -230,26 +232,23 @@ test('countdown switches and explicit empty signals are respected', () => {
   assert.equal(onlyCue(muted, advanceSession(muted, 8000)).volume, 0);
 });
 
-test('zero effect volume preserves spoken workout cues but mutes beep cues', () => {
-  const voice = createAlertPreset('hiit');
-  voice.volume = 0;
-  const first = makeSession({ audioAlerts: voice });
-  assert.equal(onlyCue(null, first).volume, 100);
+test('zero effects volume mutes persisted spoken settings in every phase and preview', () => {
+  const saved = normalizeAlertConfig({ enabled: true, volume: 0 });
+  assert.equal(saved.countdown.mode, 'voice');
+  assert.equal(saved.signals.start.uri, 'speech://go');
+  const before = structuredClone(saved);
+  const first = makeSession({ audioAlerts: saved });
+  assert.equal(onlyCue(null, first).volume, 0);
   const countdown = advanceSession(first, 8000);
-  const spoken = onlyCue(first, countdown);
-  assert.equal(spoken.sound.uri, 'speech://count/3');
-  assert.equal(spoken.volume, 100);
+  assert.equal(onlyCue(first, countdown).sound.uri, 'voices://cue_tick');
+  assert.equal(onlyCue(first, countdown).volume, 0);
   const rest = advanceSession(countdown, 11000);
-  assert.equal(onlyCue(countdown, rest).volume, 100);
+  assert.equal(onlyCue(countdown, rest).volume, 0);
   const last = advanceSession(rest, 25000);
   const finished = advanceSession(last, 26000);
-  assert.equal(onlyCue(last, finished).volume, 100);
-
-  const beeps = createAlertPreset('beeps');
-  beeps.volume = 0;
-  const silentEffects = makeSession({ audioAlerts: beeps });
-  assert.equal(onlyCue(null, silentEffects).volume, 0);
-  assert.equal(onlyCue(silentEffects, advanceSession(silentEffects, 8000)).volume, 0);
+  assert.equal(onlyCue(last, finished).volume, 0);
+  assert.ok(buildCuePreview(saved).every((cue) => cue.volume === 0));
+  assert.deepEqual(saved, before, 'playback and preview must not rewrite saved settings');
   assert.deepEqual(
     planSessionCues(null, makeSession({ audioAlerts: createAlertPreset('silent') })),
     [],
@@ -268,17 +267,17 @@ test('preview is a cancellable three-second plan with configured language and ef
   );
   assert.deepEqual(
     plan.map((cue) => cue.sound.uri),
-    ['speech://count/3', 'speech://count/2', 'speech://count/1', 'voices://cue_gong'],
+    ['voices://cue_tick', 'voices://cue_tick', 'voices://cue_tick', 'voices://cue_gong'],
   );
   assert.ok(plan.every((cue) => cue.language === 'tr-TR'));
   assert.deepEqual(
     plan.map((cue) => cue.volume),
-    [100, 100, 100, 65],
+    [65, 65, 65, 65],
   );
   config.volume = 0;
   assert.deepEqual(
     buildCuePreview(config, 'rest').map((cue) => cue.volume),
-    [100, 100, 100, 0],
+    [0, 0, 0, 0],
   );
   config.countdown.work = false;
   assert.equal(buildCuePreview(config, 'rest').length, 1);
@@ -303,4 +302,35 @@ test('a paused mid-interval resume does not replay the entry command', () => {
   const waiting = holdForAudio(resumeSession(paused, 6000), 6000);
   const ready = releaseAudioHold(waiting, 8000);
   assert.deepEqual(planSessionCues(waiting, ready), []);
+});
+
+test('all fourteen saved speech URIs resolve to original effects without changing stored data', () => {
+  const expected = [
+    ...Array.from({ length: 10 }, (_, i) => [`speech://count/${i + 1}`, 'voices://cue_tick']),
+    ['speech://go', 'voices://cue_boxing_bell'],
+    ['speech://rest', 'voices://cue_gong'],
+    ['speech://start', 'voices://cue_boxing_bell'],
+    ['speech://complete', 'voices://cue_chime'],
+  ];
+  for (const [uri, effect] of expected) {
+    const saved = Object.freeze({ uri, name: 'Saved spoken choice', platform: 'speech' });
+    assert.equal(resolveAlertSound(saved).uri, effect);
+    assert.equal(saved.uri, uri);
+  }
+  const saved = normalizeAlertConfig({ enabled: true, language: 'tr-TR' });
+  const before = structuredClone(saved);
+  const effective = resolveAlertConfig(saved);
+  assert.equal(effective.countdown.mode, 'beep');
+  assert.ok(Object.values(effective.signals).every((sound) => sound.uri.startsWith('voices://')));
+  assert.deepEqual(saved, before);
+  for (const uri of ['file:///my-cue.wav', 'https://example.com/cue.mp3', 'voices://buzzer']) {
+    const custom = { uri, name: 'My cue' };
+    assert.equal(resolveAlertSound(custom), custom);
+  }
+  assert.equal(resolveAlertSound(null), null);
+  for (const name of ['hiit', 'boxing', 'beeps', 'silent']) {
+    const preset = createAlertPreset(name);
+    assert.notEqual(preset.countdown.mode, 'voice');
+    assert.ok(Object.values(preset.signals).every((sound) => !sound?.uri.startsWith('speech://')));
+  }
 });

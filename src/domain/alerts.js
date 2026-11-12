@@ -1,4 +1,4 @@
-/** Workout cues are local audio or speech, independent of the selected music service. */
+/** Workout cues use local sound effects, independent of the selected music service. */
 const signal = (uri, name, duration = 1) => ({
   id: uri.split('://')[1],
   name,
@@ -82,8 +82,38 @@ export const normalizeAlertConfig = (raw) => {
   };
 };
 
+/** Preserve saved speech settings while playing only our original sound effects. */
+export const resolveAlertSound = (sound) => {
+  const uri = typeof sound?.uri === 'string' ? sound.uri : '';
+  const replacement = uri.startsWith('speech://')
+    ? {
+        'speech://go': SOUNDS.bell,
+        'speech://rest': SOUNDS.gong,
+        'speech://start': SOUNDS.bell,
+        'speech://complete': SOUNDS.chime,
+      }[uri]
+    : null;
+  if (replacement) return { ...replacement };
+  if (/^speech:\/\/count\/(?:[1-9]|10)$/.test(uri)) return { ...SOUNDS.tick };
+  return sound;
+};
+
+export const resolveAlertConfig = (raw) => {
+  const config = normalizeAlertConfig(raw);
+  return {
+    ...config,
+    countdown: {
+      ...config.countdown,
+      mode: config.countdown.mode === 'voice' ? 'beep' : config.countdown.mode,
+    },
+    signals: Object.fromEntries(
+      SIGNAL_KEYS.map((key) => [key, resolveAlertSound(config.signals[key])]),
+    ),
+  };
+};
+
 export const createAlertPreset = (name = 'hiit') => {
-  const config = normalizeAlertConfig({ version: 1, enabled: name !== 'silent' });
+  const config = resolveAlertConfig({ version: 1, enabled: name !== 'silent' });
   if (name === 'boxing') {
     config.signals = {
       start: { ...SOUNDS.bell },
@@ -103,10 +133,7 @@ export const createAlertPreset = (name = 'hiit') => {
   return config;
 };
 
-const countSound = (config, number) =>
-  config.countdown.mode === 'voice'
-    ? signal(`speech://count/${number}`, String(number), 0.6)
-    : { ...SOUNDS.tick };
+const countSound = () => ({ ...SOUNDS.tick });
 
 const sameRun = (previous, next) =>
   previous && previous.startedAt === next.startedAt && previous.routine?.id === next.routine?.id;
@@ -115,8 +142,7 @@ const generation = (session) => Math.max(0, finite(session?.skippedPhases, 0));
 const cueBase = (session) => `${session.startedAt}:${generation(session)}:${session.index}`;
 const decorate = (config, details) => ({
   ...details,
-  // Native speech follows the device volume; this setting controls audio effects only.
-  volume: details.sound?.uri?.startsWith('speech://') ? 100 : config.volume,
+  volume: config.volume,
   language: config.language,
 });
 
@@ -131,7 +157,7 @@ const phaseAgeMs = (session, phase) => phase.durationSec * 1000 - session.remain
  */
 export const planSessionCues = (previous, next) => {
   if (!next || next.routine?.audioAlerts == null || !Array.isArray(next.timeline)) return [];
-  const config = normalizeAlertConfig(next.routine.audioAlerts);
+  const config = resolveAlertConfig(next.routine.audioAlerts);
   if (!config.enabled) return [];
   const same = sameRun(previous, next);
   const skipped = same && generation(previous) !== generation(next);
@@ -200,14 +226,14 @@ export const planSessionCues = (previous, next) => {
       id: `${cueBase(next)}:count:${number}`,
       kind: 'count',
       number,
-      sound: countSound(config, number),
+      sound: countSound(),
     }),
   ];
 };
 
 /** A short sample independent of live workout playback. The caller owns cancellation. */
 export const buildCuePreview = (raw, signalKey = 'start') => {
-  const config = normalizeAlertConfig(raw);
+  const config = resolveAlertConfig(raw);
   if (!config.enabled || !SIGNAL_KEYS.includes(signalKey)) return [];
   // Preview the last three seconds even when the workout uses a longer countdown.
   const events = [];
@@ -222,7 +248,7 @@ export const buildCuePreview = (raw, signalKey = 'start') => {
         atMs: (count - number) * 1000,
         kind: 'count',
         number,
-        sound: countSound(config, number),
+        sound: countSound(),
       }),
     );
   if (config.signals[signalKey])

@@ -56,8 +56,11 @@ export default function ProfileScreen() {
   const [cloudBusy, setCloudBusy] = useState(false);
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const adPrivacyBusy = privacyBusy || ads.privacyOptionsBusy;
+  const adPrivacyEnabledRef = useRef(false);
+  adPrivacyEnabledRef.current = ads.adsEnabled === true;
   const privacySafeRef = useRef(false);
   privacySafeRef.current =
+    adPrivacyEnabledRef.current &&
     focused &&
     ads.appActive === true &&
     sheet === null &&
@@ -76,7 +79,7 @@ export default function ProfileScreen() {
     [],
   );
   const openAdPrivacy = async () => {
-    if (adPrivacyBusy) return;
+    if (!adPrivacyEnabledRef.current || adPrivacyBusy) return;
     if (workout.isWorkoutRunning || workout.isMusicPlaying || workout.isAudioSyncing) {
       Alert.alert(
         'Ad privacy choices',
@@ -447,7 +450,8 @@ export default function ProfileScreen() {
             null,
             true,
           )}
-          {(ads.nativeAvailable || ads.privacyOptionsRequired) &&
+          {ads.adsEnabled === true &&
+            (ads.nativeAvailable || ads.privacyOptionsRequired) &&
             row(
               'options-outline',
               'Ad privacy choices',

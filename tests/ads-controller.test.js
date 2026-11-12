@@ -371,33 +371,48 @@ test('native NOT_REQUIRED privacy result is distinct from unknown and never open
   }
 });
 
-test('cold Pro and disabled-ads settings expose native privacy choices without initializing ads', async () => {
-  for (const mode of ['cold-pro', 'disabled-ads']) {
+test('cold Pro retains native privacy choices when ads are configured without initializing ads', async () => {
+  const { controller, calls, getLoadCount } = setup();
+  assert.equal(controller.getState().nativeAvailable, true);
+  controller.setGate({ ...free, eligible: false });
+  controller.acquirePlacement();
+  await settle();
+  assert.equal(getLoadCount(), 0);
+  assert.equal(await controller.requestPrivacyOptions(() => true), true);
+  assert.deepEqual(calls, ['info', 'privacy']);
+  assert.equal(controller.getState().privacyOptionsRequired, true);
+  assert.equal(controller.getState().initialized, false);
+  assert.equal(controller.getState().canRequestAds, false);
+});
+
+test('disabled ads never load consent or GMA across direct actions, placements and foreground changes', async () => {
+  for (const dev of [false, true]) {
     const { controller, calls, getLoadCount } = setup({
-      ...(mode === 'disabled-ads'
-        ? {
-            controller: {
-              config: createAdsConfig({
-                platform: 'ios',
-                dev: true,
-                env: { EXPO_PUBLIC_ADS_ENABLED: 'false' },
-              }),
-            },
-          }
-        : {}),
+      controller: {
+        config: createAdsConfig({
+          platform: 'ios',
+          dev,
+          env: { EXPO_PUBLIC_ADS_ENABLED: 'false' },
+        }),
+      },
     });
-    assert.equal(controller.getState().nativeAvailable, true, mode);
-    assert.equal(controller.getState().privacyOptionsRequired, false, mode);
-    assert.equal(getLoadCount(), 0, mode);
-    controller.setGate({ ...free, eligible: mode !== 'cold-pro' });
-    controller.acquirePlacement();
+    assert.equal(controller.getState().nativeAvailable, true);
+    for (const gate of [free, { ...free, appActive: false }, free]) {
+      controller.setGate(gate);
+      const release = controller.acquirePlacement();
+      const before = controller.getState();
+      assert.equal(await controller.requestPrivacyOptions(() => true), false);
+      assert.equal(controller.getState(), before, 'disabled manual actions do not mutate state');
+      release();
+    }
     await settle();
-    assert.equal(getLoadCount(), 0, mode);
-    assert.equal(await controller.requestPrivacyOptions(() => true), true, mode);
-    assert.deepEqual(calls, ['info', 'privacy'], mode);
-    assert.equal(controller.getState().privacyOptionsRequired, true, mode);
-    assert.equal(controller.getState().initialized, false, mode);
-    assert.equal(controller.getState().canRequestAds, false, mode);
+    assert.equal(getLoadCount(), 0);
+    assert.deepEqual(calls, []);
+    assert.equal(controller.getState().privacyOptionsRequirementStatus, 'UNKNOWN');
+    assert.equal(controller.getState().privacyOptionsBusy, false);
+    assert.equal(controller.getState().initialized, false);
+    assert.equal(controller.getState().canRequestAds, false);
+    assert.equal(controller.getState().error, null);
   }
 });
 

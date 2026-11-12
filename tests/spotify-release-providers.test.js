@@ -13,7 +13,12 @@ import {
   SPOTIFY_UNAVAILABLE_MESSAGE,
 } from '../src/services/spotify/availability.js';
 import { useMusicSearch } from '../src/hooks/useMusicSearch.js';
-import { normalizeAlertConfig, createAlertPreset } from '../src/domain/alerts.js';
+import {
+  normalizeAlertConfig,
+  resolveAlertConfig,
+  resolveAlertSound,
+  createAlertPreset,
+} from '../src/domain/alerts.js';
 import { createAppleMusicService } from '../src/services/appleMusic/adapter.js';
 import { MUSIC_PROVIDERS, resolveMusicLink } from '../src/services/music/providers.js';
 import { useAudioController } from '../src/hooks/useAudioController.js';
@@ -472,6 +477,7 @@ test('audio alert helper follows Spotify release availability and retains the de
         SPOTIFY_AVAILABLE: available,
         appleMusicService: { available: false },
         normalizeAlertConfig,
+        resolveAlertConfig,
         createAlertPreset,
         Surface: 'Surface',
         Slider: 'Slider',
@@ -495,12 +501,95 @@ test('audio alert helper follows Spotify release availability and retains the de
       const textOf = (node) =>
         typeof node === 'string' ? node : (node?.children || []).map(textOf).join('');
       const output = textOf(root.toJSON());
-      assert.match(output, /Voice cues and alert sounds play with Device audio\./);
+      assert.match(output, /Alert sounds play with Device audio\./);
       assert.equal(output.includes('Spotify intervals use the visual timer.'), available, profile);
       if (!available) assert.doesNotMatch(output, /Spotify/, profile);
     } finally {
       await act(async () => root.unmount());
     }
+  }
+});
+
+test('cue editor shows original-effect fallbacks without rewriting saved spoken choices', async () => {
+  const { AlertSoundPicker } = load(
+    'screens/Routine/components/AlertSoundPicker.js',
+    ['AlertSoundPicker'],
+    { resolveAlertSound },
+  );
+  const { AdvancedSettings } = load(
+    'screens/Routine/components/AdvancedSettings.js',
+    ['AdvancedSettings'],
+    {
+      SPOTIFY_AVAILABLE: false,
+      appleMusicService: { available: false },
+      normalizeAlertConfig,
+      resolveAlertConfig,
+      createAlertPreset,
+      Surface: 'Surface',
+      Slider: 'Slider',
+      DurationField: 'DurationField',
+      AlertSoundPicker,
+    },
+  );
+  const saved = normalizeAlertConfig({
+    enabled: true,
+    language: 'tr-TR',
+    countdown: { mode: 'voice', seconds: 5 },
+  });
+  const before = structuredClone(saved);
+  const changes = [];
+  let root;
+  await act(async () => {
+    root = create(
+      React.createElement(AdvancedSettings, {
+        isExpanded: true,
+        onToggle: noop,
+        audioAlerts: saved,
+        onAudioAlertsChange: (next) => changes.push(next),
+        onSoundPickerOpen: noop,
+        countdownBeforeStartSec: 3,
+        restVolume: 50,
+      }),
+    );
+  });
+  try {
+    const textOf = (node) =>
+      typeof node === 'string' ? node : (node?.children || []).map(textOf).join('');
+    assert.doesNotMatch(
+      textOf(root.toJSON()),
+      /Voice|Spoken|SyncApp Coach|Device voice|media volume/,
+    );
+    assert.equal(
+      root.root.findByProps({ accessibilityLabel: 'Countdown mode: Beep' }).props.accessibilityState
+        .selected,
+      true,
+    );
+    assert.equal(root.root.findByProps({ accessibilityLabel: 'Audio cues' }).props.value, true);
+    assert.equal(changes.length, 0, 'mounting a saved routine must not persist its fallback');
+    await act(async () =>
+      root.root.findByProps({ accessibilityLabel: 'Effects volume' }).props.onValueChange(0),
+    );
+    assert.equal(changes.at(-1).volume, 0);
+    assert.equal(changes.at(-1).countdown.mode, 'voice');
+    assert.equal(changes.at(-1).language, 'tr-TR');
+    assert.equal(changes.at(-1).signals.rest.uri, 'speech://rest');
+    await act(async () =>
+      root.root.findByProps({ accessibilityLabel: 'Choose start rest sound' }).props.onPress(),
+    );
+    assert.equal(
+      root.root.findByProps({ accessibilityLabel: 'Use gong' }).props.accessibilityState.selected,
+      true,
+    );
+    assert.ok(root.root.findByProps({ accessibilityLabel: 'Choose a custom alert sound' }));
+    assert.doesNotMatch(textOf(root.toJSON()), /Spoken|SyncApp Coach|Voice/);
+    await act(async () =>
+      root.root.findByProps({ accessibilityLabel: 'Use chime' }).props.onPress(),
+    );
+    assert.equal(changes.at(-1).signals.rest.uri, 'voices://cue_chime');
+    assert.equal(changes.at(-1).signals.start.uri, 'speech://go');
+    assert.deepEqual(saved, before);
+  } finally {
+    await act(async () => root.unmount());
   }
 });
 

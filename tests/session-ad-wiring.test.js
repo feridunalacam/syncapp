@@ -47,11 +47,20 @@ const hookCode = compile(
   [['export default function useSessionAds', 'function useSessionAds']],
   'globalThis.sessionHook = useSessionAds;',
 );
+const profileCode = compile(
+  '../src/screens/Profile/ProfileScreen.js',
+  [['export default function ProfileScreen', 'function ProfileScreen']],
+  'globalThis.ProfileScreen = ProfileScreen;',
+);
 
 async function mount(options = {}) {
   const events = [];
   const nativeAds = [];
   const listeners = new Set();
+  const deviceConsentInfo = {
+    ...consentInfo,
+    privacyOptionsRequirementStatus: options.privacyRequired ? 'REQUIRED' : 'NOT_REQUIRED',
+  };
   const scene = {
     auth: { ready: true, user: { id: 'account-a' }, recoveryMode: false },
     subscription: {
@@ -102,16 +111,20 @@ async function mount(options = {}) {
     AdsConsent: {
       async requestInfoUpdate() {
         events.push('consent-info');
-        return consentInfo;
+        return deviceConsentInfo;
       },
       async loadAndShowConsentFormIfRequired() {
         events.push('consent-form');
         if (options.form) await options.form.promise;
         events.push('consent-closed');
-        return consentInfo;
+        return deviceConsentInfo;
       },
       async getConsentInfo() {
-        return consentInfo;
+        return deviceConsentInfo;
+      },
+      async showPrivacyOptionsForm() {
+        events.push('privacy-form');
+        return deviceConsentInfo;
       },
     },
     BannerAd() {},
@@ -171,8 +184,8 @@ async function mount(options = {}) {
     createSessionAdActions,
     canPrepareAds,
     canUseAdsAccount,
-    __DEV__: true,
-    process: { env: { EXPO_PUBLIC_ADS_ENABLED: 'true' } },
+    __DEV__: options.dev ?? true,
+    process: { env: { EXPO_PUBLIC_ADS_ENABLED: options.adsEnabled === false ? 'false' : 'true' } },
     require: () => {
       events.push('sdk-load');
       return sdk;
@@ -193,6 +206,7 @@ async function mount(options = {}) {
     scene.ads = ads;
     return {
       ...ads,
+      ...scene.adsOverride,
       holdAdPreparation() {
         events.push('hold');
         const release = ads.holdAdPreparation();
@@ -204,6 +218,49 @@ async function mount(options = {}) {
     };
   };
   new Script(hookCode).runInNewContext(context);
+  if (options.profile) {
+    Object.assign(
+      context,
+      Object.fromEntries(
+        [
+          'View',
+          'Text',
+          'Pressable',
+          'ScrollView',
+          'TextInput',
+          'Image',
+          'Switch',
+          'Surface',
+          'SpotifyDevicePicker',
+          'MusicServicesPanel',
+          'SpotifyLogo',
+          'AccountPanel',
+          'SubscriptionPanel',
+          'ScreenWrapper',
+          'ScreenHeader',
+          'GlassSurface',
+        ].map((name) => [name, name]),
+      ),
+      {
+        StyleSheet: { create: (styles) => styles },
+        Ionicons: 'Icon',
+        useTheme: () => ({ theme: {}, isDark: false, toggleTheme() {} }),
+        useAccountData: () => ({ status: 'local', hasGuestData: false }),
+        useWorkout: () => scene.workout,
+        useRoutineContext: () => ({ routines: [], completedRoutines: [] }),
+        usePostContext: () => ({ posts: [], addPost() {}, deletePost() {} }),
+        useProfileData: () => ({ ready: true, picture: null, bio: '', links: {} }),
+        useSpotifyConnection: () => ({ available: false, connecting: false }),
+        useAppleMusicConnection: () => ({ available: false, connecting: false }),
+        Sheet: ({ visible, children }) =>
+          visible ? React.createElement('Sheet', null, children) : null,
+        Alert: { alert: (...args) => events.push(['alert', ...args]) },
+        Linking: {},
+        Clipboard: {},
+      },
+    );
+    new Script(profileCode).runInNewContext(context);
+  }
   function Consumer() {
     const [, update] = React.useState(0);
     scene.forceRender = () => update((value) => value + 1);
@@ -213,7 +270,9 @@ async function mount(options = {}) {
       sessionKey: scene.sessionKey,
       onFinish: (key) => events.push(['finish', key]),
     });
-    return React.createElement('SessionState', { busy: scene.api.busy });
+    return options.profile
+      ? React.createElement(context.ProfileScreen)
+      : React.createElement('SessionState', { busy: scene.api.busy });
   }
   const tree = () =>
     React.createElement(
@@ -230,6 +289,7 @@ async function mount(options = {}) {
     scene,
     events,
     nativeAds,
+    renderer,
     async update(change) {
       Object.assign(scene, change);
       await act(async () => {
@@ -266,6 +326,67 @@ async function mount(options = {}) {
     },
   };
 }
+
+const textOf = (node) =>
+  typeof node === 'string' ? node : (node?.children || []).map(textOf).join('');
+const privacyRows = (app) =>
+  app.renderer.root
+    .findAllByType('Pressable')
+    .filter((node) => textOf(node).includes('Ad privacy choices'));
+
+test('disabled native-present provider hides Profile privacy choices and never starts consent or ads', async () => {
+  for (const dev of [false, true]) {
+    const app = await mount({ adsEnabled: false, dev, profile: true });
+    try {
+      assert.equal(app.scene.ads.adsEnabled, false);
+      assert.equal(app.scene.ads.nativeAvailable, true);
+      assert.equal(privacyRows(app).length, 0);
+      let release;
+      await act(async () => {
+        release = app.scene.ads.acquirePlacement(() => true);
+        assert.equal((await app.scene.ads.requestPrivacyOptions(() => true)).changed, false);
+      });
+      await app.foreground('background');
+      await app.foreground('active');
+      await act(async () => {
+        assert.equal((await app.scene.ads.requestPrivacyOptions(() => true)).changed, false);
+        release();
+      });
+      assert.deepEqual(app.events, []);
+      assert.equal(app.scene.ads.privacyOptionsBusy, false);
+      assert.equal(app.scene.ads.error, null);
+      assert.equal(app.scene.ads.initialized, false);
+      assert.equal(app.scene.ads.canRequestAds, false);
+      assert.equal(privacyRows(app).length, 0);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test('enabled cold-Pro Profile opens privacy choices and rejects a captured action after disablement', async () => {
+  const app = await mount({ pro: true, profile: true, privacyRequired: true });
+  try {
+    assert.equal(app.scene.ads.adsEnabled, true);
+    assert.equal(app.scene.ads.accountEligible, false);
+    assert.deepEqual(app.events, []);
+    const captured = privacyRows(app)[0].props.onPress;
+    await act(async () => captured());
+    assert.deepEqual(app.events, ['sdk-load', 'consent-info', 'privacy-form']);
+    assert.equal(app.scene.ads.initialized, false);
+    assert.equal(app.scene.ads.canRequestAds, false);
+
+    // Keep the real controller enabled to prove the Profile callback itself
+    // rejects a stale entry when its current context disables the action.
+    await app.update({ adsOverride: { adsEnabled: false } });
+    assert.equal(privacyRows(app).length, 0);
+    const before = [...app.events];
+    await act(async () => captured());
+    assert.deepEqual(app.events, before);
+  } finally {
+    await app.close();
+  }
+});
 
 test('verified Pro starts the free core without loading consent, SDK or any native interstitial', async () => {
   const app = await mount({ pro: true });

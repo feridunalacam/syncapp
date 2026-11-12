@@ -144,7 +144,7 @@ export default function HomeScreen({ navigation, route }) {
             </Text>
             <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 5 }}>
               {selectedRoutine
-                ? `${selectedRoutine.rounds} rounds · ${formatTime(getRoutineDuration(selectedRoutine))}`
+                ? `${selectedRoutine.rounds} round${selectedRoutine.rounds === 1 ? '' : 's'} · ${formatTime(getRoutineDuration(selectedRoutine))}`
                 : 'Create or select a routine to start'}
             </Text>
           </View>
@@ -430,7 +430,7 @@ export default function HomeScreen({ navigation, route }) {
               <View style={{ flex: 1 }}>
                 <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>{r.name}</Text>
                 <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 5 }}>
-                  {r.rounds} rounds · {formatTime(getRoutineDuration(r))}
+                  {r.rounds} round{r.rounds === 1 ? '' : 's'} · {formatTime(getRoutineDuration(r))}
                 </Text>
               </View>
               <Ionicons

@@ -149,6 +149,7 @@ export function AdsProvider({ children, blocked = false }) {
         accountEligible,
         appActive,
         presenterBlocked: blocked,
+        adsEnabled: config.enabled,
         bannerEnabled: config.bannerEnabled && !interstitialState.presenting,
         interstitialEnabled: config.interstitialEnabled && runtime.hasInterstitialSupport(),
         interstitialPresenting: interstitialState.presenting,

@@ -180,6 +180,7 @@ export function createAdsController({ runtime, config, onChange = () => {}, getC
       };
     },
     requestPrivacyOptions(isEligible = () => true) {
+      if (!config.enabled) return Promise.resolve(false);
       if (privacyPromise) return privacyPromise;
       if (preparationHolds) return Promise.resolve(false);
       const callerSafe = () => {
