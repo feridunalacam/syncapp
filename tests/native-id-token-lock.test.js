@@ -5,6 +5,7 @@ import { Script } from 'node:vm';
 import { createRequire } from 'node:module';
 import { createAuthCredentialWriters } from '../src/lib/authCredentialWrites.js';
 import { createAuthSessionStorage } from '../src/lib/authSessionStorage.js';
+import { createAuthRecoveryStorage } from '../src/lib/authRecoveryStorage.js';
 import { createAuthOperationQueue } from '../src/lib/authOperations.js';
 
 const require = createRequire(import.meta.url);
@@ -48,6 +49,8 @@ function harness(name, { read, fetcher }) {
   });
   let auth, configuredKey;
   const url = `https://offline-${name}.invalid`;
+  const mainKey = `sb-offline-${name}-auth-token`;
+  const configuredClients = [];
   const scope = {
     process: {
       env: {
@@ -61,29 +64,42 @@ function harness(name, { read, fetcher }) {
     AsyncStorage: {},
     processLock,
     createAuthCredentialWriters,
+    createAuthRecoveryStorage,
     createAuthSessionStorage: () => storage,
     installNativeAuthCrypto: () => true,
     createAuthFetch: (fetch) => fetch,
     fetch: fetcher,
     createClient(_url, _key, options) {
-      configuredKey = options.auth.storageKey;
-      auth = new GoTrueClient({
+      const clientAuth = new GoTrueClient({
         ...options.auth,
         autoRefreshToken: false,
         url: `${url}/auth/v1`,
         fetch: fetcher,
       });
-      return { auth };
+      configuredClients.push(options.auth);
+      if (options.auth.storageKey === mainKey) {
+        configuredKey = options.auth.storageKey;
+        auth = clientAuth;
+        assert.equal(options.auth.lock, processLock, 'main identity retains the SDK lock');
+        assert.equal(options.auth.storage, storage);
+      } else {
+        assert.equal(options.auth.storageKey, `${mainKey}-recovery-v1`);
+        assert.equal(
+          options.auth.lock,
+          undefined,
+          'the sessionless recovery client has its own queue',
+        );
+        assert.equal(options.auth.autoRefreshToken, false);
+        assert.notEqual(options.auth.storage, storage);
+      }
+      return { auth: clientAuth };
     },
   };
   new Script(
     `${source}\nglobalThis.idTokenSignIn = signInWithNativeIdToken; globalThis.writers = authCredentialWriters;`,
   ).runInNewContext(scope);
-  assert.equal(
-    configuredKey,
-    `sb-offline-${name}-auth-token`,
-    'the explicit slot must preserve the SDK default',
-  );
+  assert.equal(configuredKey, mainKey, 'the explicit slot must preserve the SDK default');
+  assert.equal(configuredClients.length, 2);
   const enqueue = createAuthOperationQueue();
   return {
     auth,

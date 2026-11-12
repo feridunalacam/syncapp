@@ -132,9 +132,11 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
           onClose();
         }
       } else if (mode === 'reset') {
-        await auth.sendPasswordReset(address);
-        if (canFinish())
-          setMessage('If an account uses this email, you will receive a password reset link.');
+        const result = await auth.sendPasswordReset(address);
+        if (!result?.cancelled && canFinish())
+          setMessage(
+            'If an account uses this email, you will receive a password reset link. Open it on the device that requested it.',
+          );
       } else {
         await auth.updatePassword(password);
         if (!canFinish()) return;
@@ -293,6 +295,11 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
                   or use email
                 </Text>
               </>
+            )}
+            {mode === 'reset' && (
+              <Text style={[styles.prose, { color: theme.textSecondary }]}>
+                Request a link here, then open the newest reset email on this device.
+              </Text>
             )}
             {mode !== 'recovery' && (
               <>

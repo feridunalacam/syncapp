@@ -11,12 +11,12 @@ const project = 'https://offline-test.invalid';
 
 // Load the real app configuration with native imports replaced. The race tests
 // consume its lock option, so a missing client wiring fails the SDK regression.
-function configuredLock() {
-  let options;
+function configuredClients() {
+  const options = [];
   const source = readFileSync(new URL('../src/lib/supabase.js', import.meta.url), 'utf8')
     .replace(/^import .*;\n/gm, '')
     .replace(/^export /gm, '');
-  new Script(source).runInNewContext({
+  const context = {
     process: {
       env: {
         EXPO_PUBLIC_SUPABASE_URL: project,
@@ -29,17 +29,51 @@ function configuredLock() {
     processLock,
     URL,
     createAuthCredentialWriters,
+    createAuthRecoveryStorage: () => ({ storage: {} }),
     createAuthSessionStorage: () => ({}),
     installNativeAuthCrypto: () => true,
     createAuthFetch: (fetcher) => fetcher,
     fetch: async () => assert.fail('Unexpected transport'),
     createClient(_url, _key, configuration) {
-      options = configuration;
-      return {};
+      const index = options.length;
+      options.push(configuration);
+      return {
+        auth: {
+          initialize: async () => index,
+          resetPasswordForEmail: async () => index,
+          exchangeCodeForSession: async () => index,
+          signOut: () => assert.fail('must stay private'),
+          startAutoRefresh: () => assert.fail('must stay private'),
+        },
+      };
     },
-  });
-  return options.auth.lock;
+  };
+  new Script(source + '\nglobalThis.recoveryFacade = authRecoveryClient;').runInNewContext(context);
+  return { options, facade: context.recoveryFacade };
 }
+const configuredLock = () => configuredClients().options[0].auth.lock;
+
+test('recovery SDK is sessionless, isolated and exposes no session writer or refresh control', async () => {
+  const { options, facade } = configuredClients();
+  assert.equal(options.length, 2);
+  const [main, recovery] = options;
+  assert.equal(main.auth.lock, processLock);
+  assert.equal(recovery.auth.lock, undefined);
+  assert.equal(recovery.auth.autoRefreshToken, false);
+  assert.equal(recovery.auth.persistSession, true);
+  assert.equal(recovery.auth.detectSessionInUrl, false);
+  assert.equal(recovery.auth.flowType, 'pkce');
+  assert.notEqual(recovery.auth.storageKey, main.auth.storageKey);
+  assert.notEqual(recovery.auth.storage, main.auth.storage);
+  assert.deepEqual(Object.keys(facade).sort(), [
+    'exchangeCodeForSession',
+    'initialize',
+    'resetPasswordForEmail',
+  ]);
+  assert.equal(await facade.initialize(), 1);
+  assert.equal(await facade.resetPasswordForEmail(), 1);
+  assert.equal(await facade.exchangeCodeForSession(), 1);
+});
 const deferred = () => {
   let resolve;
   const promise = new Promise((done) => (resolve = done));

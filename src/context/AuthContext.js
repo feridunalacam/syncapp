@@ -20,10 +20,13 @@ import {
   authStorage,
   signInWithNativeIdToken,
   authCredentialWriters,
+  authRecoveryClient,
+  authRecoveryStorage,
 } from '../lib/supabase';
-import { AUTH_REDIRECT, RECOVERY_REDIRECT, parseAuthLink } from '../lib/authLinks';
+import { AUTH_REDIRECT, parseAuthLink } from '../lib/authLinks';
 import { authExchangeDiagnostic, createAuthCodeExchanger } from '../lib/authCodeExchange';
 import { createAuthRecoveryState, recoverySessionIdentity } from '../lib/authRecoveryState';
+import { createAuthRecoveryFlow } from '../lib/authRecoveryFlow';
 import { createAuthOperationQueue } from '../lib/authOperations';
 import { createSocialAuth } from '../lib/socialAuth';
 import { ensureSocialProvider, AUTH_SERVICE_ORIGIN } from '../services/auth/providers';
@@ -48,6 +51,18 @@ export function AuthProvider({ children }) {
   if (!exchangeCode.current && supabase) exchangeCode.current = createAuthCodeExchanger(supabase);
   const operations = useRef(null);
   if (!operations.current) operations.current = createAuthOperationQueue();
+  const recoveryFlow = useRef(null);
+  if (!recoveryFlow.current && supabase)
+    recoveryFlow.current = createAuthRecoveryFlow({
+      auth: authRecoveryClient,
+      storage: authRecoveryStorage,
+      mainAuth: supabase.auth,
+      enqueue: (action) => operations.current(action),
+      onRecovery: (next) => {
+        assertCurrentSession(next);
+        return recovery.current.observe(next, 'PASSWORD_RECOVERY');
+      },
+    });
   const social = useRef(null);
   if (!social.current && supabase)
     social.current = createSocialAuth({
@@ -94,10 +109,12 @@ export function AuthProvider({ children }) {
     const parsed = parseAuthLink(url);
     if (!parsed) return;
     if (parsed.error) throw new Error(parsed.error);
-    await social.current.receive(parsed);
+    if (parsed.recovery) await recoveryFlow.current.receive(parsed);
+    else await social.current.receive(parsed);
   };
   useEffect(() => {
     if (!supabase) return;
+    recoveryFlow.current.resume();
     let alive = true;
     let receivedEvent = false;
     let sessionVersion = 0;
@@ -161,6 +178,7 @@ export function AuthProvider({ children }) {
     return () => {
       alive = false;
       social.current?.cancel();
+      recoveryFlow.current?.dispose();
       recovery.current.suspend();
       subscription.unsubscribe();
       links.remove();
@@ -168,15 +186,26 @@ export function AuthProvider({ children }) {
       supabase.auth.stopAutoRefresh();
     };
   }, []);
+  const cancelRecovery = () => {
+    const operation = recoveryFlow.current.cancel();
+    // Observe an eager failure even while an older auth action holds the queue.
+    // Return the original promise: the queued await still rejects fail-closed.
+    operation.catch(() => {});
+    return operation;
+  };
   const signIn = (email, password) => {
     requireClient();
-    return operations.current(() =>
-      checked(authCredentialWriters.signInWithPassword({ email: email.trim(), password })),
-    );
+    const cancelledRecovery = cancelRecovery();
+    return operations.current(async () => {
+      await cancelledRecovery;
+      return checked(authCredentialWriters.signInWithPassword({ email: email.trim(), password }));
+    });
   };
   const signUp = (email, password) => {
     requireClient();
+    const cancelledRecovery = cancelRecovery();
     return operations.current(async () => {
+      await cancelledRecovery;
       const data = await checked(
         authCredentialWriters.signUp({
           email: email.trim(),
@@ -187,14 +216,16 @@ export function AuthProvider({ children }) {
       return { requiresConfirmation: !data.session };
     });
   };
-  const sendPasswordReset = (email) =>
-    checked(
-      requireClient().auth.resetPasswordForEmail(email.trim(), { redirectTo: RECOVERY_REDIRECT }),
-    );
+  const sendPasswordReset = (email) => {
+    requireClient();
+    return recoveryFlow.current.send(email.trim());
+  };
   const updatePassword = async (password) => {
     const client = requireClient();
     const target = currentSession.current;
+    const cancelledRecovery = cancelRecovery();
     return operations.current(async () => {
+      await cancelledRecovery;
       assertCurrentSession(target);
       await checked(client.auth.updateUser({ password }));
       recovery.current.finish(target);
@@ -203,13 +234,16 @@ export function AuthProvider({ children }) {
   const signOut = () => {
     const client = requireClient();
     const target = currentSession.current;
-    return operations.current(() => {
+    const cancelledRecovery = cancelRecovery();
+    return operations.current(async () => {
+      await cancelledRecovery;
       assertCurrentSession(target);
       return checked(client.auth.signOut({ scope: 'local' }));
     });
   };
   const signInWithOAuth = async (provider) => {
     requireClient();
+    await cancelRecovery();
     return social.current.signIn(provider);
   };
   const deleteAccount = async () => {
@@ -217,7 +251,9 @@ export function AuthProvider({ children }) {
     const target = currentSession.current;
     const targetId = target?.user.id;
     if (!targetId) throw new Error('Sign in before deleting your account.');
+    const cancelledRecovery = cancelRecovery();
     return operations.current(async () => {
+      await cancelledRecovery;
       assertCurrentSession(target);
       const { error: failure } = await client.functions.invoke('delete-account', {
         body: { confirmation: 'DELETE' },

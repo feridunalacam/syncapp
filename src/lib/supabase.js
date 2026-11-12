@@ -7,6 +7,7 @@ import { createAuthSessionStorage } from './authSessionStorage';
 import { installNativeAuthCrypto } from './authCrypto';
 import { createAuthFetch } from './authFetch';
 import { createAuthCredentialWriters } from './authCredentialWrites';
+import { createAuthRecoveryStorage } from './authRecoveryStorage';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
@@ -20,9 +21,10 @@ const authCryptoReady = installNativeAuthCrypto({
 export const isSupabaseConfigured = Boolean(url && key && authCryptoReady);
 export const authStorage =
   Platform.OS === 'web' ? AsyncStorage : createAuthSessionStorage(SecureStore);
+const authFetch = isSupabaseConfigured ? createAuthFetch(fetch.bind(globalThis), url) : null;
 export const supabase = isSupabaseConfigured
   ? createClient(url, key, {
-      global: { fetch: createAuthFetch(fetch.bind(globalThis), url) },
+      global: { fetch: authFetch },
       auth: {
         storageKey: authStorageKey,
         storage: authStorage,
@@ -35,6 +37,41 @@ export const supabase = isSupabaseConfigured
         flowType: 'pkce',
         experimental: { appendPkceFlowIdToRedirects: true },
       },
+    })
+  : null;
+// A failed refresh of an older main session must not erase a pending recovery.
+// Only PKCE state is durable here; this client's session/user slots are memory-only.
+const recoveryStorageKey = `${authStorageKey}-recovery-v1`;
+export const authRecoveryStorage = isSupabaseConfigured
+  ? createAuthRecoveryStorage({ storage: authStorage, storageKey: recoveryStorageKey })
+  : null;
+const recoveryClient = isSupabaseConfigured
+  ? createClient(url, key, {
+      global: {
+        fetch: (input, options) =>
+          authFetch(input, { ...options, signal: authRecoveryStorage.signal || options?.signal }),
+      },
+      auth: {
+        storageKey: recoveryStorageKey,
+        storage: authRecoveryStorage.storage,
+        // recoveryStorage.run owns every operation, and this client never
+        // refreshes. A second legacy SDK lock is unnecessary here.
+        autoRefreshToken: false,
+        persistSession: true,
+        detectSessionInUrl: false,
+        flowType: 'pkce',
+        experimental: { appendPkceFlowIdToRedirects: true },
+      },
+    }).auth
+  : null;
+// Do not expose another session writer, signOut or auto-refresh controller.
+export const authRecoveryClient = recoveryClient
+  ? Object.freeze({
+      initialize: () => recoveryClient.initialize(),
+      resetPasswordForEmail: (email, options) =>
+        recoveryClient.resetPasswordForEmail(email, options),
+      exchangeCodeForSession: (code, options) =>
+        recoveryClient.exchangeCodeForSession(code, options),
     })
   : null;
 export const authCredentialWriters = supabase

@@ -8,6 +8,7 @@ import { create } from 'react-test-renderer';
 import { createAuthRecoveryState } from '../src/lib/authRecoveryState.js';
 import { recoverySessionIdentity } from '../src/lib/authRecoveryState.js';
 import { createAuthOperationQueue } from '../src/lib/authOperations.js';
+import { createAuthRecoveryFlow } from '../src/lib/authRecoveryFlow.js';
 import { createAuthFetch, AUTH_REQUEST_TIMEOUT_MS } from '../src/lib/authFetch.js';
 import { AUTH_REDIRECT, RECOVERY_REDIRECT, parseAuthLink } from '../src/lib/authLinks.js';
 import { authExchangeDiagnostic, createAuthCodeExchanger } from '../src/lib/authCodeExchange.js';
@@ -44,6 +45,7 @@ const sessionA = '30303030-3030-4030-8030-303030303030';
 const sessionB = '40404040-4040-4040-8040-404040404040';
 const session = (userId = accountA, sessionId = sessionA) => ({
   user: { id: userId },
+  refresh_token: 'offline-refresh',
   access_token: `offline.${Buffer.from(JSON.stringify({ sub: userId, session_id: sessionId })).toString('base64url')}.signature`,
 });
 function deferred() {
@@ -100,8 +102,16 @@ async function harness(options = {}) {
       listener('PASSWORD_RECOVERY', next);
       return { data: { session: next }, error: null };
     },
+    setSession:
+      options.setSession ||
+      (async () => {
+        const next = session();
+        listener('SIGNED_IN', next);
+        return { data: { session: next, user: next.user }, error: null };
+      }),
     updateUser: options.updateUser || (async () => ({ data: {}, error: null })),
     signInWithPassword: options.signInWithPassword || (async () => ({ data: {}, error: null })),
+    signUp: options.signUp || (async () => ({ data: { session: null }, error: null })),
     signOut: options.signOut || (async () => ({ data: {}, error: null })),
   };
   const context = {
@@ -141,12 +151,29 @@ async function harness(options = {}) {
     authExchangeDiagnostic,
     createAuthCodeExchanger,
     createAuthRecoveryState,
+    createAuthRecoveryFlow,
+    authRecoveryStorage: {
+      run: (action) => action(),
+      hasFlow: async () => true,
+      invalidate: options.invalidateRecovery || (async () => {}),
+      suspend: () => {},
+    },
+    authRecoveryClient: {
+      initialize: async () => {},
+      resetPasswordForEmail:
+        options.resetPasswordForEmail || (async () => ({ data: {}, error: null })),
+      exchangeCodeForSession: async () => {
+        exchanges++;
+        const next = session();
+        return { data: { session: next, user: next.user, redirectType: 'recovery' }, error: null };
+      },
+    },
     recoverySessionIdentity,
     createAuthOperationQueue,
     createSocialAuth,
     AUTH_SERVICE_ORIGIN: 'https://fixture.supabase.co',
-    ensureSocialProvider: async () => {},
-    signInNativeApple: async () => null,
+    ensureSocialProvider: options.ensureSocialProvider || (async () => {}),
+    signInNativeApple: options.signInNativeApple || (async () => null),
     signInWithNativeIdToken: async () => assert.fail('Unexpected native login'),
     authCredentialWriters: {
       signInWithPassword: (credentials) => auth.signInWithPassword(credentials),
@@ -264,7 +291,9 @@ test('an incoming recovery waits for an older password update to finish before r
     let completing, receiving;
     await act(async () => {
       completing = app.value.updatePassword('offline-new-password');
-      receiving = app.dispatchLink(`${RECOVERY_REDIRECT}?code=next-recovery`);
+      receiving = app.dispatchLink(
+        `${RECOVERY_REDIRECT}?code=next-recovery&sb_flow_id=${'b'.repeat(32)}`,
+      );
     });
     assert.equal(app.exchanges(), 0);
     await act(async () => {
@@ -717,6 +746,118 @@ test('confirmed deletion removes SecureStore-only legacy credentials without reg
     assert.equal(credentials.get(`syncapp.music.credentials.${accountB}`), 'other-account-remains');
     assert.equal(credentials.get('syncapp.music.credentials'), 'guest-remains');
     assert.equal(app.value.user, null);
+  } finally {
+    await app.close();
+  }
+});
+
+for (const intent of [
+  'signIn',
+  'signUp',
+  'signInWithOAuth',
+  'signOut',
+  'deleteAccount',
+  'updatePassword',
+]) {
+  test(`explicit ${intent} waits for durable recovery cancellation before its auth mutation`, async () => {
+    const release = deferred();
+    const events = [];
+    const success = async () => {
+      events.push('mutation');
+      return { data: {}, error: null };
+    };
+    const app = await harness({
+      invalidateRecovery: () => {
+        events.push('cancel');
+        return release.promise;
+      },
+      signInWithPassword: success,
+      signUp: success,
+      signOut: success,
+      updateUser: success,
+      invoke: success,
+      ensureSocialProvider: async () => events.push('mutation'),
+      signInNativeApple: async () => ({ cancelled: true }),
+    });
+    try {
+      await app.emit('SIGNED_IN', session());
+      let operation;
+      await act(async () => {
+        const args =
+          intent === 'signInWithOAuth' ? ['apple'] : ['offline@example.test', 'synthetic-password'];
+        operation = app.value[intent](...args);
+      });
+      assert.deepEqual(events, ['cancel']);
+      await act(async () => {
+        release.resolve();
+        await operation;
+      });
+      assert.equal(events[0], 'cancel');
+      assert.ok(events.includes('mutation'));
+    } finally {
+      await app.close();
+    }
+  });
+}
+
+test('password reset uses only the dedicated recovery client without changing main identity', async () => {
+  let sent = 0;
+  const app = await harness({
+    resetPasswordForEmail: async (email, options) => {
+      sent++;
+      assert.equal(email, 'offline@example.test');
+      assert.equal(options.redirectTo, RECOVERY_REDIRECT);
+      return { data: {}, error: null };
+    },
+  });
+  try {
+    await app.emit('SIGNED_IN', session());
+    await act(async () => app.value.sendPasswordReset(' offline@example.test '));
+    assert.equal(sent, 1);
+    assert.equal(app.value.user.id, accountA);
+    assert.equal(app.value.recoveryMode, false);
+  } finally {
+    await app.close();
+  }
+});
+
+test('a rejected recovery cancellation is observed while an older auth action holds the queue', async () => {
+  const update = deferred();
+  let cancellations = 0;
+  let signIns = 0;
+  const app = await harness({
+    updateUser: () => update.promise,
+    invalidateRecovery: () => {
+      cancellations++;
+      return cancellations === 2
+        ? Promise.reject(new Error('Synthetic recovery vault unavailable'))
+        : Promise.resolve();
+    },
+    signInWithPassword: async () => {
+      signIns++;
+      return { data: {}, error: null };
+    },
+  });
+  try {
+    await app.emit('SIGNED_IN', session());
+    let updating, signing;
+    await act(async () => {
+      updating = app.value.updatePassword('synthetic-password');
+    });
+    await act(async () => {
+      signing = app.value.signIn('offline@example.test', 'synthetic-password');
+    });
+    const rejected = assert.rejects(signing, /recovery vault unavailable/);
+    // Node reports an unhandled eager cancellation here unless the provider
+    // observes it immediately, independently of its later queued await.
+    await new Promise(setImmediate);
+    await act(async () => {
+      update.resolve({ data: {}, error: null });
+      await updating;
+      await rejected;
+    });
+    assert.equal(signIns, 0, 'a failed durable cancellation must still prevent sign-in');
+    assert.equal(app.value.user.id, accountA);
   } finally {
     await app.close();
   }
