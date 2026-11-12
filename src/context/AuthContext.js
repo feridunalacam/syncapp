@@ -30,7 +30,8 @@ import { createAuthRecoveryFlow } from '../lib/authRecoveryFlow';
 import { createAuthOperationQueue } from '../lib/authOperations';
 import { createSocialAuth } from '../lib/socialAuth';
 import { ensureSocialProvider, AUTH_SERVICE_ORIGIN } from '../services/auth/providers';
-import { signInNativeApple } from '../services/auth/apple';
+import { signInNativeApple, getNativeAppleAuthentication } from '../services/auth/apple';
+import { observeAppleCredentialRevocation } from '../lib/appleCredentialRevocation';
 
 const AuthContext = createContext({ user: null, ready: false, configured: false });
 export const useAuth = () => useContext(AuthContext);
@@ -72,6 +73,14 @@ export function AuthProvider({ children }) {
       ensureProvider: ensureSocialProvider,
       signInNativeApple,
       signInWithIdToken: signInWithNativeIdToken,
+      registerAppleAuthorization: async (authorizationCode, target) => {
+        if (!target?.access_token) return;
+        assertCurrentSession(target);
+        await supabase.functions.invoke('register-apple-token', {
+          body: { authorization_code: authorizationCode },
+          headers: { Authorization: `Bearer ${target.access_token}` },
+        });
+      },
       openSession: (url, redirect) => WebBrowser.openAuthSessionAsync(url, redirect),
       authorizationOrigin: AUTH_SERVICE_ORIGIN,
       getIdentity: () => {
@@ -118,6 +127,7 @@ export function AuthProvider({ children }) {
     let alive = true;
     let receivedEvent = false;
     let sessionVersion = 0;
+    let appleRevocation = null;
     const receiveSession = (next, event) => {
       const version = ++sessionVersion;
       currentUser.current = next?.user?.id || null;
@@ -126,7 +136,10 @@ export function AuthProvider({ children }) {
       // Keep the initial account gate closed while unfinished recovery state is
       // restored. The bounded local read never calls Auth from its event callback.
       recovery.current.observe(next, event).then(() => {
-        if (alive && version === sessionVersion) setReady(true);
+        if (alive && version === sessionVersion) {
+          setReady(true);
+          appleRevocation?.check();
+        }
       });
     };
     const {
@@ -171,8 +184,22 @@ export function AuthProvider({ children }) {
       })
       .catch(() => {});
     const links = Linking.addEventListener('url', ({ url }) => receive(url));
-    const refresh = (state) =>
-      state === 'active' ? supabase.auth.startAutoRefresh() : supabase.auth.stopAutoRefresh();
+    appleRevocation = observeAppleCredentialRevocation({
+      apple: getNativeAppleAuthentication(),
+      getSession: () => currentSession.current,
+      enqueue: (action) => operations.current(action),
+      onRevoked: async (target) => {
+        assertCurrentSession(target);
+        social.current?.cancel();
+        await checked(supabase.auth.signOut({ scope: 'local' }));
+      },
+    });
+    const refresh = (state) => {
+      if (state === 'active') {
+        supabase.auth.startAutoRefresh();
+        appleRevocation?.check();
+      } else supabase.auth.stopAutoRefresh();
+    };
     refresh(AppState.currentState);
     const appState = AppState.addEventListener('change', refresh);
     return () => {
@@ -183,6 +210,7 @@ export function AuthProvider({ children }) {
       subscription.unsubscribe();
       links.remove();
       appState.remove();
+      appleRevocation?.dispose();
       supabase.auth.stopAutoRefresh();
     };
   }, []);
@@ -255,7 +283,7 @@ export function AuthProvider({ children }) {
     return operations.current(async () => {
       await cancelledRecovery;
       assertCurrentSession(target);
-      const { error: failure } = await client.functions.invoke('delete-account', {
+      const { data: deletion, error: failure } = await client.functions.invoke('delete-account', {
         body: { confirmation: 'DELETE' },
         headers: { Authorization: `Bearer ${target.access_token}` },
       });
@@ -307,10 +335,22 @@ export function AuthProvider({ children }) {
           await client.auth.signOut({ scope: 'local' });
           if (currentUser.current === targetId) setSession(null);
         }
+      } catch {
+        const failure = new Error(
+          'Your account was deleted, but this device could not finish signing out.',
+        );
+        failure.apple_revocation = deletion?.apple_revocation;
+        throw failure;
       } finally {
         const cleanupError = await cleanup;
-        if (cleanupError) throw cleanupError;
+        if (cleanupError) {
+          // Remote deletion already succeeded. Keep Apple's required follow-up
+          // instructions visible even when a local cache could not be removed.
+          cleanupError.apple_revocation = deletion?.apple_revocation;
+          throw cleanupError;
+        }
       }
+      return deletion;
     });
   };
   return (

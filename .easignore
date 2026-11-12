@@ -39,7 +39,7 @@ supabase/.temp/
 /sites/sync-legal/
 
 # Local store capture/export artifacts do not belong in app builds.
-/artifacts/app-store/
+/artifacts/
 
 # Historical coach recordings are preserved locally, but are not release assets.
 /assets/sounds/coach-en/

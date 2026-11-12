@@ -17,6 +17,7 @@ export const useAudioController = ({
   countdownSoundPlayer,
   stopLocalCues,
   onPlaybackInterrupted,
+  isExternalMusicActive,
 }) => {
   const [track, setTrack] = useState(null);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
@@ -35,6 +36,9 @@ export const useAudioController = ({
   const commandCount = useRef(0);
   const loadingVersion = useRef(null);
   const requestedPhase = useRef(null);
+  const preparedDevice = useRef(false);
+  const shuffleState = useRef(false);
+  const repeatState = useRef(false);
   const interruption = useRef(null);
   const params = useRef({});
   params.current = {
@@ -47,8 +51,9 @@ export const useAudioController = ({
     countdownSoundPlayer,
     stopLocalCues,
     onPlaybackInterrupted,
-    isShuffled,
-    isRepeating,
+    isExternalMusicActive,
+    isShuffled: shuffleState.current,
+    isRepeating: repeatState.current,
   };
   const allowLocalCues = useCallback((allowed) => {
     localCuesAllowedRef.current = allowed;
@@ -62,6 +67,7 @@ export const useAudioController = ({
       revision.current++;
       const p = params.current;
       const current = active.current;
+      p.services?.spotify?.cancelPending?.();
       const silence = async (source) => {
         if (!source || source.platform === 'voices') return;
         const token =
@@ -81,7 +87,10 @@ export const useAudioController = ({
       queue.current.then(() =>
         Promise.allSettled([
           silence(active.current),
-          ...Object.values(p.services || {}).map((service) => service.cleanup?.()),
+          active.current && active.current.platform !== 'voices'
+            ? p.services?.[active.current.platform]?.cleanup?.()
+            : null,
+          preparedDevice.current ? p.services?.device?.clearPrepared?.() : null,
           p.countdownSoundPlayer?.stop(),
         ]),
       );
@@ -115,7 +124,8 @@ export const useAudioController = ({
     };
   }, []);
   const check = (result) => {
-    if (result?.success === false) throw new Error(result.error || 'Music playback failed.');
+    if (result === false || result?.success === false)
+      throw new Error(result?.error || 'Music playback failed.');
   };
   const stopActive = useCallback(
     async (preservePrepared = false) => {
@@ -130,7 +140,10 @@ export const useAudioController = ({
             if (result?.code !== 'DEVICE_CHANGED') check(result);
           } finally {
             if (preservePrepared && service.releaseCurrent) await service.releaseCurrent();
-            else await service.cleanup?.();
+            else {
+              await service.cleanup?.();
+              if (current.platform === 'device') preparedDevice.current = false;
+            }
             // Local cleanup unloads the sound even if its pause failed. Spotify
             // has no unload operation: retain ownership until pause succeeds.
             if (current.platform === 'device' && active.current === current) active.current = null;
@@ -205,6 +218,9 @@ export const useAudioController = ({
   }, [connection]);
   const handlePhaseChange = useCallback(
     (phase, roundNum, paused = false) => {
+      if (params.current.isExternalMusicActive?.())
+        return Promise.resolve({ success: true, bypassed: true });
+      if (commandCount.current > 0) params.current.services?.spotify?.cancelPending?.();
       const version = ++revision.current;
       loadingVersion.current = version;
       requestedPhase.current = { phase, roundNum };
@@ -265,10 +281,12 @@ export const useAudioController = ({
           );
           const prepareNext = () => {
             const next = resolveNextRoundAudio(routine, phase, roundNum, p.selectedPlatform);
-            if (next?.platform === 'device' && next.kind === 'track')
+            if (next?.platform === 'device' && next.kind === 'track') {
+              preparedDevice.current = true;
               Promise.resolve(p.services?.device?.prepareTrack?.('device', next.source.uri)).catch(
                 () => {},
               );
+            }
           };
           if (!resolved) {
             prepareNext();
@@ -351,10 +369,12 @@ export const useAudioController = ({
             if (service.setVolume && !playResult?.externalChange)
               await service.setVolume(token, volume, deviceId);
             if (service.setRepeat && !playResult?.externalChange)
-              await service.setRepeat(
-                token,
-                p.isRepeating ? (song ? 'track' : 'context') : 'off',
-                deviceId,
+              check(
+                await service.setRepeat(
+                  token,
+                  p.isRepeating ? (song ? 'track' : 'context') : 'off',
+                  deviceId,
+                ),
               );
           }
           if (version !== revision.current || !mounted.current) return;
@@ -380,6 +400,7 @@ export const useAudioController = ({
     [enqueue, connection, stopActive, fetchPlayback, allowLocalCues],
   );
   const pauseMusic = useCallback(() => {
+    params.current.services?.spotify?.cancelPending?.();
     wantsPaused.current = true;
     revision.current++;
     if (loadingVersion.current != null) pendingPhase.current = requestedPhase.current;
@@ -442,6 +463,7 @@ export const useAudioController = ({
     });
   }, [enqueue, connection, handlePhaseChange]);
   const stopMusic = useCallback(() => {
+    params.current.services?.spotify?.cancelPending?.();
     wantsPaused.current = true;
     const version = ++revision.current;
     pendingPhase.current = null;
@@ -454,6 +476,10 @@ export const useAudioController = ({
     return enqueue(async () => {
       try {
         await stopActive();
+        if (preparedDevice.current) {
+          await params.current.services?.device?.clearPrepared?.();
+          preparedDevice.current = false;
+        }
         if (version === revision.current) allowLocalCues(true);
       } finally {
         await params.current.countdownSoundPlayer?.stop();
@@ -480,31 +506,59 @@ export const useAudioController = ({
   const skipNext = useCallback(() => control('next'), [control]);
   const skipPrevious = useCallback(() => control('previous'), [control]);
   const toggleShuffle = useCallback(() => {
-    const value = !params.current.isShuffled;
-    setIsShuffled(value);
-    return enqueue(async () => {
-      const c = active.current;
-      if (!c) return;
-      const { service, token } = await connection(c.platform, true);
-      await service?.setShuffle?.(token, value, c.deviceId);
-    });
+    const version = revision.current;
+    return enqueue(
+      async () => {
+        if (version !== revision.current || !mounted.current) return;
+        const c = active.current;
+        if (!c) return;
+        const value = !shuffleState.current;
+        const { service, token } = await connection(c.platform, true);
+        if (!service?.setShuffle) return;
+        if (version !== revision.current || !mounted.current) return;
+        const result = await service.setShuffle(token, value, c.deviceId);
+        if (result?.cancelled || version !== revision.current || !mounted.current) return;
+        check(result);
+        if (active.current === c) {
+          shuffleState.current = value;
+          params.current.isShuffled = value;
+          setIsShuffled(value);
+          setAudioError(null);
+        }
+      },
+      () => version === revision.current,
+    );
   }, [enqueue, connection]);
   const toggleRepeat = useCallback(() => {
-    const value = !params.current.isRepeating;
-    setIsRepeating(value);
-    return enqueue(async () => {
-      const c = active.current;
-      if (!c) return;
-      const { service, token } = await connection(c.platform, true);
-      await service?.setRepeat?.(
-        token,
-        value ? (c.kind === 'track' ? 'track' : 'context') : 'off',
-        c.deviceId,
-      );
-    });
+    const version = revision.current;
+    return enqueue(
+      async () => {
+        if (version !== revision.current || !mounted.current) return;
+        const c = active.current;
+        if (!c) return;
+        const value = !repeatState.current;
+        const { service, token } = await connection(c.platform, true);
+        if (!service?.setRepeat) return;
+        if (version !== revision.current || !mounted.current) return;
+        const result = await service.setRepeat(
+          token,
+          value ? (c.kind === 'track' ? 'track' : 'context') : 'off',
+          c.deviceId,
+        );
+        if (result?.cancelled || version !== revision.current || !mounted.current) return;
+        check(result);
+        if (active.current === c) {
+          repeatState.current = value;
+          params.current.isRepeating = value;
+          setIsRepeating(value);
+          setAudioError(null);
+        }
+      },
+      () => version === revision.current,
+    );
   }, [enqueue, connection]);
   const playCountdownSound = useCallback((type) => {
-    if (!localCuesAllowedRef.current) return;
+    if (!localCuesAllowedRef.current || params.current.isExternalMusicActive?.()) return;
     const p = params.current;
     const key =
       type === 'beforeStart'

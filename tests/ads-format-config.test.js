@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createAdsConfig } from '../src/services/ads/config.js';
 import { createNativeAdsRuntime } from '../src/services/ads/sdk.js';
+import { createAdsController } from '../src/services/ads/controller.js';
+import { createInterstitialController } from '../src/services/ads/interstitials.js';
 
 const liveBanner = 'ca-app-pub-1234567890123456/1234567890';
 const liveInterstitial = 'ca-app-pub-1234567890123456/9876543210';
@@ -84,6 +86,179 @@ test('release enables each valid real format independently and selects only its 
   const web = createAdsConfig({ platform: 'web', env });
   assert.equal(web.enabled, false);
   assert.equal(web.interstitialEnabled, false);
+});
+
+test('standalone test inventory requires the exact preview profile and explicit valid flag', () => {
+  const profiles = [undefined, '', 'development', 'production', 'unknown', 'Preview', 'preview'];
+  const flags = [undefined, 'false', 'true', '', 'TRUE', ' true', 'false ', '0', null, true, false];
+  for (const platform of ['ios', 'android', 'web']) {
+    for (const profile of profiles) {
+      for (const flag of flags) {
+        const config = createAdsConfig({
+          platform,
+          env: {
+            EXPO_PUBLIC_BUILD_PROFILE: profile,
+            EXPO_PUBLIC_ADS_ENABLED: 'true',
+            EXPO_PUBLIC_ADS_TEST_MODE: flag,
+            EXPO_PUBLIC_ADMOB_IOS_BANNER_ID: liveBanner,
+            EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID: liveInterstitial,
+            EXPO_PUBLIC_ADMOB_ANDROID_BANNER_ID: liveBanner,
+            EXPO_PUBLIC_ADMOB_ANDROID_INTERSTITIAL_ID: liveInterstitial,
+          },
+        });
+        const previewTestMode = profile === 'preview' && flag === 'true';
+        const expectedEnabled =
+          platform !== 'web' && (flag === undefined || flag === 'false' || previewTestMode);
+        const label = `${platform}/${String(profile)}/${String(flag)}`;
+        assert.equal(config.enabled, expectedEnabled, label);
+        assert.equal(config.bannerEnabled, expectedEnabled, label);
+        assert.equal(config.interstitialEnabled, expectedEnabled, label);
+        assert.equal(config.testMode, previewTestMode, label);
+      }
+    }
+  }
+});
+
+test('preview test mode preserves release opt-in and rejects invalid or demo configured units', () => {
+  const env = {
+    EXPO_PUBLIC_BUILD_PROFILE: 'preview',
+    EXPO_PUBLIC_ADS_TEST_MODE: 'true',
+    EXPO_PUBLIC_ADS_ENABLED: 'true',
+  };
+  for (const platform of ['ios', 'android']) {
+    const prefix = `EXPO_PUBLIC_ADMOB_${platform.toUpperCase()}`;
+    for (const format of ['BANNER', 'INTERSTITIAL']) {
+      for (const id of [
+        undefined,
+        '',
+        'invalid',
+        'ca-app-pub-3940256099942544/4411468910',
+        `${liveBanner}\n`,
+      ]) {
+        const config = createAdsConfig({
+          platform,
+          env: { ...env, [`${prefix}_${format}_ID`]: id },
+        });
+        assert.equal(config.enabled, false, `${platform}/${format}/${String(id)}`);
+      }
+    }
+    for (const enabled of [undefined, 'false', 'TRUE', null]) {
+      const config = createAdsConfig({
+        platform,
+        env: {
+          ...env,
+          EXPO_PUBLIC_ADS_ENABLED: enabled,
+          [`${prefix}_BANNER_ID`]: liveBanner,
+          [`${prefix}_INTERSTITIAL_ID`]: liveInterstitial,
+        },
+      });
+      assert.equal(config.enabled, false, `${platform}/${String(enabled)}`);
+    }
+  }
+});
+
+test('development remains demo-only regardless of standalone QA flags or profile', () => {
+  for (const profile of [undefined, 'preview', 'production']) {
+    for (const flag of [undefined, 'false', 'true', 'malformed']) {
+      const config = createAdsConfig({
+        platform: 'ios',
+        dev: true,
+        env: { EXPO_PUBLIC_BUILD_PROFILE: profile, EXPO_PUBLIC_ADS_TEST_MODE: flag },
+      });
+      assert.equal(config.enabled, true);
+      assert.equal(config.testMode, true);
+      assert.equal(config.bannerUnitId, null);
+      assert.equal(config.interstitialUnitId, null);
+    }
+  }
+});
+
+test('standalone preview routes both formats through SDK TestIds without changing request policy', async () => {
+  const info = { canRequestAds: true, privacyOptionsRequirementStatus: 'NOT_REQUIRED' };
+  const app = runtimeFixture({
+    AdsConsent: {
+      requestInfoUpdate: async () => info,
+      loadAndShowConsentFormIfRequired: async () => info,
+    },
+    default: () => ({
+      setAppMuted: async () => {},
+      setAppVolume: async () => {},
+      setRequestConfiguration: async () => {},
+      initialize: async () => {},
+    }),
+  });
+  const config = createAdsConfig({
+    platform: 'ios',
+    env: {
+      EXPO_PUBLIC_BUILD_PROFILE: 'preview',
+      EXPO_PUBLIC_ADS_ENABLED: 'true',
+      EXPO_PUBLIC_ADS_TEST_MODE: 'true',
+      EXPO_PUBLIC_ADMOB_IOS_BANNER_ID: liveBanner,
+      EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID: liveInterstitial,
+    },
+  });
+  const gate = { identity: null, eligible: true, appActive: true, blocked: false };
+  const controller = createAdsController({
+    runtime: app.runtime,
+    config,
+    getCurrentGate: () => gate,
+  });
+  const release = controller.acquirePlacement(() => true);
+  controller.setGate(gate);
+  await controller.waitUntilIdle();
+  assert.equal(controller.getState().ready, true);
+  assert.equal(controller.getState().bannerUnitId, 'demo-banner');
+  const interstitial = createInterstitialController({
+    getSdk: () => app.runtime.getSdk(),
+    config,
+    getCurrentGate: () => ({ ...gate, ready: true }),
+  });
+  interstitial.setGate({ ...gate, ready: true });
+  assert.equal(
+    interstitial.preload(() => true),
+    true,
+  );
+  assert.deepEqual(app.calls, [
+    { unitId: 'demo-interstitial', requestOptions: { requestNonPersonalizedAdsOnly: true } },
+  ]);
+  assert.deepEqual(config.requestConfiguration, { maxAdContentRating: 'G' });
+  interstitial.dispose();
+  release();
+  controller.dispose();
+});
+
+test('unsafe standalone test flags cannot evaluate the SDK even with an eligible release placement', async () => {
+  for (const [profile, flag] of [
+    ['production', 'true'],
+    [undefined, 'true'],
+    ['preview', 'TRUE'],
+  ]) {
+    const app = runtimeFixture();
+    const config = createAdsConfig({
+      platform: 'ios',
+      env: {
+        EXPO_PUBLIC_BUILD_PROFILE: profile,
+        EXPO_PUBLIC_ADS_ENABLED: 'true',
+        EXPO_PUBLIC_ADS_TEST_MODE: flag,
+        EXPO_PUBLIC_ADMOB_IOS_BANNER_ID: liveBanner,
+        EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID: liveInterstitial,
+      },
+    });
+    const gate = { identity: null, eligible: true, appActive: true, blocked: false };
+    const controller = createAdsController({
+      runtime: app.runtime,
+      config,
+      getCurrentGate: () => gate,
+    });
+    controller.setGate(gate);
+    const release = controller.acquirePlacement(() => true);
+    await controller.waitUntilIdle();
+    assert.equal(config.enabled, false);
+    assert.equal(app.loads(), 0);
+    assert.deepEqual(app.calls, []);
+    release();
+    controller.dispose();
+  }
 });
 
 test('release never substitutes test inventory for missing, malformed or demo interstitial IDs', () => {

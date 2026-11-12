@@ -5,6 +5,7 @@ import { Script, createContext } from 'node:vm';
 import { createRequire } from 'node:module';
 import * as rules from '../supabase/functions/_shared/subscriptions.js';
 import * as reviewRules from '../supabase/functions/_shared/review-subscriptions.js';
+import { createAppleTokenService } from '../supabase/functions/_shared/apple-revocation.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -57,9 +58,13 @@ function compile(path) {
 }
 const sharedCode = compile('_shared/server.ts');
 const handlerCode = Object.fromEntries(
-  ['delete-account', 'sync-subscription', 'revenuecat-webhook', 'revenuecat-review-webhook'].map(
-    (name) => [name, compile(`${name}/index.ts`)],
-  ),
+  [
+    'delete-account',
+    'register-apple-token',
+    'sync-subscription',
+    'revenuecat-webhook',
+    'revenuecat-review-webhook',
+  ].map((name) => [name, compile(`${name}/index.ts`)]),
 );
 
 function harness(name, options = {}) {
@@ -87,7 +92,11 @@ function harness(name, options = {}) {
         data: {
           user:
             token === 'fixture-user-token'
-              ? { id: USER_A, last_sign_in_at: new Date(NOW).toISOString() }
+              ? {
+                  id: USER_A,
+                  last_sign_in_at: new Date(NOW).toISOString(),
+                  ...(options.appleUser || {}),
+                }
               : null,
         },
         error: token === 'fixture-user-token' ? null : { status: 401 },
@@ -209,6 +218,7 @@ function harness(name, options = {}) {
   const context = createContext({
     ...rules,
     ...reviewRules,
+    createAppleTokenService,
     requireRecentSignIn: (value) => rules.requireRecentSignIn(value, NOW),
     createClient: () => admin,
     Deno: {
@@ -390,7 +400,11 @@ test('recent authenticated deletion revokes sessions before deleting its Auth us
   const app = harness('delete-account');
   const response = await app.request({ confirmation: 'DELETE', user_id: USER_B });
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { deleted: true, subscription_cancelled: false });
+  assert.deepEqual(await response.json(), {
+    deleted: true,
+    subscription_cancelled: false,
+    apple_revocation: { status: 'not_required' },
+  });
   assert.deepEqual(
     app.calls.map(([method]) => method),
     ['claims', 'list', 'revoke', 'delete'],
@@ -405,6 +419,43 @@ test('session revocation failure prevents Auth user deletion', async () => {
   assert.equal(
     app.calls.some(([method]) => method === 'delete'),
     false,
+  );
+});
+
+test('legacy Apple account deletion succeeds without signing secrets and returns manual Apple revocation instructions', async () => {
+  const app = harness('delete-account', {
+    appleUser: {
+      identities: [{ provider: 'apple', identity_data: { sub: 'synthetic-apple-subject' } }],
+    },
+  });
+  const response = await app.request({ confirmation: 'DELETE' });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.deleted, true);
+  assert.equal(result.apple_revocation.status, 'manual_required');
+  assert.equal(result.apple_revocation.url, 'https://support.apple.com/102571');
+  assert.deepEqual(
+    app.calls.map(([method]) => method),
+    ['claims', 'list', 'revoke', 'delete'],
+  );
+});
+
+test('Apple registration requires recent matching verified Auth claims and remains sanitized without configuration', async () => {
+  const old = harness('register-apple-token', {
+    verifiedClaims: { data: { claims: claims(3600) }, error: null },
+  });
+  assert.equal((await old.request({ authorization_code: 'synthetic-code' })).status, 403);
+  const app = harness('register-apple-token', {
+    appleUser: {
+      identities: [{ provider: 'apple', identity_data: { sub: 'synthetic-apple-subject' } }],
+    },
+  });
+  const response = await app.request({ authorization_code: 'sensitive-code-that-must-not-return' });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: 'apple_registration_unavailable' });
+  assert.deepEqual(
+    app.calls.map(([method]) => method),
+    ['claims'],
   );
 });
 

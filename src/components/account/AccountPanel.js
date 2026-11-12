@@ -17,6 +17,20 @@ import { recoverySessionIdentity } from '../../lib/authRecoveryState';
 import AppleSignInButton from './AppleSignInButton';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const showAppleRevocationInstructions = (result) => {
+  if (result?.apple_revocation?.status !== 'manual_required') return;
+  Alert.alert(
+    'Account deleted',
+    'To also stop Sign in with Apple, open Settings, tap your name, Sign in with Apple, then Sync, and delete its connection.',
+    [
+      { text: 'Done', style: 'cancel' },
+      {
+        text: 'Apple instructions',
+        onPress: () => Linking.openURL('https://support.apple.com/102571'),
+      },
+    ],
+  );
+};
 
 export default function AccountPanel({ visible, onClose, onManageSubscription }) {
   const { theme } = useTheme();
@@ -92,7 +106,10 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
     try {
       await action(canFinish);
     } catch (failure) {
-      if (canFinish()) setError(failure?.message || 'Something went wrong. Please try again.');
+      if (canFinish()) {
+        setError(failure?.message || 'Something went wrong. Please try again.');
+        showAppleRevocationInstructions(failure);
+      }
     } finally {
       running.current = false;
       setBusy(false);
@@ -263,8 +280,11 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
                   'Permanently delete account',
                   () =>
                     run(async (canFinish) => {
-                      await auth.deleteAccount();
-                      if (canFinish()) onClose();
+                      const result = await auth.deleteAccount();
+                      if (canFinish()) {
+                        onClose();
+                        showAppleRevocationInstructions(result);
+                      }
                     }),
                   { danger: true, disabled: deleteText !== 'DELETE' },
                 )}

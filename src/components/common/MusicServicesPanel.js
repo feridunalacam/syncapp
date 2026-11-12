@@ -29,6 +29,10 @@ export default function MusicServicesPanel() {
     setOpening(true);
     setError(null);
     try {
+      if (apple.player?.isActive?.()) {
+        const cleared = await apple.player.clear();
+        if (cleared?.success === false) throw new Error(cleared.error);
+      }
       await Linking.openURL(resolved.url);
     } catch {
       setError(`${resolved.provider.name} could not be opened. Please try again.`);
@@ -68,26 +72,34 @@ export default function MusicServicesPanel() {
     <View>
       {row(
         MUSIC_PROVIDERS.appleMusic,
-        busy
-          ? 'Finish your session before changing music connections.'
+        apple.companionAvailable
+          ? apple.connected
+            ? 'Choose songs and playlists. Music plays independently of your timer.'
+            : 'Open the player to connect. Apple Music subscription required.'
+          : busy
+            ? 'Finish your session before changing music connections.'
+            : apple.available
+              ? apple.connected
+                ? 'Connected · songs and playlists for each round'
+                : 'Songs and playlists · Apple Music subscription required'
+              : 'Opens Apple Music. Playback stays in Apple Music.',
+        apple.companionAvailable
+          ? apple.player.open
           : apple.available
             ? apple.connected
-              ? 'Connected · songs and playlists for each round'
-              : 'Songs and playlists · Apple Music subscription required'
-            : 'Opens Apple Music. Playback stays in Apple Music.',
-        apple.available
-          ? apple.connected
-            ? apple.disconnect
-            : apple.connect
-          : () => open('appleMusic'),
-        apple.available
-          ? apple.connecting
-            ? 'Connecting…'
-            : apple.connected
-              ? 'Disconnect'
-              : 'Connect'
-          : 'Open',
-        !!busy || opening || (apple.available && (!apple.ready || apple.connecting)),
+              ? apple.disconnect
+              : apple.connect
+            : () => open('appleMusic'),
+        apple.companionAvailable
+          ? 'Open player'
+          : apple.available
+            ? apple.connecting
+              ? 'Connecting…'
+              : apple.connected
+                ? 'Disconnect'
+                : 'Connect'
+            : 'Open',
+        (!apple.companionAvailable && !!busy) || opening || (apple.available && !apple.ready),
       )}
       {!!apple.error && (
         <Text

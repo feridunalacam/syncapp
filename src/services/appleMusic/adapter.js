@@ -36,6 +36,8 @@ export function createAppleMusicService(native, { unavailableMessage } = {}) {
   const start = async (method, id, options = {}, shuffle = false) => {
     const ticket = ++revision;
     if (options.isCancelled?.()) return { success: true, cancelled: true };
+    // Expo validates the bridge closure's arity, including its ignored parameters.
+    // All three Swift start exports take (String, Bool), even track and resume.
     const result = await call(method, id, shuffle);
     if (ticket !== revision || result?.cancelled) return { success: true, cancelled: true };
     if (options.isCancelled?.()) {

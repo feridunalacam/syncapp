@@ -35,6 +35,7 @@ function harness({
         if (fail) throw fail;
         return {
           identityToken: 'synthetic-identity-token',
+          authorizationCode: 'synthetic-one-use-code',
           state: mismatch ? 'other-state' : options.state,
         };
       },
@@ -48,6 +49,7 @@ test('Apple native sign-in binds a fresh SHA-256 nonce and state and returns the
   const h = harness();
   const credential = await h.signIn();
   assert.equal(credential.token, 'synthetic-identity-token');
+  assert.equal(credential.authorizationCode, 'synthetic-one-use-code');
   assert.equal(credential.nonce.length, 64);
   assert.equal(h.request().nonce, createHash('sha256').update(credential.nonce).digest('hex'));
   assert.equal(h.request().state, 'synthetic-state');

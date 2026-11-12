@@ -10,11 +10,13 @@ import { canPrepareAds, canShowBanner, canUseAdsAccount } from '../../services/a
 
 // A creative exists only inside a currently eligible placement. Retired native
 // callbacks cannot revive a banner after a route/account/workout change.
-function Creative({ Component, unitId, size, width, requestOptions }) {
+function Creative({ Component, unitId, size, width, requestOptions, isEligible }) {
   const { theme } = useTheme();
   const [loaded, setLoaded] = useState(false);
   const [failed, setFailed] = useState(false);
   const alive = useRef(true);
+  const eligibility = useRef(isEligible);
+  eligibility.current = isEligible;
   useEffect(() => {
     alive.current = true;
     return () => {
@@ -32,10 +34,10 @@ function Creative({ Component, unitId, size, width, requestOptions }) {
           width={width}
           requestOptions={requestOptions}
           onAdLoaded={() => {
-            if (alive.current) setLoaded(true);
+            if (alive.current && eligibility.current()) setLoaded(true);
           }}
           onAdFailedToLoad={() => {
-            if (alive.current) setFailed(true);
+            if (alive.current && eligibility.current()) setFailed(true);
           }}
         />
       </View>
@@ -113,6 +115,7 @@ export default function AdBanner({ placementVisible = true, hasBlockingModal = f
           size={ads.bannerSize}
           width={width}
           requestOptions={ads.requestOptions}
+          isEligible={() => prepareRef.current && ads.canPresentAds?.() !== false}
         />
       )}
     </View>

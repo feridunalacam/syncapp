@@ -52,6 +52,46 @@ const eas = {
   },
 };
 
+test('standard Apple Music flag is explicit and cannot enable interval playback', () => {
+  for (const profile of ['preview', 'production']) {
+    for (const companion of [undefined, 'false', 'true']) {
+      assert.deepEqual(
+        checkReleaseConfig({
+          platform: 'ios',
+          profile,
+          eas,
+          env: { ...values, EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED: companion },
+        }).errors,
+        [],
+      );
+    }
+    assert.deepEqual(
+      checkReleaseConfig({
+        platform: 'ios',
+        profile,
+        eas,
+        env: {
+          ...values,
+          EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED: 'true',
+          EXPO_PUBLIC_APPLE_MUSIC_ENABLED: 'true',
+        },
+      }).errors,
+      ['appleMusic'],
+    );
+    for (const companion of ['', 'TRUE', 'unexpected']) {
+      assert.deepEqual(
+        checkReleaseConfig({
+          platform: 'ios',
+          profile,
+          eas,
+          env: { ...values, EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED: companion },
+        }).errors,
+        ['appleMusicCompanion'],
+      );
+    }
+  }
+});
+
 test('release preflight requires generic web media importing to remain explicitly disabled', () => {
   for (const platform of ['ios', 'android'])
     for (const profile of ['preview', 'production'])
@@ -213,6 +253,90 @@ test('profile inheritance is checked and profile overrides win over local env', 
   assert.deepEqual(checkReleaseConfig({ platform: 'ios', env: values, eas: config }).errors, [
     'inheritance',
   ]);
+});
+
+test('platform env merges through inheritance and overrides common and local values only on that platform', () => {
+  const config = {
+    build: {
+      base: {
+        env: { EXPO_PUBLIC_ADS_ENABLED: 'false' },
+        ios: { image: 'pinned-image', env: { EXPO_PUBLIC_ADS_ENABLED: 'true' } },
+      },
+      middle: {
+        extends: 'base',
+        ios: { env: { EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED: 'true' } },
+      },
+      preview: {
+        extends: 'middle',
+        environment: 'preview',
+        env: { EXPO_PUBLIC_ADS_ENABLED: 'false' },
+        ios: { distribution: 'store', env: { EXPO_PUBLIC_ADS_TEST_MODE: 'true' } },
+      },
+    },
+  };
+  const selected = resolveProfile(config, 'preview');
+  assert.equal(selected.ios.image, 'pinned-image');
+  assert.equal(selected.ios.distribution, 'store');
+  assert.deepEqual(selected.ios.env, {
+    EXPO_PUBLIC_ADS_ENABLED: 'true',
+    EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED: 'true',
+    EXPO_PUBLIC_ADS_TEST_MODE: 'true',
+  });
+  const env = {
+    ...values,
+    EXPO_PUBLIC_ADS_ENABLED: 'false',
+    EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY: 'goog_PublicFixture123',
+  };
+  assert.deepEqual(
+    checkReleaseConfig({ platform: 'ios', profile: 'preview', eas: config, env }).errors,
+    ['adIds'],
+  );
+  assert.deepEqual(
+    checkReleaseConfig({ platform: 'android', profile: 'preview', eas: config, env }).errors,
+    [],
+  );
+  config.build.preview.ios.env.EXPO_PUBLIC_ADS_ENABLED = 'false';
+  assert.deepEqual(
+    checkReleaseConfig({ platform: 'ios', profile: 'preview', eas: config, env }).errors,
+    [],
+  );
+});
+
+test('preview demo mode still validates real native inventory and cannot enter production', () => {
+  const env = {
+    ...values,
+    EXPO_PUBLIC_ADS_TEST_MODE: 'true',
+    ADMOB_IOS_APP_ID: 'ca-app-pub-1234567890123456~1234567890',
+    EXPO_PUBLIC_ADMOB_IOS_BANNER_ID: 'ca-app-pub-1234567890123456/1234567890',
+    EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID: 'ca-app-pub-1234567890123456/9876543210',
+  };
+  const config = structuredClone(eas);
+  config.build.preview.ios = { env: { EXPO_PUBLIC_ADS_ENABLED: 'true' } };
+  assert.deepEqual(
+    checkReleaseConfig({ platform: 'ios', profile: 'preview', eas: config, env }).errors,
+    [],
+  );
+  env.EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID = 'invalid-inventory';
+  assert.deepEqual(
+    checkReleaseConfig({ platform: 'ios', profile: 'preview', eas: config, env }).errors,
+    ['adIds'],
+  );
+  assert.deepEqual(
+    checkReleaseConfig({ platform: 'ios', profile: 'production', eas: config, env }).errors,
+    ['adTestMode'],
+  );
+  for (const profile of ['development', 'preview', 'production']) {
+    for (const flag of ['', 'TRUE', 'false\n', 'untrusted-value']) {
+      assert.ok(
+        checkReleaseConfig({
+          platform: 'ios',
+          profile,
+          eas,
+          env: { ...values, EXPO_PUBLIC_ADS_TEST_MODE: flag },
+        }).errors.includes('adTestMode'),
+      );
+    }
+  }
 });
 
 test('enabled release ads require matching real IDs only for the selected platform', () => {

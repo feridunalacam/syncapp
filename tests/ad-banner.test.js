@@ -47,6 +47,7 @@ async function harness(overrides = {}) {
     bannerUnitId: 'test-banner',
     bannerSize: 'LARGE_ANCHORED_ADAPTIVE_BANNER',
     requestOptions: { requestNonPersonalizedAdsOnly: true },
+    canPresentAds: () => !scene.musicBlocked,
     acquirePlacement(check) {
       acquired++;
       preparationChecks.push(check);
@@ -128,6 +129,25 @@ async function harness(overrides = {}) {
     },
   };
 }
+
+test('music suppression rejects retained banner callbacks before React renders', async () => {
+  const app = await harness();
+  try {
+    const retained = app.native.at(-1);
+    await act(async () => {
+      app.scene.musicBlocked = true;
+      retained.onAdLoaded();
+      retained.onAdFailedToLoad();
+    });
+    assert.equal(JSON.stringify(app.json()).includes('Advertisement'), false);
+    assert.equal(app.banners().length, 1, 'Rejected stale failure cannot mutate the creative');
+    app.scene.musicBlocked = false;
+    await act(async () => retained.onAdLoaded());
+    assert.equal(JSON.stringify(app.json()).includes('Advertisement'), true);
+  } finally {
+    await app.close();
+  }
+});
 
 test('unknown access never creates an ad; Pro immediately retires a verified-Free ad', async () => {
   const app = await harness({

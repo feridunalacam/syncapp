@@ -36,4 +36,4 @@ supabase/.temp/
 /sites/sync-legal/
 
 # Local store capture/export artifacts; scripts and release docs remain tracked.
-/artifacts/app-store/
+/artifacts/

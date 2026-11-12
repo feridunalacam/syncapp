@@ -7,13 +7,16 @@ import { createAdsConfig } from '../services/ads/config';
 import { createAdsController } from '../services/ads/controller';
 import { createNativeAdsRuntime } from '../services/ads/sdk';
 import { createInterstitialController } from '../services/ads/interstitials';
+import { createPresentationBlockers } from '../services/ads/presentationBlockers';
 
 const AdsContext = createContext(null);
 const config = createAdsConfig({
   platform: Platform.OS,
   dev: __DEV__,
   env: {
+    EXPO_PUBLIC_BUILD_PROFILE: process.env.EXPO_PUBLIC_BUILD_PROFILE,
     EXPO_PUBLIC_ADS_ENABLED: process.env.EXPO_PUBLIC_ADS_ENABLED,
+    EXPO_PUBLIC_ADS_TEST_MODE: process.env.EXPO_PUBLIC_ADS_TEST_MODE,
     EXPO_PUBLIC_ADMOB_IOS_BANNER_ID: process.env.EXPO_PUBLIC_ADMOB_IOS_BANNER_ID,
     EXPO_PUBLIC_ADMOB_ANDROID_BANNER_ID: process.env.EXPO_PUBLIC_ADMOB_ANDROID_BANNER_ID,
     EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID: process.env.EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID,
@@ -33,20 +36,32 @@ export function AdsProvider({ children, blocked = false }) {
   const { user, ready: authReady } = useAuth();
   const subscription = useSubscription();
   const [appActive, setAppActive] = useState(AppState.currentState === 'active');
-  const accountEligible =
-    !blocked &&
-    canUseAdsAccount({
-      authReady,
-      userId: user?.id || null,
-      subscriptionUserId: subscription.userId || null,
-      subscriptionReady: subscription.ready,
-      accessVerified: subscription.accessVerified,
-      isPro: subscription.isPro,
-      pending: subscription.pending,
-      loading: subscription.loading,
-    });
+  const [featureBlocked, setFeatureBlocked] = useState(false);
+  const synchronizeBlockers = useRef(() => {});
+  const blockers = useRef(null);
+  if (!blockers.current)
+    blockers.current = createPresentationBlockers(() => synchronizeBlockers.current());
+  const baseAccountEligible = canUseAdsAccount({
+    authReady,
+    userId: user?.id || null,
+    subscriptionUserId: subscription.userId || null,
+    subscriptionReady: subscription.ready,
+    accessVerified: subscription.accessVerified,
+    isPro: subscription.isPro,
+    pending: subscription.pending,
+    loading: subscription.loading,
+  });
+  const blockedForAds = blocked || featureBlocked || blockers.current.isBlocked();
+  const accountEligible = !blockedForAds && baseAccountEligible;
+  const eligibility = useRef(null);
+  eligibility.current = { identity: user?.id || null, baseAccountEligible, appActive, blocked };
   const gate = useRef(null);
-  gate.current = { identity: user?.id || null, eligible: accountEligible, appActive, blocked };
+  gate.current = {
+    identity: user?.id || null,
+    eligible: accountEligible,
+    appActive,
+    blocked: blockedForAds,
+  };
   const [state, setState] = useState({ ready: false });
   const [interstitialState, setInterstitialState] = useState({
     loaded: false,
@@ -76,16 +91,30 @@ export function AdsProvider({ children, blocked = false }) {
       getCurrentGate: fullscreenGate,
       onChange: setInterstitialState,
     });
+  synchronizeBlockers.current = () => {
+    const current = eligibility.current;
+    const held = blockers.current.isBlocked();
+    gate.current = {
+      identity: current.identity,
+      eligible: current.baseAccountEligible && !current.blocked && !held,
+      appActive: current.appActive,
+      blocked: current.blocked || held,
+    };
+    controller.current.setGate(gate.current);
+    fullscreen.current.setGate(fullscreenGate());
+    setFeatureBlocked(held);
+  };
   useEffect(() => {
     controller.current.setGate(gate.current);
     fullscreen.current.setGate(fullscreenGate());
-  }, [user?.id, accountEligible, appActive, blocked]);
+  }, [user?.id, accountEligible, appActive, blocked, featureBlocked]);
   useEffect(() => {
     fullscreen.current.setGate(fullscreenGate());
   }, [state.ready, state.canRequestAds]);
   useEffect(() => {
     const listener = AppState.addEventListener('change', (status) => {
       const active = status === 'active';
+      eligibility.current = { ...eligibility.current, appActive: active };
       gate.current = { ...gate.current, appActive: active };
       controller.current.setGate(gate.current);
       fullscreen.current.setGate(fullscreenGate());
@@ -93,6 +122,7 @@ export function AdsProvider({ children, blocked = false }) {
     });
     return () => {
       listener.remove();
+      blockers.current.dispose();
       controller.current.dispose();
       fullscreen.current.dispose();
     };
@@ -137,6 +167,18 @@ export function AdsProvider({ children, blocked = false }) {
     [],
   );
   const holdAdPreparation = useCallback(() => controller.current.holdPreparation(), []);
+  const acquirePresentationBlocker = useCallback(() => blockers.current.acquire(), []);
+  const canPresentAds = useCallback(() => {
+    const current = gate.current;
+    const prepared = controller.current.getState();
+    return !!(
+      current.eligible &&
+      current.appActive &&
+      !current.blocked &&
+      prepared.ready &&
+      prepared.canRequestAds
+    );
+  }, []);
   const safe = accountEligible && appActive;
   return (
     <AdsContext.Provider
@@ -149,6 +191,7 @@ export function AdsProvider({ children, blocked = false }) {
         accountEligible,
         appActive,
         presenterBlocked: blocked,
+        featurePresentationBlocked: featureBlocked,
         adsEnabled: config.enabled,
         bannerEnabled: config.bannerEnabled && !interstitialState.presenting,
         interstitialEnabled: config.interstitialEnabled && runtime.hasInterstitialSupport(),
@@ -160,6 +203,8 @@ export function AdsProvider({ children, blocked = false }) {
         cancelInterstitialPreparation,
         waitForAdPresenters,
         holdAdPreparation,
+        acquirePresentationBlocker,
+        canPresentAds,
         acquirePlacement,
         requestPrivacyOptions,
       }}

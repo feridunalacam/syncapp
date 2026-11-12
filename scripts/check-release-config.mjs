@@ -17,11 +17,15 @@ export const releaseConfigMessages = {
     'iOS preview and production need a distinct App Store public RevenueCat review SDK key. Supplied iOS development review keys must also be valid; Test Store, private and placeholder keys are not allowed.',
   appleMusic:
     'EXPO_PUBLIC_APPLE_MUSIC_ENABLED must be exactly false in iOS preview and production.',
+  appleMusicCompanion:
+    'EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED must be exactly true or false when supplied. This flag never enables timed round playback.',
   webMediaImport:
     'EXPO_PUBLIC_WEB_MEDIA_IMPORT_ENABLED must be exactly false in preview and production.',
   legal: 'EXPO_PUBLIC_PRIVACY_URL and EXPO_PUBLIC_TERMS_URL must be public HTTPS pages.',
   publicSecrets: 'Private credentials must not use EXPO_PUBLIC_ variables.',
   adFlag: 'EXPO_PUBLIC_ADS_ENABLED must be exactly true or false when supplied.',
+  adTestMode:
+    'EXPO_PUBLIC_ADS_TEST_MODE must be exactly true or false when supplied, and must not be true in production.',
   adIds:
     'Enabled release ads need matching real app, banner and interstitial IDs for the selected platform.',
   environment: 'The selected EAS environment is not explicit; verify remote environment selection.',
@@ -71,7 +75,17 @@ export function resolveProfile(eas, profile, visited = new Set()) {
   visited.add(profile);
   const current = eas.build[profile];
   const parent = current.extends ? resolveProfile(eas, current.extends, visited) : {};
-  return { ...parent, ...current, env: { ...parent.env, ...current.env } };
+  const resolved = { ...parent, ...current, env: { ...parent.env, ...current.env } };
+  for (const platform of platforms) {
+    if (parent[platform] && current[platform]) {
+      resolved[platform] = {
+        ...parent[platform],
+        ...current[platform],
+        env: { ...parent[platform].env, ...current[platform].env },
+      };
+    }
+  }
+  return resolved;
 }
 
 // Cloud builds must validate their actual environment without filling missing
@@ -87,6 +101,11 @@ export function checkReleaseValues({ platform, profile = 'production', env: valu
     errors.push('webMediaImport');
   if (platform === 'ios' && release && values.EXPO_PUBLIC_APPLE_MUSIC_ENABLED !== 'false')
     errors.push('appleMusic');
+  if (
+    values.EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED !== undefined &&
+    !['true', 'false'].includes(values.EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED)
+  )
+    errors.push('appleMusicCompanion');
   if (!httpsPublic(values.EXPO_PUBLIC_SUPABASE_URL)) errors.push('supabaseUrl');
   if (!publicSupabaseKey(values.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY)) errors.push('supabaseKey');
   const subscription = createSubscriptionConfig({ platform, profile, dev: !release, env: values });
@@ -114,6 +133,12 @@ export function checkReleaseValues({ platform, profile = 'production', env: valu
     errors.push('publicSecrets');
   const adFlag = values.EXPO_PUBLIC_ADS_ENABLED;
   if (adFlag !== undefined && !['true', 'false'].includes(adFlag)) errors.push('adFlag');
+  const adTestMode = values.EXPO_PUBLIC_ADS_TEST_MODE;
+  if (
+    (adTestMode !== undefined && !['true', 'false'].includes(adTestMode)) ||
+    (profile === 'production' && adTestMode === 'true')
+  )
+    errors.push('adTestMode');
   if (release && adFlag === 'true') {
     const appId = platform === 'ios' ? values.ADMOB_IOS_APP_ID : values.ADMOB_ANDROID_APP_ID;
     const bannerId =
@@ -148,9 +173,15 @@ export function checkReleaseConfig({ platform, profile = 'production', env = {},
     errors.push('inheritance');
   }
   if (!selected || errors.includes('platform')) return { errors, warnings };
-  // EAS profile env overrides the local process env. This does not fetch the
-  // remote environment or imply that ignored local files reach cloud builds.
-  errors.push(...checkReleaseValues({ platform, profile, env: { ...env, ...selected.env } }));
+  // EAS merges inherited common values, then the selected platform overrides.
+  // Both profile scopes override process values; remote values are not fetched.
+  errors.push(
+    ...checkReleaseValues({
+      platform,
+      profile,
+      env: { ...env, ...selected.env, ...selected[platform]?.env },
+    }),
+  );
   if (selected.environment !== profile) warnings.push('environment');
   warnings.push('cloud');
   return { errors, warnings };

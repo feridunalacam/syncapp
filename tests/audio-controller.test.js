@@ -59,7 +59,12 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
       services: {
         device: service,
         spotify: service,
-        appleMusic: { ...service, allowsLocalCues: false, localPlaybackControl: true },
+        appleMusic: {
+          ...service,
+          allowsLocalCues: false,
+          localPlaybackControl: true,
+          ...configuration.appleMusicService,
+        },
       },
       connectedPlatforms: {
         spotify: { connected: true, accessToken: 'test-token' },
@@ -72,6 +77,7 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
       stopLocalCues: configuration.stopLocalCues,
       onPlaybackInterrupted: configuration.onPlaybackInterrupted,
       getValidAccessToken: configuration.getValidAccessToken,
+      isExternalMusicActive: configuration.isExternalMusicActive,
     });
     return null;
   }
@@ -79,16 +85,125 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
   await act(async () => {
     root = create(React.createElement(Harness));
   });
-  t.after(async () => {
-    await act(async () => root.unmount());
-  });
+  const unmount = async () => {
+    if (!root) return;
+    const previous = root;
+    root = null;
+    await act(async () => previous.unmount());
+  };
+  t.after(unmount);
   return {
     get audio() {
       return audio;
     },
     calls,
+    unmount,
   };
 }
+
+test('an independent music owner bypasses every timed phase without source playback or controls', async (t) => {
+  const sourceCalls = [];
+  const h = await mountAudio(
+    t,
+    {
+      getActiveDevice: async () => {
+        sourceCalls.push('device');
+        return 'device';
+      },
+      playTrack: async () => {
+        sourceCalls.push('track');
+        return success;
+      },
+      playPlaylist: async () => {
+        sourceCalls.push('playlist');
+        return success;
+      },
+      pause: async () => {
+        sourceCalls.push('pause');
+        return success;
+      },
+      cleanup: async () => {
+        sourceCalls.push('cleanup');
+      },
+      cancelPending: () => {
+        sourceCalls.push('cancel');
+      },
+    },
+    {
+      routine: spotifyRoutine,
+      isExternalMusicActive: () => true,
+      getValidAccessToken: async () => {
+        sourceCalls.push('token');
+        return 'token';
+      },
+      stopLocalCues: async () => {
+        sourceCalls.push('cues');
+      },
+    },
+  );
+  await act(async () => {
+    for (const [phase, round] of [
+      ['beforeStart', 0],
+      ['work', 1],
+      ['rest', 1],
+      ['work', 2],
+    ]) {
+      const result = await h.audio.handlePhaseChange(phase, round);
+      assert.equal(result.bypassed, true);
+    }
+  });
+  assert.deepEqual(sourceCalls, []);
+  assert.equal(h.audio.track, null);
+  assert.equal(h.audio.isMusicPlaying, false);
+});
+
+test('unmount without a timed source never stops or cleans up the independent Apple singleton', async (t) => {
+  const appleCalls = [];
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      isExternalMusicActive: () => true,
+      appleMusicService: {
+        pause: async () => {
+          appleCalls.push('pause');
+        },
+        cleanup: async () => {
+          appleCalls.push('cleanup');
+        },
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  await h.unmount();
+  await new Promise(setImmediate);
+  assert.deepEqual(appleCalls, []);
+  assert.deepEqual(h.calls, []);
+});
+
+test('unmount only cleans up its owned Device source while an Apple singleton exists', async (t) => {
+  const appleCalls = [];
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      appleMusicService: {
+        pause: async () => {
+          appleCalls.push('pause');
+        },
+        cleanup: async () => {
+          appleCalls.push('cleanup');
+        },
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  await h.unmount();
+  await new Promise(setImmediate);
+  assert.deepEqual(appleCalls, []);
+  assert.ok(h.calls.some((call) => call[0] === 'pause'));
+  assert.equal(h.calls.filter((call) => call[0] === 'cleanup').length, 1);
+});
 
 for (const boundary of ['start', 'preparation-to-work', 'resume']) {
   test(`Spotify ${boundary} reports a diagnostic read failure before it can become a device ID`, async (t) => {
@@ -851,3 +966,93 @@ test('an obsolete failed load cannot replace the next interval with an error', a
   assert.equal(h.audio.audioError, null);
   assert.equal(h.audio.track.title, 'Two');
 });
+
+for (const setting of [
+  { method: 'setShuffle', toggle: 'toggleShuffle', selected: 'isShuffled' },
+  { method: 'setRepeat', toggle: 'toggleRepeat', selected: 'isRepeating' },
+]) {
+  test(`a cancelled Spotify ${setting.method} cannot commit an unacknowledged selection`, async (t) => {
+    let cancelled = false;
+    const h = await mountAudio(
+      t,
+      {
+        [setting.method]: async () => (cancelled ? { success: true, cancelled: true } : success),
+      },
+      { routine: spotifyRoutine },
+    );
+    await act(async () => h.audio.handlePhaseChange('work', 1));
+    await act(async () => h.audio[setting.toggle]());
+    assert.equal(h.audio[setting.selected], true);
+    cancelled = true;
+    await act(async () => h.audio[setting.toggle]());
+    assert.equal(h.audio[setting.selected], true);
+    assert.equal(h.audio.audioError, null);
+  });
+
+  for (const boundary of ['pauseMusic', 'stopMusic']) {
+    test(`Spotify ${boundary} retires pending ${setting.method} without changing its last acknowledged state`, async (t) => {
+      const pending = deferred();
+      const started = deferred();
+      let hold = false;
+      let cancellations = 0;
+      const h = await mountAudio(
+        t,
+        {
+          [setting.method]: async () => {
+            if (!hold) return success;
+            started.resolve();
+            return pending.promise;
+          },
+          cancelPending: () => {
+            if (hold) {
+              cancellations++;
+              pending.resolve({ success: true, cancelled: true });
+            }
+          },
+        },
+        { routine: spotifyRoutine },
+      );
+      await act(async () => h.audio.handlePhaseChange('work', 1));
+      await act(async () => h.audio[setting.toggle]());
+      assert.equal(h.audio[setting.selected], true);
+      hold = true;
+      await act(async () => {
+        const toggle = h.audio[setting.toggle]();
+        await started.promise;
+        const stop = h.audio[boundary]();
+        await Promise.all([toggle, stop]);
+      });
+      assert.ok(cancellations > 0);
+      assert.equal(h.audio[setting.selected], true);
+      assert.equal(h.audio.audioError, null);
+    });
+  }
+
+  test(`a late successful ${setting.method} cannot commit after phase supersession`, async (t) => {
+    const pending = deferred();
+    const started = deferred();
+    let hold = false;
+    const h = await mountAudio(
+      t,
+      {
+        [setting.method]: async () => {
+          if (!hold) return success;
+          started.resolve();
+          return pending.promise;
+        },
+      },
+      { routine: spotifyRoutine },
+    );
+    await act(async () => h.audio.handlePhaseChange('work', 1));
+    hold = true;
+    await act(async () => {
+      const toggle = h.audio[setting.toggle]();
+      await started.promise;
+      const phase = h.audio.handlePhaseChange('rest', 1);
+      pending.resolve(success);
+      await Promise.all([toggle, phase]);
+    });
+    assert.equal(h.audio[setting.selected], false);
+    assert.equal(h.audio.audioError, null);
+  });
+}

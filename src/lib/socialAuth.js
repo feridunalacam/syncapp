@@ -9,6 +9,7 @@ export function createSocialAuth({
   openSession,
   signInNativeApple,
   signInWithIdToken,
+  registerAppleAuthorization,
   getIdentity,
   onBusy = () => {},
   authorizationOrigin,
@@ -76,6 +77,19 @@ export function createSocialAuth({
               const { data, error } = result;
               if (error) throw new Error('Apple sign-in could not be completed. Please try again.');
               attempt.completed = true;
+              if (
+                credential.authorizationCode &&
+                registerAppleAuthorization &&
+                !attempt.cancelled
+              ) {
+                try {
+                  // Registration is optional: missing server signing material,
+                  // an outage or a used code must never undo verified sign-in.
+                  await registerAppleAuthorization(credential.authorizationCode, data.session);
+                } catch {
+                  // No native/provider error or credential is logged or exposed.
+                }
+              }
               return data;
             });
         }

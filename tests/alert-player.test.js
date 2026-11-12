@@ -7,11 +7,12 @@ import { buildCuePreview, resolveAlertSound } from '../src/domain/alerts.js';
 
 const settle = () => new Promise(setImmediate);
 const deferred = () => {
-  let resolve;
-  const promise = new Promise((done) => {
+  let resolve, reject;
+  const promise = new Promise((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 };
 
 // Execute the actual adapter body with native modules and asset requires replaced.
@@ -27,7 +28,7 @@ const assetSource = readFileSync(
   'utf8',
 ).replace(/^export /gm, '');
 const adapterScript = new Script(
-  `${assetSource}\n${adapterSource}\nglobalThis.api = { prepareWorkoutCues, playWorkoutCue, stopWorkoutCues, previewWorkoutCue, stopCuePreview };`,
+  `${assetSource}\n${adapterSource}\nglobalThis.api = { prepareWorkoutCues, playWorkoutCue, stopWorkoutCues, previewWorkoutCue, stopCuePreview, acquireMusicCueSilence };`,
   { filename: 'native-alert-player.js' },
 );
 
@@ -271,4 +272,91 @@ test('unknown speech URIs fail without a TTS or remote audio fallback', async ()
   const h = harness();
   await assert.rejects(h.api.playWorkoutCue(cue('speech://unknown')), /built-in cue/);
   assert.equal(h.sounds.length, 0);
+});
+
+for (const owner of ['workout', 'preview']) {
+  test(`music suppression and both stop callers await the same ${owner} native unload`, async () => {
+    const unloaded = deferred();
+    const h = harness({ unload: () => unloaded.promise });
+    const playing =
+      owner === 'workout'
+        ? h.api.playWorkoutCue(cue())
+        : h.api.previewWorkoutCue('start', { enabled: true, countdown: { mode: 'off' } });
+    await settle();
+    if (owner === 'preview') await h.time.advance(0);
+    assert.equal(h.sounds[0].plays, 1);
+    const release = h.api.acquireMusicCueSilence();
+    let workoutStopped = false,
+      previewStopped = false,
+      musicStarted = false;
+    const workoutStop = h.api.stopWorkoutCues().then(() => {
+      workoutStopped = true;
+    });
+    const previewStop = h.api.stopCuePreview().then(() => {
+      previewStopped = true;
+    });
+    const handover = Promise.all([workoutStop, previewStop]).then(() => {
+      musicStarted = true;
+    });
+    await settle();
+    assert.equal(h.sounds[0].unloads, 1, 'all callers share the native stop');
+    assert.equal(workoutStopped, false);
+    assert.equal(previewStopped, false);
+    assert.equal(musicStarted, false);
+    assert.equal((await playing).cancelled, true, 'cue cancellation itself stays prompt');
+    assert.equal((await h.api.playWorkoutCue(cue())).cancelled, true);
+    unloaded.resolve();
+    await handover;
+    assert.equal(workoutStopped, true);
+    assert.equal(previewStopped, true);
+    assert.equal(musicStarted, true);
+    release();
+    assert.equal(h.time.jobs.size, 0);
+  });
+
+  test(`a failed ${owner} unload rejects music handover and remains recoverable`, async () => {
+    const unloaded = deferred();
+    let fail = true;
+    const h = harness({ unload: () => (fail ? unloaded.promise : undefined) });
+    const playing =
+      owner === 'workout'
+        ? h.api.playWorkoutCue(cue())
+        : h.api.previewWorkoutCue('start', { enabled: true, countdown: { mode: 'off' } });
+    await settle();
+    if (owner === 'preview') await h.time.advance(0);
+    const release = h.api.acquireMusicCueSilence();
+    let musicStarted = false;
+    const handover = Promise.all([h.api.stopWorkoutCues(), h.api.stopCuePreview()]).then(() => {
+      musicStarted = true;
+    });
+    const rejected = assert.rejects(handover, /Native unload failed/);
+    unloaded.reject(new Error('Native unload failed'));
+    await rejected;
+    assert.equal(musicStarted, false);
+    assert.equal((await playing).cancelled, true);
+    await assert.rejects(h.api.stopWorkoutCues(), /Native unload failed/);
+    fail = false;
+    await Promise.all([h.api.stopWorkoutCues(), h.api.stopCuePreview()]);
+    assert.equal(
+      h.sounds[0].unloads,
+      3,
+      'a failed native sound is retained for acknowledged retry',
+    );
+    release();
+    const retry = h.api.playWorkoutCue(cue());
+    await settle();
+    h.sounds.at(-1).callback({ didJustFinish: true });
+    assert.equal((await retry).completed, true);
+    assert.equal(h.time.jobs.size, 0);
+  });
+}
+
+test('stopping preview still cannot stop an active workout cue', async () => {
+  const h = harness();
+  const playing = h.api.playWorkoutCue(cue());
+  await settle();
+  await h.api.stopCuePreview();
+  assert.equal(h.sounds[0].unloads, 0);
+  h.sounds[0].callback({ didJustFinish: true });
+  assert.equal((await playing).completed, true);
 });

@@ -18,6 +18,7 @@ import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { WorkoutProvider } from './src/context/WorkoutContext';
 import { SpotifyConnectionProvider } from './src/context/SpotifyConnectionContext';
 import { AppleMusicConnectionProvider } from './src/context/AppleMusicConnectionContext';
+import AppleMusicPlayerPanel from './src/components/common/AppleMusicPlayerPanel';
 import TabNavigator from './src/navigation/TabNavigator';
 import { getNavTheme } from './src/navigation/theme';
 import { createSafeStateFromPath } from './src/navigation/safeLinking';
@@ -109,6 +110,7 @@ function AccountApp() {
             <PlatformProvider>
               <SpotifyConnectionProvider>
                 <AppleMusicConnectionProvider>
+                  <AppleMusicPlayerPanel />
                   <PostProvider>
                     <WorkoutProvider>
                       <AppContent />

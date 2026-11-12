@@ -271,7 +271,7 @@ export default function CreateRoutineScreen({ navigation, route }) {
               connecting={spotify.connecting}
             />
           )}
-          {apple.available && (
+          {apple.timedAvailable && (
             <PlaylistCard
               platformId="appleMusic"
               roundsOrder={form.roundsOrder}

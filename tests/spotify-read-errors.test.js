@@ -27,6 +27,8 @@ function harness(respond) {
   const context = {
     SPOTIFY_CLIENT_ID: 'synthetic-client',
     URLSearchParams,
+    AbortController,
+    clearTimeout,
     setTimeout: (callback) => setTimeout(callback, 0),
     console: { error() {}, warn() {} },
     resolvePlaybackDevice,

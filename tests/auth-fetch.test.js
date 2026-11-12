@@ -63,6 +63,9 @@ test('only this project Auth and exact account deletion are bounded', async () =
   await fetcher(`${project}/functions/v1/delete-account`);
   assert.ok(signals.at(-1) instanceof AbortSignal);
   assert.equal(timer.clears, 2);
+  await fetcher(`${project}/functions/v1/register-apple-token`);
+  assert.ok(signals.at(-1) instanceof AbortSignal);
+  assert.equal(timer.clears, 3);
 });
 
 test('upstream cancellation reaches native fetch and removes its listener after rejection', async () => {

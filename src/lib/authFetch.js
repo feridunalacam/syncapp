@@ -11,7 +11,9 @@ export function createAuthFetch(
   const endpoint = new URL(supabaseUrl);
   const basePath = endpoint.pathname.replace(/\/$/, '');
   const authPath = `${basePath}/auth/v1/`;
-  const deletionPath = `${basePath}/functions/v1/delete-account`;
+  const accountPaths = new Set(
+    ['delete-account', 'register-apple-token'].map((name) => `${basePath}/functions/v1/${name}`),
+  );
   return async (input, options) => {
     let url;
     try {
@@ -22,7 +24,7 @@ export function createAuthFetch(
     if (
       !url ||
       url.origin !== endpoint.origin ||
-      (!url.pathname.startsWith(authPath) && url.pathname !== deletionPath)
+      (!url.pathname.startsWith(authPath) && !accountPaths.has(url.pathname))
     )
       return fetcher(input, options);
     const controller = new AbortController();

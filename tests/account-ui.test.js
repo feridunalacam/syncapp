@@ -24,6 +24,7 @@ const compiled = transformSync(`${source}\nglobalThis.Component = AccountPanel;`
 
 async function mount(overrides = {}) {
   const events = [];
+  const alerts = [];
   const auth = {
     ready: true,
     configured: true,
@@ -72,8 +73,16 @@ async function mount(overrides = {}) {
       theme: { text: '#111', textSecondary: '#555', accent: '#345', error: '#f00' },
     }),
     process: { env: {} },
-    Alert: { alert() {} },
-    Linking: { async openURL() {} },
+    Alert: {
+      alert(...args) {
+        alerts.push(args);
+      },
+    },
+    Linking: {
+      async openURL(url) {
+        events.push(url);
+      },
+    },
   };
   new Script(compiled).runInNewContext(context);
   let renderer;
@@ -91,6 +100,7 @@ async function mount(overrides = {}) {
     typeof node === 'string' ? node : (node?.children || []).map(textOf).join('');
   return {
     events,
+    alerts,
     text: () => textOf(renderer.toJSON()),
     button: (label) =>
       renderer.root.findAllByType('Pressable').find((node) => textOf(node) === label),
@@ -151,6 +161,51 @@ test('account deletion requires an exact typed confirmation and explains store c
     await ui.fill('Type DELETE to confirm account deletion', 'DELETE');
     await ui.press('Permanently delete account');
     assert.deepEqual(ui.events, ['delete', 'close']);
+  } finally {
+    await ui.close();
+  }
+});
+
+test('confirmed legacy Apple deletion presents manual Apple revocation instructions and only the fixed Apple support URL', async () => {
+  const ui = await mount({
+    user: { id: 'one' },
+    deleteAccount: async () => ({
+      deleted: true,
+      apple_revocation: { status: 'manual_required', url: 'https://untrusted.invalid' },
+    }),
+  });
+  try {
+    await ui.press('Delete account…');
+    await ui.fill('Type DELETE to confirm account deletion', 'DELETE');
+    await ui.press('Permanently delete account');
+    assert.equal(ui.alerts.length, 1);
+    assert.equal(ui.alerts[0][0], 'Account deleted');
+    assert.match(ui.alerts[0][1], /Settings.*Sign in with Apple.*Sync/);
+    await ui.alerts[0][2].find((button) => button.text === 'Apple instructions').onPress();
+    assert.equal(ui.events.at(-1), 'https://support.apple.com/102571');
+  } finally {
+    await ui.close();
+  }
+});
+
+test('remote deletion manual Apple follow-up survives a failed device cleanup', async () => {
+  const ui = await mount({
+    user: { id: 'one' },
+    deleteAccount: async () => {
+      const failure = new Error(
+        'Your account was deleted, but some device records could not be removed.',
+      );
+      failure.apple_revocation = { status: 'manual_required' };
+      throw failure;
+    },
+  });
+  try {
+    await ui.press('Delete account…');
+    await ui.fill('Type DELETE to confirm account deletion', 'DELETE');
+    await ui.press('Permanently delete account');
+    assert.match(ui.text(), /some device records could not be removed/);
+    assert.equal(ui.alerts.length, 1);
+    assert.match(ui.alerts[0][1], /Settings.*Sign in with Apple/);
   } finally {
     await ui.close();
   }

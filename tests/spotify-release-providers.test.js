@@ -20,6 +20,7 @@ import {
   createAlertPreset,
 } from '../src/domain/alerts.js';
 import { createAppleMusicService } from '../src/services/appleMusic/adapter.js';
+import { createAppleMusicCompanionController } from '../src/services/appleMusic/companion.js';
 import { MUSIC_PROVIDERS, resolveMusicLink } from '../src/services/music/providers.js';
 import { useAudioController } from '../src/hooks/useAudioController.js';
 import { APPLE_MUSIC_UNAVAILABLE_MESSAGE } from '../src/services/appleMusic/config.js';
@@ -99,7 +100,7 @@ async function mount(
   t,
   content,
   appleMusicService = { available: false },
-  { savedApple = false } = {},
+  { savedApple = false, companionService = { available: false } } = {},
 ) {
   const records = new Map([
     [
@@ -168,14 +169,18 @@ async function mount(
     spotifyService: new Proxy(
       {},
       {
-        get: () => async () => {
-          spotifyCalls++;
-          throw new Error('Spotify must stay offline');
-        },
+        get: (_target, method) =>
+          method === 'cancelPending'
+            ? noop
+            : async () => {
+                spotifyCalls++;
+                throw new Error('Spotify must stay offline');
+              },
       },
     ),
     deviceMusicService: { getActiveDevice: async () => 'device' },
     appleMusicService,
+    appleMusicCompanionService: companionService,
     AppState: {
       addEventListener: (_event, callback) => {
         listeners.add(callback);
@@ -218,6 +223,14 @@ async function mount(
     {
       usePlatformContext: platform.usePlatformContext,
       appleMusicService,
+      appleMusicCompanionService: companionService,
+      createAppleMusicCompanionController,
+      acquireMusicCueSilence: () => noop,
+      useAds: () => ({
+        acquirePresentationBlocker: () => noop,
+        waitForAdPresenters: async () => {},
+      }),
+      AppState: { currentState: 'active', addEventListener: () => ({ remove: noop }) },
     },
   );
   let appleValue;
@@ -774,7 +787,8 @@ test('blocked Apple Music retains saved selections without native access and lea
     new URL('../src/services/appleMusic/index.js', import.meta.url),
     'utf8',
   )
-    .replace(/^import .*;\n/gm, '')
+    .replace(/^import[\s\S]*?;\n/gm, '')
+    .replace('export const appleMusicCompanionService =', 'globalThis.companion =')
     .replace(
       'export default createAppleMusicService',
       'globalThis.service = createAppleMusicService',
@@ -782,6 +796,7 @@ test('blocked Apple Music retains saved selections without native access and lea
   const context = {
     Platform: { OS: 'ios' },
     APPLE_MUSIC_AVAILABLE: false,
+    APPLE_MUSIC_COMPANION_AVAILABLE: false,
     APPLE_MUSIC_UNAVAILABLE_MESSAGE,
     createAppleMusicService,
     requireOptionalNativeModule: () => {
@@ -862,4 +877,75 @@ test('blocked Apple Music retains saved selections without native access and lea
   assert.deepEqual(h.writes, []);
   assert.deepEqual(h.nativeWrites, []);
   assert.equal(JSON.stringify(routine), before);
+});
+
+test('a standard-only Apple connection remains outside the timed platform facade and cannot execute saved rounds', async (t) => {
+  const calls = [];
+  const companionService = createAppleMusicService({
+    supported: true,
+    getConnectionState: async () => ({ status: 'authorized', canPlayCatalogContent: true }),
+    playTrack: async (...args) => {
+      calls.push(['track', ...args]);
+      return { success: true };
+    },
+    setRepeat: async () => ({ success: true }),
+    getCurrentPlayback: async () => ({
+      is_playing: true,
+      item: { id: '123', name: 'Explicit song', duration: 60 },
+    }),
+    stop: async () => {
+      calls.push(['stop']);
+    },
+  });
+  const timedService = createAppleMusicService(null, {
+    unavailableMessage: APPLE_MUSIC_UNAVAILABLE_MESSAGE,
+  });
+  let audio;
+  const routine = {
+    roundsData: [{ workSong: { uri: 'apple-music:song:123', platform: 'appleMusic' } }],
+  };
+  const h = await mount(
+    t,
+    (hooks) => {
+      audio = useAudioController({
+        ...hooks.usePlatformContext(),
+        selectedRoutine: routine,
+        countdownSoundPlayer: { stop: async () => {} },
+      });
+      return null;
+    },
+    timedService,
+    { savedApple: true, companionService },
+  );
+  assert.equal(h.apple.companionAvailable, true);
+  assert.equal(h.apple.timedAvailable, false);
+  assert.equal(h.apple.connected, true);
+  assert.equal(h.platform.appleMusicConnection.connected, true);
+  assert.equal(h.platform.connectedPlatforms.appleMusic, undefined);
+  assert.equal(h.platform.isPlatformConnected('appleMusic'), false);
+  await act(async () => {
+    await h.platform.setSelectedPlatform('appleMusic');
+  });
+  assert.equal(h.platform.selectedPlatform, null);
+  await assert.rejects(h.platform.getValidAccessToken('appleMusic'), {
+    message: APPLE_MUSIC_UNAVAILABLE_MESSAGE,
+  });
+  await act(async () => {
+    await h.apple.player.playTrack({ uri: 'apple-music:song:123', name: 'Explicit song' });
+  });
+  assert.equal(h.apple.player.ownsQueue, true);
+  let result;
+  await act(async () => {
+    result = await audio.handlePhaseChange('work', 1);
+  });
+  assert.equal(result.success, false);
+  assert.equal(audio.audioError, APPLE_MUSIC_UNAVAILABLE_MESSAGE);
+  assert.deepEqual(
+    calls,
+    [['track', '123', false]],
+    'saved timed assignment cannot contact or stop the standard player',
+  );
+  await act(async () => {
+    await h.apple.player.clear();
+  });
 });

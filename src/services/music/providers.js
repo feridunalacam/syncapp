@@ -19,7 +19,7 @@ export const MUSIC_PROVIDERS = {
     url: 'https://music.apple.com/',
     hosts: ['music.apple.com'],
     description:
-      'Connect on iOS to choose songs and playlists for your rounds. An Apple Music subscription is required.',
+      'Connect on iOS to play songs and playlists independently of your timer. An Apple Music subscription is required.',
   },
   youtubeMusic: {
     id: 'youtubeMusic',

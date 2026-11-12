@@ -22,7 +22,13 @@ export async function signInNativeApple() {
     });
     if (!credential.identityToken || credential.state !== state)
       throw new Error('Invalid Apple response');
-    return { token: credential.identityToken, nonce };
+    // A transient, one-use code is handed only to the authenticated server.
+    // Never put it in session storage, local backups or diagnostics.
+    return {
+      token: credential.identityToken,
+      nonce,
+      authorizationCode: credential.authorizationCode,
+    };
   } catch (error) {
     if (error.code === 'ERR_REQUEST_CANCELED') return { cancelled: true };
     throw new Error('Apple sign-in could not be completed. Please try again.');

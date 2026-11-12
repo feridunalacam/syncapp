@@ -13,6 +13,7 @@ import { createAuthFetch, AUTH_REQUEST_TIMEOUT_MS } from '../src/lib/authFetch.j
 import { AUTH_REDIRECT, RECOVERY_REDIRECT, parseAuthLink } from '../src/lib/authLinks.js';
 import { authExchangeDiagnostic, createAuthCodeExchanger } from '../src/lib/authCodeExchange.js';
 import { createSocialAuth } from '../src/lib/socialAuth.js';
+import { observeAppleCredentialRevocation } from '../src/lib/appleCredentialRevocation.js';
 import {
   createAccountStore,
   clearAccountStore,
@@ -174,7 +175,10 @@ async function harness(options = {}) {
     AUTH_SERVICE_ORIGIN: 'https://fixture.supabase.co',
     ensureSocialProvider: options.ensureSocialProvider || (async () => {}),
     signInNativeApple: options.signInNativeApple || (async () => null),
-    signInWithNativeIdToken: async () => assert.fail('Unexpected native login'),
+    getNativeAppleAuthentication: () => options.nativeApple || null,
+    observeAppleCredentialRevocation,
+    signInWithNativeIdToken:
+      options.signInWithNativeIdToken || (async () => assert.fail('Unexpected native login')),
     authCredentialWriters: {
       signInWithPassword: (credentials) => auth.signInWithPassword(credentials),
       signUp: (credentials) => auth.signUp(credentials),
@@ -212,6 +216,43 @@ async function harness(options = {}) {
     },
   };
 }
+
+test('native Apple registration uses the verified session bearer and cannot cross an account change', async () => {
+  for (const changed of [false, true]) {
+    const calls = [];
+    const target = session();
+    const app = await harness({
+      signInNativeApple: async () => ({
+        token: 'synthetic-id-token',
+        nonce: 'synthetic',
+        authorizationCode: 'synthetic-code',
+      }),
+      signInWithNativeIdToken: async () => {
+        app.dispatchAuth('SIGNED_IN', changed ? session(accountB, sessionB) : target);
+        return { data: { session: target }, error: null };
+      },
+      invoke: async (name, options) => {
+        calls.push([name, options]);
+        return { error: null };
+      },
+    });
+    try {
+      await act(async () => {
+        await app.value.signInWithOAuth('apple');
+      });
+      assert.equal(app.value.user.id, changed ? accountB : accountA);
+      assert.equal(calls.length, changed ? 0 : 1);
+      if (!changed) {
+        assert.equal(calls[0][0], 'register-apple-token');
+        assert.equal(calls[0][1].body.authorization_code, 'synthetic-code');
+        assert.deepEqual(Object.keys(calls[0][1].body), ['authorization_code']);
+        assert.equal(calls[0][1].headers.Authorization, `Bearer ${target.access_token}`);
+      }
+    } finally {
+      await app.close();
+    }
+  }
+});
 
 test('cold session restoration holds the ready gate until the session-bound recovery marker is read', async () => {
   const marker = deferred();
@@ -641,7 +682,10 @@ test('a confirmed remote deletion retains namespace knowledge and reports incomp
   );
   const app = await harness({
     accountStorage: local,
-    invoke: async () => ({ error: null }),
+    invoke: async () => ({
+      data: { deleted: true, apple_revocation: { status: 'manual_required' } },
+      error: null,
+    }),
     clearAccountPlatforms: async () => {
       throw new Error('Offline native cleanup fixture');
     },
@@ -649,7 +693,11 @@ test('a confirmed remote deletion retains namespace knowledge and reports incomp
   try {
     await app.emit('SIGNED_IN', session());
     await act(async () =>
-      assert.rejects(app.value.deleteAccount(), /account was deleted, but some device records/),
+      assert.rejects(app.value.deleteAccount(), (error) => {
+        assert.match(error.message, /account was deleted, but some device records/);
+        assert.equal(error.apple_revocation.status, 'manual_required');
+        return true;
+      }),
     );
     assert.equal(app.value.user, null);
     assert.ok((await getKnownBillingNamespaces(local, accountA)).includes(namespace));

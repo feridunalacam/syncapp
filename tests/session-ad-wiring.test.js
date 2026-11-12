@@ -11,6 +11,7 @@ import { createNativeAdsRuntime } from '../src/services/ads/sdk.js';
 import { createInterstitialController } from '../src/services/ads/interstitials.js';
 import { createSessionAdActions } from '../src/services/ads/sessionActions.js';
 import { canPrepareAds, canUseAdsAccount } from '../src/services/ads/eligibility.js';
+import { createPresentationBlockers } from '../src/services/ads/presentationBlockers.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -182,6 +183,7 @@ async function mount(options = {}) {
     createNativeAdsRuntime,
     createInterstitialController,
     createSessionAdActions,
+    createPresentationBlockers,
     canPrepareAds,
     canUseAdsAccount,
     __DEV__: options.dev ?? true,
@@ -290,6 +292,10 @@ async function mount(options = {}) {
     events,
     nativeAds,
     renderer,
+    emitAppState(value) {
+      appState.currentState = value;
+      [...listeners].forEach((callback) => callback(value));
+    },
     async update(change) {
       Object.assign(scene, change);
       await act(async () => {
@@ -333,6 +339,68 @@ const privacyRows = (app) =>
   app.renderer.root
     .findAllByType('Pressable')
     .filter((node) => textOf(node).includes('Ad privacy choices'));
+
+test('companion ownership retires a ready ad while Start and Finish remain usable', async () => {
+  const app = await mount();
+  let release;
+  try {
+    const ad = await app.prepare();
+    await act(async () => {
+      release = app.scene.ads.acquirePresentationBlocker();
+      assert.equal(app.scene.ads.canPresentAds(), false, 'Gate changes before React renders');
+    });
+    assert.equal(app.scene.ads.accountEligible, false);
+    assert.equal(app.scene.ads.presenterBlocked, false, 'Music must not block core actions');
+    assert.equal(ad.destroys, 1);
+    let started;
+    await act(async () => {
+      started = await app.scene.api.startOrToggle();
+    });
+    assert.equal(started.performed, true);
+    assert.equal(started.shown, false);
+    assert.equal(ad.shows, 0);
+    await app.update({
+      sessionKey: 'completed-during-companion',
+      workout: { ...app.scene.workout, isWorkoutRunning: false },
+    });
+    let finished;
+    await act(async () => {
+      finished = await app.scene.api.finish();
+    });
+    assert.equal(finished.performed, true);
+    assert.equal(finished.shown, false);
+    assert.equal(
+      app.events.some((event) => Array.isArray(event) && event[0] === 'finish'),
+      true,
+    );
+    assert.equal(app.nativeAds.length, 1, 'Owned paused music also prevents a new preload');
+    await act(async () => release());
+    assert.equal(app.scene.ads.accountEligible, true);
+  } finally {
+    await app.close();
+  }
+});
+
+test('background then music lease release in one tick cannot reopen the foreground gate', async () => {
+  const app = await mount();
+  try {
+    await app.prepare();
+    await act(async () => {
+      const release = app.scene.ads.acquirePresentationBlocker();
+      app.emitAppState('background');
+      release();
+      assert.equal(app.scene.ads.canPresentAds(), false);
+      const held = app.scene.ads.acquirePresentationBlocker();
+      held();
+      assert.equal(app.scene.ads.canPresentAds(), false);
+    });
+    assert.equal(app.scene.ads.appActive, false);
+    assert.equal(app.scene.ads.ready, false);
+    assert.equal(app.nativeAds.length, 1);
+  } finally {
+    await app.close();
+  }
+});
 
 test('disabled native-present provider hides Profile privacy choices and never starts consent or ads', async () => {
   for (const dev of [false, true]) {

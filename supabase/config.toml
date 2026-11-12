@@ -4,6 +4,8 @@ project_id = "syncapp"
 # account JWTs; the webhook uses a server-only bearer secret, never a client flag.
 [functions.delete-account]
 verify_jwt = false
+[functions.register-apple-token]
+verify_jwt = false
 [functions.sync-subscription]
 verify_jwt = false
 [functions.revenuecat-webhook]

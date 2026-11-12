@@ -151,7 +151,7 @@ export const MusicSearchModal = ({
         ...(spotify.available
           ? [{ id: 'spotify', label: 'Spotify', icon: 'musical-notes-outline' }]
           : []),
-        ...(apple.available
+        ...(apple.timedAvailable
           ? [{ id: 'appleMusic', label: 'Apple Music', icon: 'logo-apple' }]
           : []),
         {

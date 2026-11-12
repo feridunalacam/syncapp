@@ -188,6 +188,9 @@ async function mountWorkout(t, start) {
     useAccountData: () => ({ setSyncPaused }),
     useRoutineContext: () => ({ routines, addCompletedRoutine() {} }),
     usePlatformContext: () => ({}),
+    useAppleMusicConnection: () => ({
+      player: { isActive: () => false, registerBeforePlay: () => () => {} },
+    }),
     useCountdownSoundPlayer: () => ({ stop: silent }),
     useAudioController: () => ({ handlePhaseChange() {}, stopMusic() {}, fetchPlayback: silent }),
     useTimerLogic: () => timer,

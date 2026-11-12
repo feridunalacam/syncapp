@@ -93,6 +93,40 @@ test('the registered EAS post-install hook runs and checks each actual release p
   assert.doesNotMatch(invalid.output, /NeverEchoThisSecret123/);
 });
 
+test('actual preview demo mode preserves inventory checks and production rejects its flag', () => {
+  const demo = {
+    ...releaseEnv('ios', 'preview'),
+    EXPO_PUBLIC_ADS_ENABLED: 'true',
+    EXPO_PUBLIC_ADS_TEST_MODE: 'true',
+    ADMOB_IOS_APP_ID: 'ca-app-pub-1234567890123456~1234567890',
+    EXPO_PUBLIC_ADMOB_IOS_BANNER_ID: 'ca-app-pub-1234567890123456/1234567890',
+    EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID: 'ca-app-pub-1234567890123456/9876543210',
+  };
+  const preview = run(demo, { npmHook: true });
+  assert.equal(preview.status, 0, preview.output);
+  const production = run({
+    ...demo,
+    EAS_BUILD_PROFILE: 'production',
+    EXPO_PUBLIC_BUILD_PROFILE: 'production',
+  });
+  assert.equal(production.status, 1);
+  assert.match(production.output, /ADS_TEST_MODE.*must not be true in production/);
+  const invalidInventory = run({
+    ...demo,
+    EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID: 'invalid-inventory',
+  });
+  assert.equal(invalidInventory.status, 1);
+  assert.match(invalidInventory.output, /matching real app, banner and interstitial IDs/);
+  for (const profile of ['preview', 'production']) {
+    for (const flag of ['', 'TRUE', 'false\n', 'untrusted-value']) {
+      const malformed = run({ ...releaseEnv('ios', profile), EXPO_PUBLIC_ADS_TEST_MODE: flag });
+      assert.equal(malformed.status, 1);
+      assert.match(malformed.output, /ADS_TEST_MODE must be exactly true or false/);
+      assert.doesNotMatch(malformed.output, /untrusted-value/);
+    }
+  }
+});
+
 test('actual process values cannot be filled or overridden by eas.json or local dotenv files', () => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-cloud-preflight-'));
   try {

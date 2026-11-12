@@ -130,6 +130,9 @@ final class AppleMusicController {
     let song = try await song(id)
     guard ticket == revision else { return ["success": true, "cancelled": true] }
     player.queue = ApplicationMusicPlayer.Queue(for: [song])
+    if #available(iOS 26.4, *) {
+      player.queue.affectsListeningHistory = false
+    }
     queueRevision = ticket
     return try await begin(ticket)
   }
@@ -141,6 +144,9 @@ final class AppleMusicController {
     let item = try await playlist(id)
     guard ticket == revision else { return ["success": true, "cancelled": true] }
     player.queue = ApplicationMusicPlayer.Queue(for: [item])
+    if #available(iOS 26.4, *) {
+      player.queue.affectsListeningHistory = false
+    }
     queueRevision = ticket
     player.state.shuffleMode = shuffle ? .songs : .off
     return try await begin(ticket)

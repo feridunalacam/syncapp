@@ -15,8 +15,10 @@
         "ADMOB_IOS_APP_ID": "ca-app-pub-6450876479080332~3587231996",
         "EXPO_PUBLIC_ADMOB_IOS_BANNER_ID": "ca-app-pub-6450876479080332/9078718471",
         "EXPO_PUBLIC_ADS_ENABLED": "false",
+        "EXPO_PUBLIC_ADS_TEST_MODE": "false",
         "EXPO_PUBLIC_SPOTIFY_ENABLED": "false",
         "EXPO_PUBLIC_APPLE_MUSIC_ENABLED": "false",
+        "EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED": "false",
         "EXPO_PUBLIC_WEB_MEDIA_IMPORT_ENABLED": "false",
         "ADMOB_ANDROID_APP_ID": "ca-app-pub-6450876479080332~6260983443",
         "EXPO_PUBLIC_ADMOB_ANDROID_BANNER_ID": "ca-app-pub-6450876479080332/8476083240",
@@ -44,6 +46,15 @@
       "environment": "preview",
       "distribution": "internal",
       "extends": "base",
+      "ios": {
+        "distribution": "store",
+        "autoIncrement": true,
+        "env": {
+          "EXPO_PUBLIC_ADS_ENABLED": "true",
+          "EXPO_PUBLIC_ADS_TEST_MODE": "true",
+          "EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED": "true"
+        }
+      },
       "env": {
         "EXPO_PUBLIC_BUILD_PROFILE": "preview"
       }
@@ -52,6 +63,11 @@
       "environment": "production",
       "autoIncrement": true,
       "extends": "base",
+      "ios": {
+        "env": {
+          "EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED": "true"
+        }
+      },
       "env": {
         "EXPO_PUBLIC_BUILD_PROFILE": "production"
       }

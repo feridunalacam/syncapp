@@ -46,6 +46,7 @@ function harness(options = {}) {
     ensureProvider: options.ensureProvider || (async () => {}),
     openSession: options.openSession || (async () => ({ type: 'success', url: callback })),
     signInNativeApple: options.native,
+    registerAppleAuthorization: options.registerAppleAuthorization,
     signInWithIdToken:
       options.signInWithIdToken === null
         ? undefined
@@ -94,6 +95,36 @@ test('Apple falls back to OAuth only when the installed native bridge is unavail
   await h.controller.signIn('apple');
   assert.equal(h.calls[0][0], 'oauth');
   assert.equal(h.calls[0][1].provider, 'apple');
+});
+
+test('Apple registration occurs only after verified native login and never changes the sign-in result on failure', async () => {
+  let registered = 0;
+  const h = harness({
+    native: async () => ({
+      token: 'synthetic-token',
+      nonce: 'synthetic',
+      authorizationCode: 'one-use-code',
+    }),
+    registerAppleAuthorization: async (code, session) => {
+      registered++;
+      assert.equal(code, 'one-use-code');
+      assert.equal(session.user.id, 'native-user');
+      assert.equal(h.calls[0][0], 'id-token');
+      throw new Error('sensitive-upstream-response');
+    },
+  });
+  assert.equal((await h.controller.signIn('apple')).session.user.id, 'native-user');
+  assert.equal(registered, 1);
+  const rejected = harness({
+    native: async () => ({
+      token: 'synthetic-token',
+      nonce: 'synthetic',
+      authorizationCode: 'one-use-code',
+    }),
+    signInWithIdToken: async () => ({ error: new Error('rejected') }),
+    registerAppleAuthorization: async () => assert.fail('Registration before verification'),
+  });
+  await assert.rejects(rejected.controller.signIn('apple'), /could not be completed/);
 });
 
 test('native Apple cannot bypass the configured session-lock boundary', async () => {

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { Script } from 'node:vm';
 import {
   appleMusicAvailable,
+  appleMusicCompanionAvailable,
   APPLE_MUSIC_UNAVAILABLE_MESSAGE,
 } from '../src/services/appleMusic/config.js';
 import { createAppleMusicService } from '../src/services/appleMusic/adapter.js';
@@ -17,13 +18,14 @@ const serviceSource = readFileSync(
   new URL('../src/services/appleMusic/index.js', import.meta.url),
   'utf8',
 )
-  .replace(/^import .*;\n/gm, '')
+  .replace(/^import[\s\S]*?;\n/gm, '')
+  .replace('export const appleMusicCompanionService =', 'globalThis.companion =')
   .replace(
     'export default createAppleMusicService',
     'globalThis.service = createAppleMusicService',
   );
 
-function builtService({ dev = false, profile, enabled, platform = 'ios' } = {}) {
+function builtService({ dev = false, profile, enabled, companionEnabled, platform = 'ios' } = {}) {
   let lookups = 0;
   const calls = [];
   const native = new Proxy(
@@ -43,7 +45,11 @@ function builtService({ dev = false, profile, enabled, platform = 'ios' } = {}) 
   const scope = {
     __DEV__: dev,
     process: {
-      env: { EXPO_PUBLIC_BUILD_PROFILE: profile, EXPO_PUBLIC_APPLE_MUSIC_ENABLED: enabled },
+      env: {
+        EXPO_PUBLIC_BUILD_PROFILE: profile,
+        EXPO_PUBLIC_APPLE_MUSIC_ENABLED: enabled,
+        EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED: companionEnabled,
+      },
     },
     Platform: { OS: platform },
     createAppleMusicService,
@@ -56,6 +62,7 @@ function builtService({ dev = false, profile, enabled, platform = 'ios' } = {}) 
   new Script(`${configSource}\n${serviceSource}`).runInNewContext(scope);
   return {
     service: scope.service,
+    companion: scope.companion,
     calls,
     get lookups() {
       return lookups;
@@ -132,4 +139,65 @@ test('actual EAS inheritance preserves owner development while keeping preview a
   assert.equal(resolveProfile(eas, 'development').env.EXPO_PUBLIC_APPLE_MUSIC_ENABLED, 'true');
   for (const profile of ['preview', 'production'])
     assert.equal(resolveProfile(eas, profile).env.EXPO_PUBLIC_APPLE_MUSIC_ENABLED, 'false');
+});
+
+test('the companion requires an explicit flag and recognized profile independently of timed development', () => {
+  for (const profile of [undefined, '', 'development', 'preview', 'production', 'unknown'])
+    for (const enabled of [undefined, '', false, true, 'false', 'true', 'TRUE'])
+      assert.equal(
+        appleMusicCompanionAvailable({ profile, enabled }),
+        ['development', 'preview', 'production'].includes(profile) && enabled === 'true',
+      );
+});
+
+test('production and preview companion opt-in never opens any timed service entry point', async () => {
+  for (const profile of ['preview', 'production']) {
+    const h = builtService({ dev: false, profile, enabled: 'true', companionEnabled: 'true' });
+    assert.equal(h.lookups, 1);
+    assert.equal(h.service.available, false);
+    assert.equal(h.companion.available, true);
+    await h.companion.authorize();
+    await h.companion.playPlaylist(null, 'p.explicit');
+    const companionCalls = h.calls.slice();
+    for (const operation of [
+      () => h.service.authorize(),
+      () => h.service.getAccessToken(),
+      () => h.service.search(null, 'saved song'),
+      () => h.service.getUserPlaylists(),
+      () => h.service.getPlaylistTracks(null, 'p.saved'),
+      () => h.service.playTrack(null, 'apple-music:song:123'),
+      () => h.service.playPlaylist(null, 'p.saved'),
+      () => h.service.play(),
+      () => h.service.pause(),
+      () => h.service.getCurrentPlayback(),
+      () => h.service.next(),
+      () => h.service.previous(),
+      () => h.service.setShuffle(null, true),
+      () => h.service.setRepeat(null, 'track'),
+      () => h.service.releaseCurrent(),
+    ])
+      await assert.rejects(operation(), (error) => error.code === 'unavailable');
+    await h.service.cleanup();
+    assert.deepEqual(h.calls, companionCalls, 'a timed caller cannot mutate the companion queue');
+  }
+});
+
+test('companion disabled and unsupported-platform builds never obtain its native service', async () => {
+  for (const options of [
+    { profile: 'production' },
+    { profile: 'production', companionEnabled: 'false' },
+    { profile: 'unknown', companionEnabled: 'true' },
+    { companionEnabled: 'true' },
+    { profile: 'production', companionEnabled: 'true', platform: 'android' },
+    { profile: 'production', companionEnabled: 'true', platform: 'web' },
+  ]) {
+    const h = builtService(options);
+    assert.equal(h.lookups, 0);
+    assert.equal(h.companion.available, false);
+    await assert.rejects(h.companion.authorize(), (error) => error.code === 'unavailable');
+  }
+  const timedOnly = builtService({ dev: true, profile: 'development', enabled: 'true' });
+  assert.equal(timedOnly.service.available, true);
+  assert.equal(timedOnly.companion.available, false);
+  await assert.rejects(timedOnly.companion.playPlaylist(null, 'p.saved'));
 });

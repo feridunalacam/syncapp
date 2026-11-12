@@ -8,6 +8,22 @@ export const prepareWorkoutCues = () => Promise.resolve();
 let currentSound = null;
 let complete = null;
 let fallback = null;
+// Ownership can be retired before native unloading finishes. Keep the sound and
+// its acknowledgement available to every later handover stop, including failures.
+const retiringSounds = new Set();
+const unloadingSounds = new Map();
+const unloadSound = (sound) => {
+  if (unloadingSounds.has(sound)) return unloadingSounds.get(sound);
+  retiringSounds.add(sound);
+  const pending = (async () => {
+    await sound.unloadAsync();
+    retiringSounds.delete(sound);
+  })().finally(() => unloadingSounds.delete(sound));
+  unloadingSounds.set(sound, pending);
+  pending.catch(() => {});
+  return pending;
+};
+const waitForNativeStops = () => Promise.all([...retiringSounds].map(unloadSound));
 const settle = (result) => {
   clearTimeout(fallback);
   fallback = null;
@@ -20,7 +36,8 @@ const output = {
     settle({ cancelled: true });
     const previous = currentSound;
     currentSound = null;
-    await Promise.allSettled([previous?.unloadAsync()]);
+    if (previous) retiringSounds.add(previous);
+    await waitForNativeStops();
   },
   async play(cue, cancelled) {
     const soundConfig = resolveAlertSound(cue.sound);
@@ -43,7 +60,7 @@ const output = {
       progressUpdateIntervalMillis: 100,
     });
     if (cancelled()) {
-      await sound.unloadAsync();
+      await unloadSound(sound);
       return { cancelled: true };
     }
     currentSound = sound;
@@ -53,7 +70,7 @@ const output = {
         if (currentSound !== sound) return;
         currentSound = null;
         settle({ completed: true });
-        sound.unloadAsync().catch(() => {});
+        unloadSound(sound).catch(() => {});
       };
       // Custom cues are intentionally bounded; they cannot outlive an entire short workout.
       fallback = setTimeout(
@@ -66,7 +83,7 @@ const output = {
           currentSound = null;
           clearTimeout(fallback);
           complete = null;
-          sound.unloadAsync().catch(() => {});
+          unloadSound(sound).catch(() => {});
           reject(new Error('The selected alert could not be played.'));
         }
       });
@@ -75,14 +92,37 @@ const output = {
         currentSound = null;
         clearTimeout(fallback);
         complete = null;
-        sound.unloadAsync().catch(() => {});
+        unloadSound(sound).catch(() => {});
         reject(error);
       });
     });
   },
 };
 const controller = createCueController({ output });
-export const playWorkoutCue = (event) => controller.play(event);
-export const stopWorkoutCues = () => controller.stop('workout');
-export const previewWorkoutCue = (key, config) => controller.preview(buildCuePreview(config, key));
-export const stopCuePreview = () => controller.stop('preview');
+const stopOwner = (owner) => {
+  const stopped = controller.stop(owner);
+  // A prior suppression stop may already have cleared the controller's owner.
+  // Its native stop still belongs to this barrier and must acknowledge silence.
+  return Promise.all([stopped, waitForNativeStops()]).then(() => undefined);
+};
+const musicOwners = new Set();
+export function acquireMusicCueSilence() {
+  const owner = {};
+  musicOwners.add(owner);
+  stopOwner('workout').catch(() => {});
+  stopOwner('preview').catch(() => {});
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    musicOwners.delete(owner);
+  };
+}
+export const playWorkoutCue = (event) =>
+  musicOwners.size ? Promise.resolve({ cancelled: true }) : controller.play(event);
+export const stopWorkoutCues = () => stopOwner('workout');
+export const previewWorkoutCue = (key, config) =>
+  musicOwners.size
+    ? Promise.resolve({ cancelled: true })
+    : controller.preview(buildCuePreview(config, key));
+export const stopCuePreview = () => stopOwner('preview');

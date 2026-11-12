@@ -14,7 +14,7 @@ import spotifyService from '../services/spotify';
 import { SPOTIFY_AVAILABLE } from '../services/spotify/config';
 import { SPOTIFY_UNAVAILABLE_MESSAGE } from '../services/spotify/availability';
 import deviceMusicService from '../services/deviceMusicService';
-import appleMusicService from '../services/appleMusic';
+import appleMusicService, { appleMusicCompanionService } from '../services/appleMusic';
 import { loadPlatforms, savePlatforms } from '../lib/platformStorage';
 import { createMusicConnections } from '../lib/musicConnections';
 export const PLATFORMS = {
@@ -85,7 +85,8 @@ export function PlatformProvider({ children }) {
   }, []);
   const connectPlatform = useCallback(async (id, data) => {
     if (id === 'spotify' && !SPOTIFY_AVAILABLE) throw new Error(SPOTIFY_UNAVAILABLE_MESSAGE);
-    if (!isAvailable(id)) throw new Error('This music source cannot connect in this build.');
+    if (!isAvailable(id) && !(id === 'appleMusic' && appleMusicCompanionService.available))
+      throw new Error('This music source cannot connect in this build.');
     if (!store.current) throw new Error('Music is still loading.');
     await store.current.connect(id, data);
     setConnectionError(null);
@@ -181,6 +182,11 @@ export function PlatformProvider({ children }) {
   const value = useMemo(
     () => ({
       PLATFORMS,
+      // Standard music connections cannot become selected interval sources.
+      appleMusicConnection:
+        appleMusicService.available || appleMusicCompanionService.available
+          ? connectedPlatforms.appleMusic || null
+          : null,
       connectedPlatforms: Object.fromEntries(
         Object.entries(connectedPlatforms).filter(([id]) => isAvailable(id)),
       ),
