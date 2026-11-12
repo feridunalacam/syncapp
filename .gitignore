@@ -34,3 +34,6 @@ supabase/.temp/
 
 # Legal/support Site uses its own managed source repository.
 /sites/sync-legal/
+
+# Local store capture/export artifacts; scripts and release docs remain tracked.
+/artifacts/app-store/
