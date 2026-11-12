@@ -31,6 +31,15 @@ export const WorkoutProvider = ({ children }) => {
     return found ? normalizeRoutine(found) : null;
   }, [routines, selectedId]);
   const activeRoutine = snapshot || selectedRoutine;
+  const selectedRef = useRef(selectedRoutine);
+  selectedRef.current = selectedRoutine;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   useEffect(() => {
     if (selectedRoutine?.audioAlerts?.enabled) prepareWorkoutCues().catch(() => {});
   }, [selectedRoutine?.id, selectedRoutine?.audioAlerts?.enabled]);
@@ -154,6 +163,19 @@ export const WorkoutProvider = ({ children }) => {
     },
     [active, stop, timer.reset],
   );
+  const beginSession = useCallback((expectedRoutine) => {
+    if (
+      !mounted.current ||
+      !expectedRoutine ||
+      selectedRef.current !== expectedRoutine ||
+      ['running', 'paused'].includes(timerRef.current?.session?.status)
+    )
+      return false;
+    setInterruptionReason(null);
+    setSnapshot(JSON.parse(JSON.stringify(expectedRoutine)));
+    alertKey.current = null;
+    return !!timerRef.current.start();
+  }, []);
   const toggle = useCallback(async () => {
     setInterruptionReason(null);
     if (paused) {
@@ -162,11 +184,9 @@ export const WorkoutProvider = ({ children }) => {
       timer.pause();
     } else if (selectedRoutine) {
       await stopCuePreview();
-      setSnapshot(JSON.parse(JSON.stringify(selectedRoutine)));
-      alertKey.current = null;
-      timer.start();
+      beginSession(selectedRoutine);
     }
-  }, [paused, running, selectedRoutine, timer, audio]);
+  }, [paused, running, selectedRoutine, timer, audio, beginSession]);
   const phase = active
     ? timer.session.timeline[timer.session.index]
     : buildTimeline(selectedRoutine || {})[0];
@@ -184,6 +204,7 @@ export const WorkoutProvider = ({ children }) => {
     phaseDuration: phase.durationSec,
     phaseProgress: active ? 1 - timer.session.remainingMs / (phase.durationSec * 1000) : 0,
     toggle,
+    beginSession,
     stop,
     skipForward: () => timer.skip(1),
     skipBackward: () => timer.skip(-1),

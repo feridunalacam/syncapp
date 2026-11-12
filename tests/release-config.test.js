@@ -109,12 +109,38 @@ test('enabled release ads require matching real IDs only for the selected platfo
     ...values,
     ADMOB_IOS_APP_ID: 'ca-app-pub-1234567890123456~1234567890',
     EXPO_PUBLIC_ADMOB_IOS_BANNER_ID: 'ca-app-pub-1234567890123456/1234567890',
+    EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID: 'ca-app-pub-1234567890123456/9876543210',
   };
   assert.deepEqual(checkReleaseConfig({ platform: 'ios', env, eas: config }).errors, []);
   env.EXPO_PUBLIC_ADMOB_IOS_BANNER_ID = 'ca-app-pub-9999999999999999/1234567890';
   assert.ok(checkReleaseConfig({ platform: 'ios', env, eas: config }).errors.includes('adIds'));
   config.build.base.env.EXPO_PUBLIC_ADS_ENABLED = 'TRUE';
   assert.ok(checkReleaseConfig({ platform: 'ios', env, eas: config }).errors.includes('adFlag'));
+});
+
+test('release ad preflight rejects absent, demo or foreign interstitial inventory', () => {
+  const config = structuredClone(eas);
+  config.build.base.env.EXPO_PUBLIC_ADS_ENABLED = 'true';
+  const env = {
+    ...values,
+    ADMOB_IOS_APP_ID: 'ca-app-pub-1234567890123456~1234567890',
+    EXPO_PUBLIC_ADMOB_IOS_BANNER_ID: 'ca-app-pub-1234567890123456/1234567890',
+  };
+  for (const id of [
+    undefined,
+    'ca-app-pub-3940256099942544/4411468910',
+    'ca-app-pub-9999999999999999/9876543210',
+    'ca-app-pub-1234567890123456/9876543210\n',
+  ]) {
+    const result = checkReleaseConfig({
+      platform: 'ios',
+      env: { ...env, EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID: id },
+      eas: config,
+    });
+    assert.ok(result.errors.includes('adIds'), String(id));
+  }
+  config.build.base.env.EXPO_PUBLIC_ADS_ENABLED = 'false';
+  assert.deepEqual(checkReleaseConfig({ platform: 'ios', env, eas: config }).errors, []);
 });
 
 test('preflight output never echoes credential values or untrusted arguments', () => {

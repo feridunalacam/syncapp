@@ -599,3 +599,223 @@ test('release config requires explicit enable and real IDs while DEV always uses
   );
   assert.equal(createAdsConfig({ platform: 'web', dev: true }).enabled, false);
 });
+
+test('an idle consent barrier resolves without loading SDK, consent or advertisements', async () => {
+  const { controller, calls, getLoadCount } = setup();
+  controller.setGate(free);
+  assert.equal(await controller.waitUntilIdle(), undefined);
+  assert.deepEqual(calls, []);
+  assert.equal(getLoadCount(), 0);
+});
+
+test('a captured automatic consent form must settle even after Pro or background invalidates its continuation', async () => {
+  for (const stop of ['pro', 'background', 'release', 'dispose']) {
+    const form = deferred();
+    const { controller, calls } = setup({
+      consent: {
+        loadAndShowConsentFormIfRequired: () => {
+          calls.push('form');
+          return form.promise;
+        },
+      },
+    });
+    controller.setGate(free);
+    const release = controller.acquirePlacement();
+    await settle();
+    assert.equal(calls.includes('form'), true, stop);
+    let settled = false;
+    const barrier = controller.waitUntilIdle().then(() => {
+      settled = true;
+    });
+    if (stop === 'release') release();
+    else if (stop === 'dispose') controller.dispose();
+    else controller.setGate({ ...free, [stop === 'pro' ? 'eligible' : 'appActive']: false });
+    await settle();
+    assert.equal(settled, false, 'Invalidating eligibility does not dismiss the native form');
+    form.resolve(info);
+    await barrier;
+    assert.equal(settled, true, stop);
+    assert.equal(calls.includes('init'), false, stop);
+  }
+});
+
+test('a captured explicit privacy form blocks the barrier until native close or error', async () => {
+  for (const outcome of ['closed', 'error']) {
+    const form = deferred();
+    const { controller, calls } = setup({
+      consent: {
+        showPrivacyOptionsForm: () => {
+          calls.push('privacy');
+          return form.promise;
+        },
+      },
+    });
+    controller.setGate({ ...free, eligible: false });
+    const request = controller.requestPrivacyOptions();
+    await settle();
+    assert.equal(calls.includes('privacy'), true);
+    let settled = false;
+    const barrier = controller.waitUntilIdle().then(() => {
+      settled = true;
+    });
+    controller.setGate({ ...free, eligible: false, appActive: false });
+    await settle();
+    assert.equal(settled, false, outcome);
+    if (outcome === 'closed') form.resolve(info);
+    else form.reject(new Error('Native privacy presentation failed'));
+    await barrier;
+    await request;
+    assert.equal(settled, true, outcome);
+    assert.equal(calls.includes('init'), false, outcome);
+  }
+});
+
+test('the barrier also drains already-requested native SDK initialization after eligibility changes', async () => {
+  const initialization = deferred();
+  const { controller } = setup({
+    mobileAds: { initialize: () => initialization.promise },
+  });
+  controller.setGate(free);
+  controller.acquirePlacement();
+  await settle();
+  let settled = false;
+  const barrier = controller.waitUntilIdle().then(() => {
+    settled = true;
+  });
+  controller.setGate({ ...free, eligible: false });
+  await settle();
+  assert.equal(settled, false);
+  initialization.reject(new Error('Native initialization failed'));
+  await barrier;
+  assert.equal(settled, true);
+  assert.equal(controller.getState().canRequestAds, false);
+});
+
+test('the barrier never adopts SDK or consent work begun after its snapshot', async () => {
+  const form = deferred();
+  const { controller, calls } = setup({
+    consent: { loadAndShowConsentFormIfRequired: () => form.promise },
+  });
+  controller.setGate(free);
+  const barrier = controller.waitUntilIdle();
+  const release = controller.acquirePlacement();
+  await barrier;
+  assert.equal(calls.includes('info'), true, 'Only the separate placement started work');
+  assert.equal(calls.includes('init'), false);
+  release();
+  form.resolve(info);
+  await settle();
+});
+
+test('a preparation hold cancels late consent info before it can open a form', async () => {
+  const pending = deferred();
+  let updates = 0;
+  const { controller, calls } = setup({
+    consent: {
+      requestInfoUpdate: () => {
+        updates++;
+        return pending.promise;
+      },
+    },
+  });
+  controller.setGate(free);
+  controller.acquirePlacement();
+  const releaseHold = controller.holdPreparation();
+  const barrier = controller.waitUntilIdle();
+  pending.resolve(info);
+  await barrier;
+  assert.equal(calls.includes('form'), false);
+  assert.equal(calls.includes('init'), false);
+  assert.equal(controller.getState().ready, false);
+  await settle();
+  assert.equal(updates, 1, 'Do not retry while held');
+  releaseHold();
+  await settle();
+  assert.equal(calls.filter((call) => call === 'form').length, 1);
+  assert.equal(controller.getState().ready, true);
+});
+
+test('a preparation hold preserves ready consent and initialized SDK for a cached interstitial', async () => {
+  const { controller, calls } = setup();
+  controller.setGate(free);
+  controller.acquirePlacement();
+  await settle();
+  assert.equal(controller.getState().ready, true);
+  const before = calls.length;
+  const releaseHold = controller.holdPreparation();
+  assert.equal(controller.getState().ready, true);
+  assert.equal(controller.getState().canRequestAds, true);
+  assert.equal(controller.getState().initialized, true);
+  await controller.waitUntilIdle();
+  assert.equal(calls.length, before);
+  releaseHold();
+  releaseHold();
+  await settle();
+  assert.equal(calls.length, before, 'Idempotent release does not restart an already-ready SDK');
+});
+
+test('new placements cannot load SDK or consent until their preparation hold is released', async () => {
+  const { controller, calls, getLoadCount } = setup();
+  const releaseHold = controller.holdPreparation();
+  controller.setGate(free);
+  controller.acquirePlacement();
+  await controller.waitUntilIdle();
+  assert.equal(getLoadCount(), 0);
+  assert.deepEqual(calls, []);
+  releaseHold();
+  await settle();
+  assert.equal(controller.getState().ready, true);
+  assert.equal(getLoadCount(), 1);
+});
+
+test('nested preparation holds skip new privacy actions and release exactly once each', async () => {
+  const { controller, calls, getLoadCount } = setup();
+  controller.setGate(free);
+  const first = controller.holdPreparation();
+  const second = controller.holdPreparation();
+  controller.acquirePlacement();
+  assert.equal(await controller.requestPrivacyOptions(), false);
+  first();
+  first();
+  assert.equal(await controller.requestPrivacyOptions(), false);
+  await settle();
+  assert.deepEqual(calls, []);
+  assert.equal(getLoadCount(), 0);
+  second();
+  second();
+  await settle();
+  assert.equal(controller.getState().ready, true);
+  assert.equal(calls.filter((call) => call === 'info').length, 1);
+});
+
+test('an already-open native form drains while held and unsafe release cannot start another', async () => {
+  const form = deferred();
+  const { controller, calls } = setup({
+    consent: {
+      loadAndShowConsentFormIfRequired: () => {
+        calls.push('form');
+        return form.promise;
+      },
+    },
+  });
+  controller.setGate(free);
+  controller.acquirePlacement();
+  await settle();
+  assert.equal(calls.includes('form'), true);
+  const releaseHold = controller.holdPreparation();
+  let settled = false;
+  const barrier = controller.waitUntilIdle().then(() => {
+    settled = true;
+  });
+  assert.equal(await controller.requestPrivacyOptions(), false);
+  await settle();
+  assert.equal(settled, false, 'A hold is not a native dismissal');
+  form.resolve(info);
+  await barrier;
+  assert.equal(calls.includes('init'), false);
+  controller.setGate({ ...free, eligible: false });
+  releaseHold();
+  await settle();
+  assert.equal(calls.filter((call) => call === 'form').length, 1);
+  assert.equal(calls.includes('init'), false);
+});

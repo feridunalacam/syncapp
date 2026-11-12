@@ -10,6 +10,7 @@ export function createAdsController({ runtime, config, onChange = () => {}, getC
   let disposed = false;
   let operation = null;
   let privacyPromise = null;
+  let preparationHolds = 0;
   let attemptedEpoch = -1;
   let consentInfo = null;
   let consentUpdated = false;
@@ -87,7 +88,8 @@ export function createAdsController({ runtime, config, onChange = () => {}, getC
     });
   };
   const pump = () => {
-    if (operation || privacyPromise || !allowed() || attemptedEpoch === epoch) return;
+    if (preparationHolds || operation || privacyPromise || !allowed() || attemptedEpoch === epoch)
+      return;
     const version = epoch;
     attemptedEpoch = version;
     operation = (async () => {
@@ -128,6 +130,28 @@ export function createAdsController({ runtime, config, onChange = () => {}, getC
   };
   return {
     getState: () => state,
+    holdPreparation() {
+      if (disposed) return () => {};
+      preparationHolds += 1;
+      // Preserve already-ready consent/SDK state for a cached interstitial.
+      // An unfinished preparation must not open a new native form after Start.
+      if (!state.ready) invalidate();
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        preparationHolds -= 1;
+        if (!preparationHolds) pump();
+      };
+    },
+    waitUntilIdle() {
+      // Snapshot only work already in flight. Invalidating a placement stops
+      // its continuation, but cannot dismiss native UMP UI already presented.
+      // Do not pump, await a later request or release a still-visible form on a
+      // timer; failures simply settle this barrier for the free core.
+      const pending = [operation, privacyPromise].filter(Boolean);
+      return Promise.allSettled(pending).then(() => undefined);
+    },
     setGate(next) {
       if (
         next.identity === gate.identity &&
@@ -157,6 +181,7 @@ export function createAdsController({ runtime, config, onChange = () => {}, getC
     },
     requestPrivacyOptions(isEligible = () => true) {
       if (privacyPromise) return privacyPromise;
+      if (preparationHolds) return Promise.resolve(false);
       const callerSafe = () => {
         try {
           return isEligible() === true;

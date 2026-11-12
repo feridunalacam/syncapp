@@ -16,10 +16,19 @@ export function createNativeAdsRuntime({ platform, getNativeModule, load }) {
       return false;
     }
   };
+  const hasInterstitialSupport = () => {
+    if (!hasNativeSupport()) return false;
+    try {
+      return !!getNativeModule('RNGoogleMobileAdsInterstitialModule');
+    } catch {
+      return false;
+    }
+  };
   return {
     // Capability detection must not evaluate the ads package or initialize GMA.
     // Settings can expose privacy choices even before a Free placement exists.
     hasNativeSupport,
+    hasInterstitialSupport,
     getSdk() {
       if (sdk) return sdk;
       if (!hasNativeSupport()) return null;
@@ -27,12 +36,31 @@ export function createNativeAdsRuntime({ platform, getNativeModule, load }) {
         const module = load();
         if (!module?.AdsConsent || !module?.BannerAd || typeof module.default !== 'function')
           return null;
+        const interstitialAvailable =
+          hasInterstitialSupport() &&
+          typeof module.InterstitialAd?.createForAdRequest === 'function' &&
+          ['LOADED', 'OPENED', 'CLOSED', 'ERROR'].every(
+            (event) => typeof module.AdEventType?.[event] === 'string',
+          );
         sdk = {
           consent: module.AdsConsent,
           mobileAds: module.default(),
           BannerComponent: module.BannerAd,
           bannerSize: module.BannerAdSize.LARGE_ANCHORED_ADAPTIVE_BANNER,
           testBannerUnitId: module.TestIds.ADAPTIVE_BANNER,
+          createInterstitial: interstitialAvailable
+            ? (unitId, requestOptions) =>
+                module.InterstitialAd.createForAdRequest(unitId, requestOptions)
+            : null,
+          interstitialEvents: interstitialAvailable
+            ? Object.freeze({
+                loaded: module.AdEventType.LOADED,
+                opened: module.AdEventType.OPENED,
+                closed: module.AdEventType.CLOSED,
+                error: module.AdEventType.ERROR,
+              })
+            : null,
+          testInterstitialUnitId: module.TestIds.INTERSTITIAL,
         };
         return sdk;
       } catch {
