@@ -1,6 +1,6 @@
 # App Store submission packet — English draft
 
-Prepared from the repository and recorded evidence on 12 November 2026. This file prepares copy and capture work; it does not submit metadata, provision reviewer access or establish paid-release readiness. No credentials are included. Confirm every field against the final submitted binary before entering it in App Store Connect.
+Updated on 12 November 2026 with the delivered Store build **1.0.0 (2)**, source `da7339f`. EAS Build `015a6833…` finished, its IPA passed strict signature/profile inspection, and EAS Submit `771ac1eb…` uploaded it successfully. Apple processing is **VALID**, internal **READY_FOR_BETA_TESTING**, external **READY_FOR_BETA_SUBMISSION**, not expired. Tester-group access is not yet configured; no invitation, external beta review, App Review or public release is recorded. This packet's copy/reviewer/capture work remains a draft and does not establish paid-release readiness. No credentials are included.
 
 ## Store fields
 
@@ -13,7 +13,7 @@ Prepared from the repository and recorded evidence on 12 November 2026. This fil
 | Copyright | **2026 Feridun Alaçam** — proposed; owner to confirm the rights-holder wording. |
 | Primary category | **Health & Fitness** — proposed, not a confirmed saved store value. Work/rest training, workout routines and exercise/session history are the app's main purpose. This fits the current product better than positioning it as a generic utility timer. No medical, measured-health, HealthKit or Apple Watch capability is claimed. |
 | Secondary category | No proposal; leave unselected unless the final listing needs one. |
-| Version | 1.0.0 in app configuration; record the actual selected distribution build separately. |
+| Version / delivered build | **1.0.0 (2)**, source `da7339f`, signed Store IPA uploaded and processed. Selection for an App Review version is not established. |
 | Privacy Policy URL | https://sync-app-support.feridun.chatgpt.site/privacy |
 | Support URL | https://sync-app-support.feridun.chatgpt.site/ |
 | Marketing URL | https://sync-app-support.feridun.chatgpt.site/ |
@@ -64,6 +64,10 @@ Privacy Policy: https://sync-app-support.feridun.chatgpt.site/privacy
 
 Use a disposable QA installation with no personal account or imported owner data. These steps are a verification checklist, not a record that every check has passed on the final distribution binary.
 
+Recorded evidence is scoped by native composition. Pre-pin `f1bfac6` / Worklets **0.6.1** iPhone/iPad simulators completed genuine four-minute/three-round sessions and Activity history; iPad background pause/landscape/Finish and Copy image/transparent clipboard on both devices passed. Fresh CNG Worklets **0.5.1** passed normal-signed Release/codesign and guest launch/editor/Duration → Apply 5 seconds. Final new-CNG short-session completion and clipboard retests remain pending after Mac control timed out and an unlock was requested. The uploaded Store build has not been exercised through configured TestFlight tester access.
+
+- [x] Fresh local CNG Worklets 0.5.1 guest launch, editor and Duration → Apply 5 seconds observed.
+
 - [ ] Launch the final Release build as a guest. Confirm Training shows the three intended defaults on a genuinely new installation; do not reset an existing user's saved routines to obtain them.
 - [ ] Enable offline mode, open a saved routine in Timer and run work/rest phases. Check Pause/Resume and leaving/returning to the app; returning must leave the session paused.
 - [ ] Create and save a short routine through the UI, reopen it and confirm its actual timing. Complete it normally, dismiss its summary and inspect Training > Activity. Do not insert or edit storage to fabricate history.
@@ -82,13 +86,21 @@ The real Apple purchase/renewal/refund/restore-to-Pro lifecycle **remains unveri
 - [ ] Validate verified-Pro backup/sync across two devices and the restore/conflict UI. Local media must remain local; do not promise media-file backup.
 - [ ] Validate deletion only on an authorized disposable account, including reauthentication and remote completion. A timeout is not confirmed deletion; account deletion does not cancel billing.
 - [ ] Keep paid availability, merchant/banking/tax/seller requirements, subscription review images/notes and App Review access open until resolved. These deferred owner actions are not completed by this document.
-- [ ] Confirm distribution certificate/profile, signed archive, build number and selected App Store build. API access and EAS Submit key storage/assignment are confirmed; they do not establish distribution signing or an upload.
+- [x] Verify distribution certificate/profile, strict IPA signature, Store build **1.0.0 (2)** and upload. The existing App Manager API key/certificate/profile are assigned in the EAS vault; CLI profile fetch with the team environment passed. No Admin role or additional API key was used.
+- [ ] Configure authorized internal tester-group access and verify actual installation/runtime. Apple's `VALID` / internal-ready state alone does not give the owner installation access. No new tester invitation or external beta review is recorded.
+- [ ] Select the intended processed build for App Review only after the reviewer-access, paid-service, merchant, screenshot, privacy and age-rating gates are resolved. Live/in-review/pending-release states are currently empty.
 
-Final Release native Copy image and transparent clipboard checks are recorded as PASS. Final iPad visual QA remains pending in the latest handoff. Full store screenshot coverage and the final signed archive remain separate gates.
+The cloud build passed Doctor **18/18**, Prebuild, pods, bundling and Fastlane after the missing-Podfile CNG packaging fix and direct Worklets 0.5.1 correction. Build/signing/upload are complete; final native runtime/capture coverage and real paid/Pro validation remain separate gates. The work used the Free plan, with no paid-plan activation or new backend.
 
 ## Screenshot capture manifest
 
-All entries below are **planned captures, not completed assets**. Capture the actual final Release UI on an iPhone and an iPad supported by the final binary. Record the exact build/commit, device model, OS, orientation, pixel dimensions, capture date and source PNG path with each delivered set. Confirm current accepted App Store device slots/dimensions at upload; no size or screenshot-completeness claim is made here. Existing QA evidence does not automatically become a store asset.
+The persistent candidate root is `/Users/feridunalacam/.codex/visualizations/2026/11/11/01a1cb22-5d7e-7c32-9bd0-bcdc3c97010f/app-store-candidates/`. Its original group contains **13 unchanged raw PNGs** (six iPhone, seven iPad) and **13 pixel-identical RGB derivatives** under `appstore/`, with provenance and technical verification in its manifest/README. The raw images are fully opaque RGBA; the derived RGB PNGs remove the alpha channel without resizing, cropping or changing pixels/color space. These are candidates, not a final screenshot-completeness claim.
+
+The original 13 are source **`f1bfac6`**, Simulator Release, OS 26.1, native Worklets **0.6.1**, before the 0.5.1 pin. They include Ready/active/Training/Activity/share, an iPhone editor and iPad landscape pause/completion. Their four-minute/three-round history was completed through the UI; the group was not relabeled as current-build evidence.
+
+The separate `current-cng-da7339f/` group now contains **three raw plus three verified RGB iPad Ready/editor/cue images**, captured at 12:32–12:33 on OS 26.1, local CNG Simulator Release **(1)**, Worklets **0.5.1**, using synthetic public configuration. Its raw alpha is fully opaque and RGB/ICC/render equality checks passed. The cue image shows its real scroll position with lower controls below the fold. This group includes no current-CNG iPhone, active timer, Training, Activity or share captures and does not independently prove the signed Store **(2)** runtime. Final capture coverage remains pending.
+
+The table below remains the **target final-build capture set**, with proposed filenames. Capture/revalidate the actual final Release UI on both device families, recording exact build/commit, device, OS, orientation, dimensions, time and raw PNG path. Confirm accepted App Store slots at upload. Pre-pin candidates do not automatically prove the submitted binary's UI.
 
 Suggested locale/file prefix: `en-US`. Keep an untouched native capture as the source. Any later caption artwork must accurately represent that capture. Do not scale iPhone content to impersonate an iPad screenshot, show personal information, or introduce fake media/history. Use a clean guest session; create any needed history by actually completing the displayed routine.
 
@@ -101,7 +113,7 @@ Suggested locale/file prefix: `en-US`. Keep an untouched native capture as the s
 | 05 | `en-US_iphone_05-cues.png` | `en-US_ipad_05-cues.png` | Expanded routine cue settings, showing actual supported controls. | Choose countdown and sound cues |
 | 06 | `en-US_iphone_06-activity.png` | `en-US_ipad_06-activity.png` | Training > Activity after a genuinely completed session; truthful recorded duration. | Review your sessions |
 
-For iPad, also retain separate internal QA captures in each orientation/multitasking layout supported by the final archive. Check safe areas, tab bar, sheets, editor controls, Activity and share previews for clipping or unreachable controls. The current app configuration says portrait, but generated iPad settings previously included landscape/multitasking; use the actual final binary to establish what ships. These extra QA captures are not a claim that every orientation must be uploaded as store marketing.
+For iPad, retain separate internal QA captures in the supported orientations/multitasking layouts. The actual Store IPA supports all four iPad orientations, family 1,2 and `UIRequiresFullScreen=false`; iPhone supports portrait/upside-down. Check safe areas, tab bar, sheets, editor controls, Activity and share previews for clipping or unreachable controls. Pre-pin landscape checks passed, but final 0.5.1 coverage remains separate. These extra QA captures are not a claim that every orientation must be uploaded as store marketing.
 
 An optional Discover screenshot must show its sample/local wording. An optional account/Pro screenshot requires verified reviewer access and real available plans; omit it while those gates are open. Do not market Spotify, live social publishing, fabricated Pro status or an unverified billing result.
 
@@ -118,6 +130,6 @@ Use [app-store-privacy.md](app-store-privacy.md) as the source matrix. Do not co
 | Browser media | Arbitrary HTTP/HTTPS browsing is supported; no separate app browsing/search-history log was found, but selected URLs can enter saved cloud metadata. | Assess third-party web traffic and the applicable web exception before deciding Browsing/Search History answers. |
 | Local files/photos | Imported audio/video and profile photos are currently local; no media bytes enter the backup allowlist. | Recheck the final binary and policy before excluding uploaded media categories; permission alone is not collection evidence. |
 | Age rating | Browser audio includes open web navigation. Discover is samples/local saved content rather than public UGC; production ads are disabled. | Answer the current questionnaire for actual open-web/content capabilities. Do not select an age band solely because this is a timer or describe local content as a public social network. |
-| Export/privacy archive | `usesNonExemptEncryption=false` is configured; required-reason and installed SDK manifests exist. | Inspect the signed archive's effective settings and aggregate privacy report; configuration format checks do not complete store declarations. |
+| Export/privacy archive | Actual Store IPA has `ITSAppUsesNonExemptEncryption=false`, expected permission removals and **15 bundled privacy manifests** whose declarations match the draft matrix. | The manifest inventory is not an official Xcode aggregated report or final questionnaire. Resolve runtime/partner behavior and the official report before finalizing disclosures. |
 
-Record final decisions and supporting evidence before entry; this packet does not change any App Store answers. No fresh web/account verification, account creation, purchase or submission was performed to prepare it.
+Record final decisions and supporting evidence before entry; this documentation update changes no App Store answers. The build upload/Apple processing record above is distinct from App Review or public release. No new tester invitation, account creation, purchase, production grant or backend creation was performed for this packet.

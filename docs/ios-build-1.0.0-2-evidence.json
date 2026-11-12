@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "recordedAtUTC": "2026-11-12T09:54:55.760111+00:00",
+  "sourceCommit": "da7339f3b9b072e9f2859974170b4350c8a3c549",
+  "platform": "ios",
+  "sourceValidation": {
+    "node": "22.23.4",
+    "testsPassed": 496,
+    "hermesExports": [
+      "ios",
+      "android"
+    ],
+    "cloudDoctorChecksPassed": 18
+  },
+  "storeBuild": {
+    "easBuildId": "015a6833-3111-42b5-a4ec-89e8bf929741",
+    "easSubmissionId": "771ac1eb-1b78-43b5-8abd-e5f9c1fee095",
+    "bundleIdentifier": "com.feridun.syncapp",
+    "version": "1.0.0",
+    "buildNumber": "2",
+    "ipaSHA256": "9bd7d0b374d49125ae4004b9413b4e0e9ac868fea3e11c33c938b92596a2100a",
+    "strictDeepSignatureVerificationPassed": true,
+    "appStoreProfileChecksPassed": true,
+    "minimumOSVersion": "15.1",
+    "deviceFamilies": [
+      1,
+      2
+    ],
+    "sdk": "iphoneos26.5",
+    "deviceArchitecture": "arm64",
+    "usesNonExemptEncryption": false,
+    "removedPermissionKeysAbsent": {
+      "NSMicrophoneUsageDescription": true,
+      "NSFaceIDUsageDescription": true,
+      "NSPhotoLibraryAddUsageDescription": true
+    }
+  },
+  "appleStatus": {
+    "processingState": "VALID",
+    "internalState": "READY_FOR_BETA_TESTING",
+    "externalState": "READY_FOR_BETA_SUBMISSION",
+    "expired": false,
+    "liveVersion": null,
+    "inReviewVersion": null,
+    "pendingReleaseVersion": null,
+    "testerAssignmentPerformed": false,
+    "appReviewSubmissionPerformed": false
+  },
+  "nativeRuntimeEvidence": {
+    "prePin": {
+      "sourceCommit": "f1bfac6",
+      "worklets": "0.6.1",
+      "devices": [
+        "iPhone simulator",
+        "iPad simulator"
+      ],
+      "completedSessionSeconds": 240,
+      "completedRounds": 3,
+      "checks": [
+        "history",
+        "iPad background pause",
+        "iPad landscape/Finish",
+        "image and transparent clipboard on both devices"
+      ]
+    },
+    "currentCNG": {
+      "sourceCommit": "da7339f",
+      "worklets": "0.5.1",
+      "configuration": "synthetic public values for simulator core QA",
+      "checksPassed": [
+        "normal-signed Release build",
+        "strict signature verification",
+        "guest launch",
+        "routine editor",
+        "duration apply to 5 seconds"
+      ],
+      "shortSessionAndClipboardRetest": "pending"
+    }
+  },
+  "privacy": {
+    "inventoryKind": "bundled manifest inventory, not official Xcode aggregate or final disclosure",
+    "manifestCount": 15,
+    "declarationCounts": {
+      "manifestsWithCollectedData": 3,
+      "totalCollectedDataDeclarations": 11,
+      "uniqueCollectedDataCategories": 8,
+      "requiredReasonAPICategories": 4
+    },
+    "officialAggregatedReportProduced": false,
+    "finalQuestionnaireSubmitted": false
+  },
+  "publicSourceAudit": {
+    "counts": {
+      "info": 0,
+      "low": 1,
+      "moderate": 18,
+      "high": 2,
+      "critical": 0,
+      "total": 21
+    },
+    "newWorkletsFinding": false,
+    "privateWorkspaceUploaded": false,
+    "cleanAudit": false
+  },
+  "releaseConfiguration": {
+    "advertisingEnabled": false,
+    "spotifyEnabled": false
+  },
+  "openReleaseGates": [
+    "owner TestFlight access and actual device runtime",
+    "current CNG session/clipboard retest",
+    "Apple merchant requirements deferred by owner",
+    "authorized review/sandbox configuration and real paid/Pro lifecycle",
+    "final store screenshots and privacy/age-rating decisions"
+  ]
+}

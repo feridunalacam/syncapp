@@ -1,6 +1,6 @@
 # iOS App Store privacy draft
 
-Technical review dated 12 November 2026 for the intended iOS release. **No App Store questionnaire was changed or published.** This maps inspected code and exact installed SDK manifests to proposed answers; owner review and the final Release archive/runtime evidence are still required. It is not a legal determination.
+Updated on 12 November 2026 with the actual signed Store IPA **1.0.0 (2)** from source `da7339f`. Its signature/profile checks passed, upload succeeded and Apple processing reports `VALID` / internally `READY_FOR_BETA_TESTING`; tester access is not yet configured. **No App Store privacy questionnaire was changed or published.** This maps inspected code and shipped SDK manifest declarations to proposed answers. It is a manifest inventory, not an official Xcode aggregated privacy report, final privacy label or legal determination; runtime/provider and owner review remain required.
 
 ## Scope and interpretation
 
@@ -37,11 +37,26 @@ Purpose abbreviations: **AF** App Functionality; **AN** Analytics; **TA** Third-
 | GMA: Coarse Location | TA, AN, DM | Yes | No | Automatic GMA path disabled; require runtime evidence before attributing actual collection. |
 | GMA: Device ID | TA, AN, DM | Yes | **Yes** | Cannot convert this to “no tracking” solely from non-personalized requests or absent ATT prompt. |
 | GMA: Advertising Data; Product Interaction | TA, AN, DM | Yes | No | Conditional GMA inventory/SDK activity; currently no automatic ad requests. |
-| GMA: Performance Data; Other Diagnostic Data | TA, AN, DM | No | No | Conditional SDK behavior, pending final archive/runtime assessment. |
-| GMA: Crash Data | AN | No | No | Included SDK declaration; actual runtime behavior remains to be verified. |
+| GMA: Performance Data; Other Diagnostic Data | TA, AN, DM | No | No | Declaration verified in the Store IPA; actual runtime/provider behavior remains open. |
+| GMA: Crash Data | AN | No | No | Declaration verified in the Store IPA; actual runtime behavior remains to be verified. |
 | UMP: Coarse Location; Performance Data; Product Interaction | **AF** | No | No | **Explicit privacy-options path is reachable even with ads disabled.** Treat these as potential collected categories until that path/provider behavior is resolved. |
 
-Evidence files are the device-slice `PrivacyInfo.xcprivacy` files under installed `GoogleMobileAds.xcframework`, `UserMessagingPlatform.xcframework` and `ios/Pods/RevenueCat/Sources/`. The app's own empty collected-data array does not replace these SDK declarations or the backend matrix. The final Release archive's aggregated report is pending.
+The installed device-slice manifests were compared with the actual IPA's `GoogleMobileAdsResources.bundle/PrivacyInfo.xcprivacy`, `UserMessagingPlatformResources.bundle/PrivacyInfo.xcprivacy` and `RevenueCat.bundle/PrivacyInfo.xcprivacy`. Their category/purpose/linked/tracking declarations match this matrix and the generic RevenueCat declaration above. The app's own empty collected-data array does not replace those declarations or the app/backend matrix.
+
+## Shipped IPA manifest inventory
+
+The actual **1.0.0 (2)** IPA contains **15 `PrivacyInfo.xcprivacy` files**. Three declare collected data: Google Mobile Ads, UMP and RevenueCat, totaling **11 declarations across 8 distinct categories**. GMA's Device ID declaration is both linked and tracking; a missing top-level tracking flag in a vendor manifest is not a blanket no-tracking result. UMP declares Coarse Location, Performance Data and Product Interaction for App Functionality, unlinked and non-tracking. RevenueCat's generic Purchase History declaration is App Functionality, unlinked and non-tracking; the app-specific account UUID/Analytics distinction above still applies.
+
+Required-reason declarations across the shipped manifests are:
+
+| API category | Declared reason codes |
+| --- | --- |
+| File Timestamp | `0A2A.1`, `3B52.1`, `C617.1` |
+| User Defaults | `CA92.1` |
+| Disk Space | `85F4.1`, `E174.1` |
+| System Boot Time | `35F9.1` |
+
+The sanitized artifact record is `/private/tmp/syncapp-cloud-release2/inspection.json`. This inventory records bundled declarations and the checked IPA settings; **it is not an official Xcode aggregated report or final App Store questionnaire**. Neither a successful upload nor Apple's valid-build status resolves the runtime/partner behavior and disclosure questions below. The official aggregated report and final questionnaire review remain open.
 
 Google's current [data-disclosure guide](https://developers.google.com/admob/ios/privacy/data-disclosure) describes a newer SDK than installed 13.6; use exact installed manifests and runtime evidence instead of importing new-version optional behavior. If advertising is enabled later, reassess every GMA row before serving. Requests currently ask for non-personalized ads, but [Google explains](https://support.google.com/admob/answer/7676680?hl=en) that this still permits identifier use for functions such as frequency capping/reporting. Publisher first-party ID retains its default; the RNAds 17 setter is a no-op compatibility stub. [Google strategies](https://developers.google.com/admob/ios/privacy/strategies).
 
@@ -58,4 +73,4 @@ The Browser audio feature lets users navigate arbitrary HTTP/HTTPS sites. It doe
 3. Confirm the cloud-content classifications, particularly **Fitness** for exercise history and **Other User Contact Info** for dedicated social links, with App Functionality and linked identity. Optional Pro backup is part of the data inventory even if guests stay local.
 4. Confirm Supabase/email-provider log fields, IP use and retention, then reconcile these categories with the final aggregated archive report and public Privacy Policy. Record any unresolved field instead of selecting “Data Not Collected.”
 
-No live identifiers, emails, backup payloads, credentials or questionnaire settings were accessed or changed for this draft. The owner should enter answers only after resolving the marked unknowns; no additional user-input request was sent by this task.
+The artifact inspection retained only sanitized technical signature/profile checks and manifest summaries; no live account emails, backup payloads or credentials were collected for this draft. No privacy questionnaire answers were changed or submitted. The owner should enter final answers after resolving the marked unknowns.
