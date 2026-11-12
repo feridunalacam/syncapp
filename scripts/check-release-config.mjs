@@ -13,6 +13,8 @@ export const releaseConfigMessages = {
   supabaseKey: 'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY must be a publishable or legacy anon key.',
   revenuecat:
     'The selected platform needs its matching public RevenueCat SDK key. Test Store keys are debug-development only.',
+  revenuecatReview:
+    'iOS preview and production need a distinct App Store public RevenueCat review SDK key. Supplied iOS development review keys must also be valid; Test Store, private and placeholder keys are not allowed.',
   legal: 'EXPO_PUBLIC_PRIVACY_URL and EXPO_PUBLIC_TERMS_URL must be public HTTPS pages.',
   publicSecrets: 'Private credentials must not use EXPO_PUBLIC_ variables.',
   adFlag: 'EXPO_PUBLIC_ADS_ENABLED must be exactly true or false when supplied.',
@@ -82,6 +84,18 @@ export function checkReleaseValues({ platform, profile = 'production', env: valu
   const subscription = createSubscriptionConfig({ platform, profile, dev: !release, env: values });
   if (!subscription.enabled || /REPLACE[_-]?ME|YOUR[_-]?KEY|PLACEHOLDER/i.test(subscription.apiKey))
     errors.push('revenuecat');
+  const reviewKey = values.EXPO_PUBLIC_REVENUECAT_REVIEW_IOS_API_KEY;
+  if (platform === 'ios' && (release || (reviewKey !== undefined && reviewKey !== ''))) {
+    const review = createSubscriptionConfig({
+      platform,
+      profile,
+      dev: !release,
+      env: values,
+      lane: 'review',
+    });
+    if (!review.enabled || /REPLACE[_-]?ME|YOUR[_-]?KEY|PLACEHOLDER/i.test(review.apiKey))
+      errors.push('revenuecatReview');
+  }
   if (!httpsPublic(values.EXPO_PUBLIC_PRIVACY_URL) || !httpsPublic(values.EXPO_PUBLIC_TERMS_URL))
     errors.push('legal');
   if (

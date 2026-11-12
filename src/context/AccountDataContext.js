@@ -15,6 +15,8 @@ import { useTheme } from './ThemeContext';
 import { createAccountStore } from '../lib/accountStore';
 import { createBackupSync } from '../lib/backupSync';
 import { supabase } from '../lib/supabase';
+import { billingScopeActive, sameBillingScope } from '../lib/accountBillingScope';
+import { createAccountBackupRemote } from '../lib/accountBackupRemote';
 
 const Context = createContext(null);
 export const useAccountData = () => useContext(Context);
@@ -22,7 +24,15 @@ export function AccountDataProvider({ children }) {
   const { user, session } = useAuth();
   const authSession = useRef(session);
   authSession.current = session;
-  const { isPro, ready: subscriptionReady } = useSubscription();
+  const {
+    isPro,
+    ready: subscriptionReady,
+    scope,
+    scopeConfirmed,
+    accessVerified,
+  } = useSubscription();
+  const access = useRef(null);
+  access.current = { userId: user?.id, scope, scopeConfirmed, accessVerified, isPro };
   const { theme } = useTheme();
   const [preparedStorage, setPreparedStorage] = useState(null);
   const [localError, setLocalError] = useState(false);
@@ -35,8 +45,12 @@ export function AccountDataProvider({ children }) {
   const paused = useRef(false);
   const schedule = useRef(() => {});
   const storage = useMemo(
-    () => createAccountStore(AsyncStorage, user?.id, () => schedule.current()),
-    [user?.id],
+    () =>
+      createAccountStore(AsyncStorage, user?.id, () => schedule.current(), {
+        namespace: user ? scope?.namespace || `unresolved:${user.id}` : null,
+        allowGuestImport: !!user && scope?.lane === 'production',
+      }),
+    [user?.id, scope?.namespace],
   );
   const localReady = preparedStorage === storage;
   const reportLoadFailure = useCallback(() => {
@@ -73,7 +87,14 @@ export function AccountDataProvider({ children }) {
         if (alive) setGuest(value);
       });
     updateGuest().catch(() => {});
-    if (!user || !isPro || !supabase) {
+    if (
+      !user ||
+      !isPro ||
+      !supabase ||
+      !scopeConfirmed ||
+      !accessVerified ||
+      !billingScopeActive(scope)
+    ) {
       setState({ status: 'local', error: null, lastSyncedAt: null });
       return () => {
         alive = false;
@@ -81,33 +102,27 @@ export function AccountDataProvider({ children }) {
     }
     const sync = createBackupSync({
       local: storage,
-      canSync: () => alive && !paused.current,
-      remote: {
-        read: async () => {
-          const { data, error } = await supabase
-            .from('account_backups')
-            .select('payload,revision,updated_at')
-            .eq('user_id', user.id)
-            .maybeSingle();
-          if (error) throw error;
-          return data;
-        },
-        write: async (payload, revision) => {
-          const captured = authSession.current;
-          if (!alive || captured?.user.id !== user.id)
-            throw new Error('Your account changed. Please retry.');
-          const { data, error } = await supabase
-            .rpc('save_account_backup', {
-              expected_revision: revision,
-              backup_payload: payload,
-              backup_user_id: user.id,
-            })
-            .setHeader('Authorization', `Bearer ${captured.access_token}`)
-            .single();
-          if (error) throw error;
-          return data;
-        },
-      },
+      canSync: () =>
+        alive &&
+        !paused.current &&
+        access.current?.scopeConfirmed &&
+        access.current?.accessVerified &&
+        access.current?.isPro &&
+        sameBillingScope(scope, access.current.scope) &&
+        billingScopeActive(access.current.scope),
+      remote: createAccountBackupRemote({
+        client: supabase,
+        scope,
+        getSession: () => authSession.current,
+        isCurrent: () =>
+          alive &&
+          access.current?.userId === user.id &&
+          access.current?.scopeConfirmed &&
+          access.current?.accessVerified &&
+          access.current?.isPro &&
+          sameBillingScope(scope, access.current.scope) &&
+          billingScopeActive(access.current.scope),
+      }),
       onState: (next) => {
         if (alive)
           setState((previous) => ({
@@ -141,7 +156,16 @@ export function AccountDataProvider({ children }) {
       sync.stop();
       engine.current = null;
     };
-  }, [user?.id, isPro, subscriptionReady, storage, localReady]);
+  }, [
+    user?.id,
+    isPro,
+    subscriptionReady,
+    storage,
+    localReady,
+    scopeConfirmed,
+    accessVerified,
+    scope?.active,
+  ]);
   const importGuestData = async () => {
     if (paused.current) throw new Error('Finish your active workout before importing records.');
     await storage.importGuestData();
@@ -172,7 +196,7 @@ export function AccountDataProvider({ children }) {
   return (
     <Context.Provider value={value}>
       {localReady ? (
-        <React.Fragment key={epoch}>{children}</React.Fragment>
+        <React.Fragment key={`${storage.namespace || 'guest'}:${epoch}`}>{children}</React.Fragment>
       ) : (
         <View style={{ flex: 1, justifyContent: 'center', backgroundColor: theme.background }}>
           {localError ? (

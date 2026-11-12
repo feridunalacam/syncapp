@@ -1,6 +1,16 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { clearAccountPlatforms } from '../lib/platformStorage';
+import { clearAccountPlatforms, invalidateAccountPlatforms } from '../lib/platformStorage';
+import {
+  clearAccountStore,
+  discoverAccountNamespaces,
+  invalidateAccountStores,
+} from '../lib/accountStore';
+import {
+  invalidateBillingScope,
+  getKnownBillingNamespaces,
+  forgetBillingScope,
+} from '../lib/accountBillingScope';
 import { AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
@@ -221,16 +231,50 @@ export function AuthProvider({ children }) {
         );
       }
       // Remote deletion is confirmed before this device forgets its account data.
-      const { clearAccountStore } = await import('../lib/accountStore');
-      const cleanup = Promise.allSettled([
-        clearAccountStore(AsyncStorage, targetId),
-        clearAccountPlatforms(targetId),
-      ]);
-      if (currentUser.current === targetId) {
-        await client.auth.signOut({ scope: 'local' });
-        if (currentUser.current === targetId) setSession(null);
+      invalidateBillingScope(AsyncStorage, targetId);
+      const liveNamespaces = invalidateAccountStores(AsyncStorage, targetId);
+      // SecureStore saves precede their AsyncStorage metadata. A previous crash
+      // can leave a credential-only orphan, so cleanup cannot depend on key
+      // discovery. These are exact keys for the deleted UID, never routing hints.
+      const credentialNamespaces = [targetId, `review:1:${targetId}`, `unresolved:${targetId}`];
+      for (const namespace of credentialNamespaces) invalidateAccountPlatforms(namespace);
+      const cleanup = (async () => {
+        // Registry reads drain older confirmations. Key-name discovery covers
+        // legacy installs without a registry. A failed/corrupt registry cannot
+        // prevent discovery or draining already-closed live local writers.
+        const discovered = await Promise.allSettled([
+          getKnownBillingNamespaces(AsyncStorage, targetId),
+          discoverAccountNamespaces(AsyncStorage, targetId),
+        ]);
+        const namespaces = [
+          ...new Set([
+            ...liveNamespaces,
+            ...discovered.flatMap((result) => (result.status === 'fulfilled' ? result.value : [])),
+          ]),
+        ];
+        const results = await Promise.allSettled([
+          ...namespaces.map((namespace) =>
+            clearAccountStore(AsyncStorage, targetId, { namespace }),
+          ),
+          ...credentialNamespaces.map((namespace) => clearAccountPlatforms(namespace)),
+        ]);
+        if ([...discovered, ...results].some((result) => result.status === 'rejected'))
+          throw new Error();
+        // Retain namespace knowledge if any cleanup fails, for a later retry.
+        await forgetBillingScope(AsyncStorage, targetId);
+      })().then(
+        () => null,
+        () => new Error('Your account was deleted, but some device records could not be removed.'),
+      );
+      try {
+        if (currentUser.current === targetId) {
+          await client.auth.signOut({ scope: 'local' });
+          if (currentUser.current === targetId) setSession(null);
+        }
+      } finally {
+        const cleanupError = await cleanup;
+        if (cleanupError) throw cleanupError;
       }
-      await cleanup;
     });
   };
   return (

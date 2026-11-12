@@ -58,19 +58,61 @@ const parseSavedJSON = (raw, fallback = null) => {
     throw new Error('Saved records could not be read. Retry to recover this device’s data.');
   }
 };
-const prefixFor = (userId) => (userId ? `@syncapp/account/${userId}/` : '');
-export const clearAccountStore = async (base, userId) => {
-  const prefix = prefixFor(userId);
+const namespaceFor = (userId, namespace = userId) => {
+  if (!userId) {
+    if (namespace != null && namespace !== '') throw new Error('Invalid account storage scope.');
+    return null;
+  }
+  if (
+    typeof userId !== 'string' ||
+    /[\/\\\u0000]/.test(userId) ||
+    ![userId, `review:1:${userId}`, `unresolved:${userId}`].includes(namespace)
+  )
+    throw new Error('Invalid account storage scope.');
+  return namespace;
+};
+const prefixFor = (namespace) => (namespace ? `@syncapp/account/${namespace}/` : '');
+export const invalidateAccountStores = (base, userId) => {
+  namespaceFor(userId);
   if (!userId) throw new Error('An account is required.');
+  const namespaces = [userId, `review:1:${userId}`, `unresolved:${userId}`].filter((namespace) =>
+    queueFor(base).has(prefixFor(namespace)),
+  );
+  for (const namespace of namespaces) closedFor(base).add(prefixFor(namespace));
+  return namespaces;
+};
+
+// Deletion-only discovery of existing key names and instantiated local adapters.
+// This never selects a billing lane or grants access. Include live adapters even
+// before a held first write has persisted any key on an older unregistered install.
+export const discoverAccountNamespaces = async (base, userId) => {
+  namespaceFor(userId);
+  if (!userId) throw new Error('An account is required.');
+  const candidates = [userId, `review:1:${userId}`, `unresolved:${userId}`];
+  const keys = await base.getAllKeys();
+  return candidates.filter(
+    (namespace) =>
+      queueFor(base).has(prefixFor(namespace)) ||
+      keys.some((key) => key.startsWith(prefixFor(namespace))),
+  );
+};
+
+export const clearAccountStore = async (base, userId, options = {}) => {
+  if (!userId) throw new Error('An account is required.');
+  const namespace = namespaceFor(userId, options.namespace);
+  const prefix = prefixFor(namespace);
   // Close synchronously before waiting: stale providers may still have a token
   // refresh or persistence callback in flight. A new adapter cannot reopen it.
   closedFor(base).add(prefix);
   const scopedQueues = queueFor(base);
   const result = (scopedQueues.get(prefix) || Promise.resolve()).then(async () => {
-    const importClaim = await base.getItem(IMPORT_CLAIM_KEY);
-    const pendingImport = decode(await base.getItem(IMPORT_CLEANUP_KEY));
     const keys = await base.getAllKeys();
     await base.multiRemove(keys.filter((key) => key.startsWith(prefix)));
+    // Review/unresolved adapters can never import guest data, so deleting them
+    // must not inspect or remove the production import claim/cleanup journal.
+    if (namespace !== userId) return;
+    const importClaim = await base.getItem(IMPORT_CLAIM_KEY);
+    const pendingImport = decode(await base.getItem(IMPORT_CLEANUP_KEY));
     if (importClaim === userId) {
       // An unfinished import must not reserve guest records for a deleted
       // account. Completed imports have already removed their temporary claim.
@@ -144,11 +186,14 @@ export function sanitizeBackup(value) {
   );
 }
 
-export function createAccountStore(base, userId, onWrite = () => {}) {
-  const prefix = prefixFor(userId);
+export function createAccountStore(base, userId, onWrite = () => {}, options = {}) {
+  const namespace = namespaceFor(userId, options.namespace);
+  const allowGuestImport = !!userId && namespace === userId && options.allowGuestImport !== false;
+  const prefix = prefixFor(namespace);
   const metaKey = `${prefix}@syncmeta`;
   const restoreKey = `${prefix}@cloud-restore-pending`;
   const scopedQueues = queueFor(base);
+  if (!scopedQueues.has(prefix)) scopedQueues.set(prefix, Promise.resolve());
   const ensureOpen = () => {
     if (closedFor(base).has(prefix))
       throw new Error('This account has been deleted from this device.');
@@ -312,6 +357,11 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
     );
     return result;
   };
+  const importSerial = (work) => {
+    if (userId && !allowGuestImport)
+      return Promise.reject(new Error('Device data cannot be imported into this account scope.'));
+    return serial(work);
+  };
   const validateImportedGuestRecords = (pending) => {
     const allowed = [...BACKUP_KEYS, 'profilePictureUri'];
     if (
@@ -342,6 +392,8 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
   };
   return {
     userId,
+    namespace,
+    allowGuestImport,
     // Resolve interrupted replacement before mounting consumers. Read every
     // personal key without cloud sanitization, normalization or a size limit so
     // guest/Free content remains available independently of backup eligibility.
@@ -380,6 +432,7 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
       }),
     guestImportState: () =>
       serial(async () => {
+        if (userId && !allowGuestImport) return { hasGuestData: false, importComplete: false };
         const owner = await base.getItem(OWNER_KEY);
         const claim = await base.getItem(IMPORT_CLAIM_KEY);
         const pending = decode(await base.getItem(IMPORT_CLEANUP_KEY));
@@ -394,7 +447,7 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
         return { hasGuestData, importComplete: !!userId && owner === userId && !needsCleanup };
       }),
     importGuestData: () =>
-      serial(() =>
+      importSerial(() =>
         claimImport(base, () => {
           if (!userId) throw new Error('Sign in before importing device data.');
           return withGuestRecords(async () => {

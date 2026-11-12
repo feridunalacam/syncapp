@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { transformSync } from '@babel/core';
-import { createAccountStore, clearAccountStore, sanitizeBackup } from '../src/lib/accountStore.js';
+import {
+  createAccountStore,
+  clearAccountStore,
+  discoverAccountNamespaces,
+  sanitizeBackup,
+} from '../src/lib/accountStore.js';
 
 function memoryStorage(initial = {}, hooks = {}) {
   const values = new Map(Object.entries(initial));
@@ -905,4 +910,212 @@ test('one account token queue never blocks another account and explicit invalida
   await Promise.all([a, later, adapter.clearAccountPlatforms('a')]);
   assert.equal(values.has('syncapp.music.credentials.a'), false);
   assert.equal(values.has('syncapp.music.credentials.b'), true);
+});
+
+test('production keeps legacy keys while review and unresolved records isolate the same account', async () => {
+  const guest = '[{"id":"guest-private"}]';
+  const legacy = '[{"id":"production-private"}]';
+  const damagedProductionJournal = '{recoverable-production-journal';
+  const base = memoryStorage({
+    routines: guest,
+    [scopedKey('a', 'routines')]: legacy,
+    [scopedKey('a', '@cloud-restore-pending')]: damagedProductionJournal,
+  });
+  const review = createAccountStore(base, 'a', undefined, { namespace: 'review:1:a' });
+  const unresolved = createAccountStore(base, 'a', undefined, { namespace: 'unresolved:a' });
+  assert.equal(review.namespace, 'review:1:a');
+  assert.equal(review.userId, 'a');
+  assert.equal(review.allowGuestImport, false);
+  await review.prepare();
+  await review.setJSON('routines', [{ id: 'review-private' }]);
+  await unresolved.setJSON('routines', [{ id: 'unresolved-private' }]);
+  assert.deepEqual(await review.getJSON('routines'), [{ id: 'review-private' }]);
+  assert.deepEqual(await unresolved.getJSON('routines'), [{ id: 'unresolved-private' }]);
+  assert.equal(base.values.get('routines'), guest);
+  assert.equal(base.values.get(scopedKey('a', 'routines')), legacy);
+  assert.equal(base.values.get(scopedKey('a', '@cloud-restore-pending')), damagedProductionJournal);
+  base.values.delete(scopedKey('a', '@cloud-restore-pending'));
+  const production = createAccountStore(base, 'a');
+  assert.equal(production.namespace, 'a');
+  assert.equal(production.allowGuestImport, true);
+  assert.deepEqual(await production.getJSON('routines'), [{ id: 'production-private' }]);
+});
+
+test('a caller cannot select another account or an unrecognized local namespace', async () => {
+  const base = memoryStorage({ routines: 'guest remains untouched' });
+  for (const namespace of ['b', 'review:1:b', 'unresolved:b', 'review:2:a', '../a', '']) {
+    assert.throws(
+      () => createAccountStore(base, 'a', undefined, { namespace }),
+      /Invalid account storage scope/,
+    );
+    await assert.rejects(
+      clearAccountStore(base, 'a', { namespace }),
+      /Invalid account storage scope/,
+    );
+  }
+  assert.throws(
+    () => createAccountStore(base, null, undefined, { namespace: 'a' }),
+    /Invalid account storage scope/,
+  );
+  assert.equal(base.values.size, 1);
+});
+
+test('review and unresolved cannot inspect, claim, import or clean guest records even when import is requested', async () => {
+  for (const namespace of ['review:1:a', 'unresolved:a']) {
+    const originals = {
+      routines: '[{"id":"guest-private"}]',
+      '@syncapp_guest_import_owner': 'a',
+      '@syncapp_guest_import_claim': 'a',
+      '@syncapp_guest_import_cleanup': JSON.stringify({
+        userId: 'a',
+        entries: [['routines', '[{"id":"guest-private"}]']],
+      }),
+    };
+    const base = memoryStorage(originals);
+    const read = base.getItem;
+    base.getItem = (key) => {
+      assert.ok(key.startsWith(scopedKey(namespace, '')), `Unexpected guest/global read: ${key}`);
+      return read(key);
+    };
+    const account = createAccountStore(base, 'a', undefined, { namespace, allowGuestImport: true });
+    assert.deepEqual(await account.guestImportState(), {
+      hasGuestData: false,
+      importComplete: false,
+    });
+    await assert.rejects(account.importGuestData(), /cannot be imported/);
+    await account.setString('profileBio', 'Only this scope');
+    await clearAccountStore(base, 'a', { namespace });
+    assert.deepEqual(base.values, new Map(Object.entries(originals)));
+  }
+});
+
+test('closing a review namespace drains and rejects stale writes without closing production or unresolved', async () => {
+  const pending = deferred();
+  const reached = deferred();
+  const namespace = 'review:1:a';
+  const base = memoryStorage(
+    {},
+    {
+      beforeSet: (key) => {
+        if (key !== scopedKey(namespace, 'profileBio')) return;
+        reached.resolve();
+        return pending.promise;
+      },
+    },
+  );
+  const review = createAccountStore(base, 'a', undefined, { namespace });
+  const production = createAccountStore(base, 'a');
+  const unresolved = createAccountStore(base, 'a', undefined, { namespace: 'unresolved:a' });
+  const oldWrite = review.setString('profileBio', 'Held review write');
+  await reached.promise;
+  const deleting = clearAccountStore(base, 'a', { namespace });
+  const lateWrite = review.setString('profileBio', 'Late review write');
+  await production.setString('profileBio', 'Production remains usable');
+  await unresolved.setString('profileBio', 'Unresolved remains separate');
+  pending.resolve();
+  await Promise.all([oldWrite, deleting]);
+  assert.equal(await lateWrite, false);
+  assert.equal(
+    await createAccountStore(base, 'a', undefined, { namespace }).setString(
+      'profileBio',
+      'Reopened',
+    ),
+    false,
+  );
+  assert.equal(await production.getString('profileBio'), 'Production remains usable');
+  assert.equal(await unresolved.getString('profileBio'), 'Unresolved remains separate');
+  assert.equal(
+    [...base.values.keys()].some((key) => key.startsWith(scopedKey(namespace, ''))),
+    false,
+  );
+});
+
+test('an in-flight review restore and its journal cannot overwrite or clear production during deletion', async () => {
+  const pending = deferred();
+  const reached = deferred();
+  const namespace = 'review:1:a';
+  let held = false;
+  const base = memoryStorage(
+    { [scopedKey('a', 'routines')]: '[{"id":"production"}]' },
+    {
+      beforeSet: (key) => {
+        if (key !== scopedKey(namespace, 'routines') || held) return;
+        held = true;
+        reached.resolve();
+        return pending.promise;
+      },
+    },
+  );
+  const review = createAccountStore(base, 'a', undefined, { namespace });
+  const restoring = review.replaceFromCloud(payload({ routines: [{ id: 'review-cloud' }] }), 2, 0);
+  await reached.promise;
+  assert.ok(base.values.has(scopedKey(namespace, '@cloud-restore-pending')));
+  const deleting = clearAccountStore(base, 'a', { namespace });
+  const production = createAccountStore(base, 'a');
+  await production.setJSON('routines', [{ id: 'new-production' }]);
+  pending.resolve();
+  await Promise.all([restoring, deleting]);
+  assert.deepEqual(await production.getJSON('routines'), [{ id: 'new-production' }]);
+  assert.equal(
+    [...base.values.keys()].some((key) => key.startsWith(scopedKey(namespace, ''))),
+    false,
+  );
+});
+
+test('deletion discovers only exact existing account namespaces using key names, without reading values', async () => {
+  const base = memoryStorage({
+    [scopedKey('a', 'profileBio')]: 'legacy production',
+    [scopedKey('review:1:a', 'routines')]: 'review',
+    [scopedKey('unresolved:a', '@syncmeta')]: 'unresolved',
+    [scopedKey('ab', 'profileBio')]: 'other account',
+    [scopedKey('review:1:ab', 'routines')]: 'other review account',
+    routines: 'guest',
+  });
+  base.getItem = () => assert.fail('Namespace discovery must not read record values');
+  assert.deepEqual(await discoverAccountNamespaces(base, 'a'), ['a', 'review:1:a', 'unresolved:a']);
+  assert.deepEqual(await discoverAccountNamespaces(base, 'missing'), []);
+});
+
+test('native music credential namespaces use valid distinct keys and deleting review preserves production and guest', async () => {
+  const values = new Map();
+  const base = memoryStorage();
+  const adapter = platformStorageWith({
+    setItemAsync: async (key, value) => {
+      assert.match(key, /^[A-Za-z0-9._-]+$/);
+      values.set(key, value);
+    },
+    getItemAsync: async (key) => values.get(key) ?? null,
+    deleteItemAsync: async (key) => values.delete(key),
+  });
+  const scopes = [undefined, 'a', 'review:1:a', 'unresolved:a'];
+  const optionsFor = (accountId) => ({
+    accountId,
+    storage: createAccountStore(base, accountId ? 'a' : null, undefined, {
+      namespace: accountId,
+    }),
+  });
+  for (const accountId of scopes) {
+    await adapter.savePlatforms(
+      { spotify: { connected: true, accessToken: accountId || 'guest' } },
+      optionsFor(accountId),
+    );
+  }
+  assert.equal(values.size, 4);
+  assert.ok(values.has('syncapp.music.credentials'));
+  assert.ok(values.has('syncapp.music.credentials.a'));
+  for (const accountId of scopes) {
+    assert.equal(
+      (await adapter.loadPlatforms(optionsFor(accountId))).spotify.accessToken,
+      accountId || 'guest',
+    );
+  }
+  await adapter.clearAccountPlatforms('review:1:a');
+  assert.equal(values.size, 3);
+  await assert.rejects(adapter.savePlatforms({}, optionsFor('review:1:a')), /deleted/);
+  assert.equal((await adapter.loadPlatforms(optionsFor('a'))).spotify.accessToken, 'a');
+  assert.equal((await adapter.loadPlatforms(optionsFor(undefined))).spotify.accessToken, 'guest');
+  assert.equal(
+    (await adapter.loadPlatforms(optionsFor('unresolved:a'))).spotify.accessToken,
+    'unresolved:a',
+  );
 });

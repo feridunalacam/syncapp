@@ -150,9 +150,11 @@ export default function SubscriptionPanel({ visible, onClose, onSignIn }) {
             {subscription.ready &&
               !subscription.configured &&
               text(
-                subscription.requiresNativeBuild
-                  ? 'Purchases will be available after updating this app build.'
-                  : 'Subscriptions are not available for purchase yet. Your free features are ready to use.',
+                subscription.requiresRestart
+                  ? 'Close Sync completely and reopen it to finish switching accounts before using purchases.'
+                  : subscription.requiresNativeBuild
+                    ? 'Purchases will be available after updating this app build.'
+                    : 'Subscriptions are not available for purchase yet. Your free features are ready to use.',
               )}
             {subscription.ready &&
               subscription.configured &&

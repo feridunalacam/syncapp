@@ -80,7 +80,10 @@ test('missing, private, malformed and wrong-platform keys never reach the native
       apiKey: config.apiKey,
       verify: async () => ({ entitlement: null }),
     });
-    await controller.identify('test-user');
+    await assert.rejects(
+      controller.identify('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),
+      /Account access/,
+    );
     assert.equal(controller.getState().configured, false);
     assert.equal(controller.getState().ready, true);
     assert.throws(() => controller.purchase({}), /not available/);
@@ -105,5 +108,38 @@ test('valid config still requires a native bridge and handles an old binary safe
       },
     }),
     null,
+  );
+});
+
+test('review configuration accepts only a distinct actual Apple store key, including in Debug', () => {
+  const values = { EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: 'appl_ProductionFixture' };
+  for (const key of [
+    undefined,
+    'test_DebugFixture',
+    'goog_OtherStore',
+    'sk_PrivateFixture',
+    'appl_ProductionFixture',
+  ]) {
+    assert.equal(
+      createSubscriptionConfig({
+        platform: 'ios',
+        dev: true,
+        lane: 'review',
+        env: { ...values, EXPO_PUBLIC_REVENUECAT_REVIEW_IOS_API_KEY: key },
+      }).enabled,
+      false,
+    );
+  }
+  assert.equal(
+    createSubscriptionConfig({
+      platform: 'ios',
+      lane: 'review',
+      env: { ...values, EXPO_PUBLIC_REVENUECAT_REVIEW_IOS_API_KEY: 'appl_ReviewFixture' },
+    }).apiKey,
+    'appl_ReviewFixture',
+  );
+  assert.equal(
+    createSubscriptionConfig({ platform: 'android', lane: 'review', env: values }).enabled,
+    false,
   );
 });

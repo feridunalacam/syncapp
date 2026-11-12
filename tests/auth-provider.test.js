@@ -12,6 +12,18 @@ import { createAuthFetch, AUTH_REQUEST_TIMEOUT_MS } from '../src/lib/authFetch.j
 import { AUTH_REDIRECT, RECOVERY_REDIRECT, parseAuthLink } from '../src/lib/authLinks.js';
 import { authExchangeDiagnostic, createAuthCodeExchanger } from '../src/lib/authCodeExchange.js';
 import { createSocialAuth } from '../src/lib/socialAuth.js';
+import {
+  createAccountStore,
+  clearAccountStore,
+  discoverAccountNamespaces,
+  invalidateAccountStores,
+} from '../src/lib/accountStore.js';
+import {
+  createBillingScopeRegistry,
+  invalidateBillingScope,
+  getKnownBillingNamespaces,
+  forgetBillingScope,
+} from '../src/lib/accountBillingScope.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -49,7 +61,24 @@ function memoryStorage() {
     getItem: async (key) => data.get(key) ?? null,
     setItem: async (key, value) => data.set(key, value),
     removeItem: async (key) => data.delete(key),
+    getAllKeys: async () => [...data.keys()],
+    multiRemove: async (keys) => keys.forEach((key) => data.delete(key)),
   };
+}
+function nativePlatformStorage(native) {
+  const body = readFileSync(new URL('../src/lib/platformStorage.js', import.meta.url), 'utf8')
+    .replace(/^import[\s\S]*?from ['"][^'"]+['"];?\n/gm, '')
+    .replace(/^export /gm, '');
+  const context = {
+    Platform: { OS: 'ios' },
+    SecureStore: native,
+    storage: { getJSON: async () => ({}), setJSON: async () => true },
+    STORAGE_KEYS: { CONNECTED_PLATFORMS: 'connectedPlatforms' },
+  };
+  new Script(
+    `${body}\nglobalThis.result = { clearAccountPlatforms, invalidateAccountPlatforms };`,
+  ).runInNewContext(context);
+  return context.result;
 }
 async function harness(options = {}) {
   const initial = deferred();
@@ -82,8 +111,15 @@ async function harness(options = {}) {
     useEffect: React.useEffect,
     useRef: React.useRef,
     useState: React.useState,
-    AsyncStorage: {},
+    AsyncStorage: options.accountStorage || memoryStorage(),
     clearAccountPlatforms: options.clearAccountPlatforms || (() => {}),
+    invalidateAccountPlatforms: options.invalidateAccountPlatforms || (() => {}),
+    clearAccountStore,
+    discoverAccountNamespaces,
+    invalidateAccountStores,
+    invalidateBillingScope,
+    getKnownBillingNamespaces,
+    forgetBillingScope,
     AppState: { currentState: 'active', addEventListener: () => ({ remove: () => {} }) },
     Linking: {
       getInitialURL: () => Promise.resolve(null),
@@ -415,5 +451,273 @@ test('held deletion success and error bodies abort before queued sign-out/sign-i
     } finally {
       await app.close();
     }
+  }
+});
+
+test('confirmed deletion cleans only the target account known namespaces and preserves a newer identity and guest data', async () => {
+  const local = memoryStorage();
+  const registry = createBillingScopeRegistry(local);
+  const reviewNamespace = `review:1:${accountA}`;
+  await registry.confirm({
+    user_id: accountA,
+    lane: 'review',
+    namespace: reviewNamespace,
+    epoch: 1,
+    active: true,
+    expires_at: '2099-01-01T00:00:00.000Z',
+  });
+  for (const namespace of [accountA, reviewNamespace, `unresolved:${accountA}`]) {
+    await createAccountStore(local, accountA, undefined, { namespace }).setString(
+      'profileBio',
+      namespace,
+    );
+  }
+  await createAccountStore(local, accountB).setString('profileBio', 'Other account remains');
+  await createAccountStore(local, null).setString('profileBio', 'Guest remains');
+  const pending = deferred();
+  const reached = deferred();
+  const clearedMusic = [];
+  let signOuts = 0;
+  const app = await harness({
+    accountStorage: local,
+    invoke: () => {
+      reached.resolve();
+      return pending.promise;
+    },
+    clearAccountPlatforms: async (namespace) => clearedMusic.push(namespace),
+    signOut: async () => {
+      signOuts++;
+      return { error: null };
+    },
+  });
+  try {
+    await app.emit('SIGNED_IN', session());
+    let deleting;
+    await act(async () => {
+      deleting = app.value.deleteAccount();
+    });
+    await reached.promise;
+    assert.deepEqual(clearedMusic, []);
+    await app.emit('SIGNED_IN', session(accountB, sessionB));
+    await act(async () => {
+      pending.resolve({ error: null });
+      await deleting;
+    });
+    assert.equal(app.value.user.id, accountB);
+    assert.equal(signOuts, 0);
+    assert.deepEqual(
+      [...clearedMusic].sort(),
+      [accountA, reviewNamespace, `unresolved:${accountA}`].sort(),
+    );
+    assert.equal(
+      [...local.data.keys()].some(
+        (key) =>
+          key.startsWith(`@syncapp/account/${accountA}/`) ||
+          key.startsWith(`@syncapp/account/${reviewNamespace}/`) ||
+          key.startsWith(`@syncapp/account/unresolved:${accountA}/`),
+      ),
+      false,
+    );
+    assert.equal(
+      await createAccountStore(local, accountB).getString('profileBio'),
+      'Other account remains',
+    );
+    assert.equal(await createAccountStore(local, null).getString('profileBio'), 'Guest remains');
+    assert.deepEqual(await getKnownBillingNamespaces(local, accountA), [`unresolved:${accountA}`]);
+    await assert.rejects(
+      registry.confirm({
+        user_id: accountA,
+        lane: 'review',
+        namespace: reviewNamespace,
+        epoch: 1,
+        active: true,
+        expires_at: '2099-01-01T00:00:00.000Z',
+      }),
+      /could not be checked/,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('confirmed deletion discovers legacy production data without a billing registry', async () => {
+  const local = memoryStorage();
+  await createAccountStore(local, accountA).setJSON('routines', [{ id: 'legacy-local' }]);
+  const app = await harness({ accountStorage: local, invoke: async () => ({ error: null }) });
+  try {
+    await app.emit('SIGNED_IN', session());
+    await act(async () => app.value.deleteAccount());
+    assert.equal(app.value.user, null);
+    assert.equal(
+      [...local.data.keys()].some((key) => key.startsWith(`@syncapp/account/${accountA}/`)),
+      false,
+    );
+  } finally {
+    await app.close();
+  }
+});
+
+test('confirmed deletion closes a legacy writer held before its first durable key without a scope registry', async () => {
+  const local = memoryStorage();
+  const pending = deferred();
+  const reached = deferred();
+  const set = local.setItem;
+  local.setItem = async (key, value) => {
+    if (key === `@syncapp/account/${accountA}/@syncmeta`) {
+      reached.resolve();
+      await pending.promise;
+    }
+    return set(key, value);
+  };
+  const legacy = createAccountStore(local, accountA);
+  const saving = legacy.setString('profileBio', 'Held first legacy write');
+  await reached.promise;
+  assert.equal(local.data.size, 0);
+  const app = await harness({ accountStorage: local, invoke: async () => ({ error: null }) });
+  try {
+    await app.emit('SIGNED_IN', session());
+    let deleting;
+    await act(async () => {
+      deleting = app.value.deleteAccount();
+    });
+    await act(async () => {
+      pending.resolve();
+      await Promise.all([saving, deleting]);
+    });
+    assert.equal(await legacy.setString('profileBio', 'Late resurrection'), false);
+    assert.equal(
+      [...local.data.keys()].some((key) => key.startsWith(`@syncapp/account/${accountA}/`)),
+      false,
+    );
+  } finally {
+    pending.resolve();
+    await app.close();
+  }
+});
+
+test('a confirmed remote deletion retains namespace knowledge and reports incomplete local cleanup', async () => {
+  const local = memoryStorage();
+  const namespace = `review:1:${accountA}`;
+  await createBillingScopeRegistry(local).confirm({
+    user_id: accountA,
+    lane: 'review',
+    namespace,
+    epoch: 1,
+    active: true,
+    expires_at: '2099-01-01T00:00:00.000Z',
+  });
+  await createAccountStore(local, accountA, undefined, { namespace }).setString(
+    'profileBio',
+    'Review record',
+  );
+  const app = await harness({
+    accountStorage: local,
+    invoke: async () => ({ error: null }),
+    clearAccountPlatforms: async () => {
+      throw new Error('Offline native cleanup fixture');
+    },
+  });
+  try {
+    await app.emit('SIGNED_IN', session());
+    await act(async () =>
+      assert.rejects(app.value.deleteAccount(), /account was deleted, but some device records/),
+    );
+    assert.equal(app.value.user, null);
+    assert.ok((await getKnownBillingNamespaces(local, accountA)).includes(namespace));
+  } finally {
+    await app.close();
+  }
+});
+
+test('a corrupt or unreadable registry cannot leave live writers open or skip deletion discovery', async () => {
+  for (const brokenRead of [false, true]) {
+    const local = memoryStorage();
+    const registryKey = `@syncapp/billing-scope/${accountA}`;
+    local.data.set(registryKey, '{recoverable-registry');
+    const pending = deferred();
+    const reached = deferred();
+    const invalidated = deferred();
+    const set = local.setItem;
+    const get = local.getItem;
+    const keys = local.getAllKeys;
+    let keyDiscoveries = 0;
+    local.getItem = (key) => {
+      if (brokenRead && key === registryKey) throw new Error('Registry read fixture');
+      return get(key);
+    };
+    local.getAllKeys = () => {
+      keyDiscoveries++;
+      return keys();
+    };
+    local.setItem = async (key, value) => {
+      if (key === `@syncapp/account/${accountA}/@syncmeta`) {
+        reached.resolve();
+        await pending.promise;
+      }
+      return set(key, value);
+    };
+    const legacy = createAccountStore(local, accountA);
+    const saving = legacy.setString('profileBio', 'Held first local write');
+    await reached.promise;
+    const app = await harness({
+      accountStorage: local,
+      invoke: async () => ({ error: null }),
+      invalidateAccountPlatforms: (namespace) => {
+        if (namespace === accountA) invalidated.resolve();
+      },
+    });
+    try {
+      await app.emit('SIGNED_IN', session());
+      let deleting;
+      await act(async () => {
+        deleting = app.value.deleteAccount();
+      });
+      await invalidated.promise;
+      const rejected = assert.rejects(deleting, /account was deleted, but some device records/);
+      const lateWrite = legacy.setString('profileBio', 'Late resurrection');
+      await act(async () => {
+        pending.resolve();
+        await Promise.all([saving, rejected]);
+      });
+      assert.equal(await lateWrite, false);
+      assert.ok(keyDiscoveries > 0);
+      assert.equal(
+        [...local.data.keys()].some((key) => key.startsWith(`@syncapp/account/${accountA}/`)),
+        false,
+      );
+      assert.equal(local.data.get(registryKey), '{recoverable-registry');
+      assert.equal(app.value.user, null);
+    } finally {
+      pending.resolve();
+      await app.close();
+    }
+  }
+});
+
+test('confirmed deletion removes SecureStore-only legacy credentials without registry or account metadata', async () => {
+  const credentials = new Map([
+    [`syncapp.music.credentials.${accountA}`, 'synthetic-orphan-for-deleted-account'],
+    [`syncapp.music.credentials.${accountB}`, 'other-account-remains'],
+    ['syncapp.music.credentials', 'guest-remains'],
+  ]);
+  const platform = nativePlatformStorage({
+    deleteItemAsync: async (key) => credentials.delete(key),
+  });
+  const local = memoryStorage();
+  const app = await harness({
+    accountStorage: local,
+    invoke: async () => ({ error: null }),
+    ...platform,
+  });
+  try {
+    await app.emit('SIGNED_IN', session());
+    assert.equal(local.data.size, 0);
+    await act(async () => app.value.deleteAccount());
+    assert.equal(credentials.has(`syncapp.music.credentials.${accountA}`), false);
+    assert.equal(credentials.get(`syncapp.music.credentials.${accountB}`), 'other-account-remains');
+    assert.equal(credentials.get('syncapp.music.credentials'), 'guest-remains');
+    assert.equal(app.value.user, null);
+  } finally {
+    await app.close();
   }
 });

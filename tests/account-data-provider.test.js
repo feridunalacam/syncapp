@@ -7,6 +7,8 @@ import React, { act } from 'react';
 import { create } from 'react-test-renderer';
 import { createAccountStore } from '../src/lib/accountStore.js';
 import { createBackupSync } from '../src/lib/backupSync.js';
+import { billingScopeActive, sameBillingScope } from '../src/lib/accountBillingScope.js';
+import { createAccountBackupRemote } from '../src/lib/accountBackupRemote.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -32,6 +34,18 @@ async function mount({
   user = null,
   pro = false,
   subscriptionReady = true,
+  scope = user
+    ? {
+        user_id: user.id,
+        lane: 'production',
+        namespace: user.id,
+        epoch: 0,
+        active: true,
+        expires_at: null,
+      }
+    : null,
+  scopeConfirmed = true,
+  accessVerified = subscriptionReady,
   beforeRead = () => {},
   remote,
 } = {}) {
@@ -74,12 +88,21 @@ async function mount({
     AppState: { addEventListener: () => ({ remove: () => {} }) },
     AsyncStorage: base,
     useAuth: () => ({ user, session: user ? { user, access_token: 'offline-fixture' } : null }),
-    useSubscription: () => ({ isPro: pro, ready: subscriptionReady }),
+    useSubscription: () => ({
+      isPro: pro,
+      ready: subscriptionReady,
+      scope,
+      scopeConfirmed,
+      accessVerified,
+    }),
     useTheme: () => ({
       theme: { background: '#000', text: '#fff', accent: '#0f0', accentText: '#000' },
     }),
     createAccountStore,
     createBackupSync,
+    billingScopeActive,
+    sameBillingScope,
+    createAccountBackupRemote,
     supabase: remote || null,
     setTimeout,
     clearTimeout,
@@ -116,6 +139,18 @@ async function mount({
     },
     async close() {
       await act(async () => renderer.unmount());
+    },
+    async updateAccess(next) {
+      if (Object.hasOwn(next, 'scope')) scope = next.scope;
+      if (Object.hasOwn(next, 'pro')) pro = next.pro;
+      if (Object.hasOwn(next, 'scopeConfirmed')) scopeConfirmed = next.scopeConfirmed;
+      if (Object.hasOwn(next, 'accessVerified')) accessVerified = next.accessVerified;
+      if (Object.hasOwn(next, 'user')) user = next.user;
+      await act(async () =>
+        renderer.update(
+          React.createElement(AccountDataProvider, {}, React.createElement(Observer)),
+        ),
+      );
     },
   };
 }
@@ -225,20 +260,25 @@ test('a pending Pro backup cannot block local core or replace records after a wo
     finish = resolve;
   });
   const app = await mount({
-    user: { id: 'pro' },
+    user: { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' },
     pro: true,
-    initial: { '@syncapp/account/pro/routines': '[{"id":"device"}]' },
+    initial: {
+      '@syncapp/account/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/routines': '[{"id":"device"}]',
+    },
     remote: {
-      from: () => ({
-        select: () => ({
-          eq: () => ({
-            maybeSingle: () => {
-              reads++;
-              return pending;
-            },
-          }),
-        }),
-      }),
+      from: () => {
+        const query = {
+          select: () => query,
+          setHeader: () => query,
+          eq: () => query,
+          abortSignal: () => query,
+          maybeSingle: () => {
+            reads++;
+            return pending;
+          },
+        };
+        return query;
+      },
     },
   });
   try {
@@ -296,5 +336,117 @@ test('damaged guest and account JSON never mounts consumers or overwrites its re
     } finally {
       await app.close();
     }
+  }
+});
+
+test('an unknown scope uses isolated local scratch and later opens only the confirmed review namespace', async () => {
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const scope = {
+    user_id: id,
+    lane: 'review',
+    namespace: `review:1:${id}`,
+    epoch: 1,
+    active: true,
+    expires_at: '2099-01-01T00:00:00Z',
+  };
+  const app = await mount({
+    user: { id },
+    scope: null,
+    scopeConfirmed: false,
+    accessVerified: false,
+    initial: {
+      routines: '[{"id":"guest-private"}]',
+      [`@syncapp/account/${id}/routines`]: '[{"id":"production-private"}]',
+      [`@syncapp/account/${scope.namespace}/routines`]: '[{"id":"review-local"}]',
+    },
+    remote: { from: () => assert.fail('Unknown/unverified scope must not query cloud') },
+  });
+  try {
+    assert.equal(app.value.storage.namespace, `unresolved:${id}`);
+    assert.deepEqual(await app.value.storage.getJSON('routines', []), []);
+    await assert.rejects(app.value.importGuestData());
+    await app.value.storage.setJSON('routines', [{ id: 'temporary-local' }]);
+    await app.updateAccess({ scope });
+    assert.equal(app.value.storage.namespace, scope.namespace);
+    assert.deepEqual(await app.value.storage.getJSON('routines'), [{ id: 'review-local' }]);
+    assert.equal(app.value.hasGuestData, false);
+    assert.equal(app.values.get('routines'), '[{"id":"guest-private"}]');
+    assert.equal(
+      app.values.get(`@syncapp/account/${id}/routines`),
+      '[{"id":"production-private"}]',
+    );
+    assert.equal(
+      app.values.get(`@syncapp/account/unresolved:${id}/routines`),
+      '[{"id":"temporary-local"}]',
+    );
+    assert.ok(app.mounts >= 2);
+  } finally {
+    await app.close();
+  }
+});
+
+test('revoked review access cannot apply a previously requested cloud backup or touch guest data', async () => {
+  const id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const scope = {
+    user_id: id,
+    lane: 'review',
+    namespace: `review:1:${id}`,
+    epoch: 1,
+    active: true,
+    expires_at: '2099-01-01T00:00:00Z',
+  };
+  let finish,
+    reads = 0;
+  const pending = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const app = await mount({
+    user: { id },
+    pro: true,
+    scope,
+    initial: {
+      routines: '[{"id":"guest"}]',
+      [`@syncapp/account/${scope.namespace}/routines`]: '[{"id":"review-local"}]',
+    },
+    remote: {
+      from: (table) => {
+        assert.equal(table, 'review_backups');
+        const query = {
+          select: () => query,
+          setHeader: () => query,
+          eq: () => query,
+          abortSignal: () => query,
+          maybeSingle: () => {
+            reads++;
+            return pending;
+          },
+        };
+        return query;
+      },
+    },
+  });
+  try {
+    assert.equal(reads, 1);
+    await app.updateAccess({
+      scope: { ...scope, active: false },
+      pro: false,
+      accessVerified: false,
+    });
+    await act(async () =>
+      finish({
+        data: {
+          namespace: scope.namespace,
+          epoch: 1,
+          revision: 4,
+          payload: { version: 1, data: { routines: [{ id: 'late-cloud' }] } },
+        },
+        error: null,
+      }),
+    );
+    assert.deepEqual(await app.value.storage.getJSON('routines'), [{ id: 'review-local' }]);
+    assert.equal(app.values.get('routines'), '[{"id":"guest"}]');
+    assert.equal(app.value.storage.namespace, scope.namespace);
+  } finally {
+    await app.close();
   }
 });

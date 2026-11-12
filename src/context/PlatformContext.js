@@ -35,7 +35,7 @@ const defaults = { device: { connected: true, accessToken: 'device' } };
 const PlatformContext = createContext({ connectedPlatforms: defaults, services, ready: false });
 export function PlatformProvider({ children }) {
   const { storage } = useAccountData();
-  const platformOptions = { storage, accountId: storage.userId };
+  const platformOptions = { storage, accountId: storage.namespace };
   const [connectedPlatforms, setConnectedPlatforms] = useState(defaults);
   const [selectedPlatform, setSelected] = useState(null);
   const [ready, setReady] = useState(false);

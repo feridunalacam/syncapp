@@ -1,4 +1,4 @@
-import { adminClient, json, preflight, subscriptionConfig, syncEntitlement } from '../_shared/server.ts';
+import { accountBillingScope, adminClient, json, preflight, subscriptionConfig, syncEntitlement } from '../_shared/server.ts';
 import { secureEqual, validateWebhook, webhookUsers } from '../_shared/subscriptions.js';
 
 Deno.serve(async (req: Request) => {
@@ -23,6 +23,8 @@ Deno.serve(async (req: Request) => {
       // Ignore former/deleted accounts. An upstream auth outage should be retried.
       if (error && error.status !== 404) throw error;
       if (!data?.user) continue;
+      const scope = await accountBillingScope(admin, userId);
+      if (scope.lane !== 'production') continue;
       const result = await syncEntitlement(admin, userId, event.id);
       if (!result.applied && !result.duplicate) return json({ error: 'refresh_superseded_retry' }, 409);
     }

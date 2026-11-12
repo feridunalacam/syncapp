@@ -29,6 +29,9 @@ function releaseEnv(platform = 'ios', profile = 'production') {
       ? 'EXPO_PUBLIC_REVENUECAT_IOS_API_KEY'
       : 'EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY']:
       platform === 'ios' ? 'appl_PublicFixture123' : 'goog_PublicFixture123',
+    ...(platform === 'ios'
+      ? { EXPO_PUBLIC_REVENUECAT_REVIEW_IOS_API_KEY: 'appl_ReviewFixture456' }
+      : {}),
   };
 }
 
@@ -87,6 +90,12 @@ test('actual process values cannot be filled or overridden by eas.json or local 
     assert.match(missing.output, /SUPABASE_URL/);
     assert.match(missing.output, /RevenueCat/);
     assert.match(missing.output, /PRIVACY_URL/);
+    const missingReview = run(
+      { ...configured, EXPO_PUBLIC_REVENUECAT_REVIEW_IOS_API_KEY: undefined },
+      { cwd },
+    );
+    assert.equal(missingReview.status, 1);
+    assert.match(missingReview.output, /distinct App Store public RevenueCat review SDK key/);
     const bad = run(
       { ...configured, EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: 'test_ActualInvalid123' },
       { cwd },
@@ -178,6 +187,48 @@ test('both release profiles reject missing, private, Test Store, wrong-platform 
       }
     }
   }
+});
+
+test('registered iOS release hook fails for absent, shared, Test Store, private or placeholder review keys', () => {
+  for (const profile of ['preview', 'production']) {
+    for (const key of [
+      undefined,
+      '',
+      'test_NeverEchoReview456',
+      'sk_NeverEchoReview456',
+      'goog_NeverEchoReview456',
+      'appl_PublicFixture123',
+      'appl_PLACEHOLDER',
+      'appl_YOURKEY',
+      'appl_REPLACEME',
+      'appl_NeverEchoReview456\n',
+    ]) {
+      const result = run(
+        { ...releaseEnv('ios', profile), EXPO_PUBLIC_REVENUECAT_REVIEW_IOS_API_KEY: key },
+        { npmHook: true },
+      );
+      assert.equal(result.status, 1, result.output);
+      assert.match(result.output, /distinct App Store public RevenueCat review SDK key/);
+      assert.doesNotMatch(result.output, /NeverEchoReview456/);
+      if (key) assert.ok(!result.output.includes(key));
+    }
+  }
+});
+
+test('review-key requirement does not affect Android release hooks or keyless development skip', () => {
+  for (const profile of ['preview', 'production']) {
+    const android = releaseEnv('android', profile);
+    assert.equal(android.EXPO_PUBLIC_REVENUECAT_REVIEW_IOS_API_KEY, undefined);
+    assert.equal(run(android).status, 0);
+  }
+  const development = run({
+    EAS_BUILD: 'true',
+    EAS_BUILD_PLATFORM: 'ios',
+    EAS_BUILD_PROFILE: 'development',
+    EXPO_PUBLIC_BUILD_PROFILE: 'development',
+  });
+  assert.equal(development.status, 0);
+  assert.match(development.output, /SKIP: Development build/);
 });
 
 test('release backend/legal/public-secret checks reject actual unsafe values without echoing them', () => {

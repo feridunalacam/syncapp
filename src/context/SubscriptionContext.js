@@ -2,51 +2,39 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AppState, Linking, NativeModules, Platform } from 'react-native';
 import { useAuth } from './AuthContext';
 import { supabase } from '../lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { createAccountScopeResolver, createBillingScopeRegistry } from '../lib/accountBillingScope';
+import { verifyAccountEntitlement } from '../services/subscriptions/accountAccess';
 import { createSubscriptionController } from '../services/subscriptions/controller';
 import { createSubscriptionConfig, loadSubscriptionSdk } from '../services/subscriptions/config';
 
 const SubscriptionContext = createContext(null);
-const purchaseConfig = createSubscriptionConfig({
+const configuration = {
   platform: Platform.OS,
   dev: __DEV__,
   profile: process.env.EXPO_PUBLIC_BUILD_PROFILE,
   env: {
     EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY,
     EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
+    EXPO_PUBLIC_REVENUECAT_REVIEW_IOS_API_KEY:
+      process.env.EXPO_PUBLIC_REVENUECAT_REVIEW_IOS_API_KEY,
   },
-});
+};
+const purchaseConfig = createSubscriptionConfig(configuration);
+const reviewConfig = createSubscriptionConfig({ ...configuration, lane: 'review' });
 const apiKey = purchaseConfig.apiKey;
+const registry = createBillingScopeRegistry(AsyncStorage);
+const resolveScope = createAccountScopeResolver({ client: supabase, registry });
 
 // Loading the JS SDK with an older development binary can throw during module
 // evaluation. Check the native bridge first and keep the free app usable.
-const sdk = loadSubscriptionSdk(purchaseConfig, {
-  hasNativeModule: !!NativeModules.RNPurchases,
-  load: () => require('react-native-purchases').default,
-});
-
-async function verifyEntitlement(userId, { sync = false } = {}) {
-  if (!supabase) throw new Error('Account services are not available in this build.');
-  const { data: sessionData } = await supabase.auth.getSession();
-  if (sessionData.session?.user.id !== userId)
-    throw new Error('Your account changed. Please try again.');
-  let syncError = null;
-  if (sync) {
-    const { error } = await supabase.functions.invoke('sync-subscription');
-    if (error)
-      syncError =
-        'Subscription verification is temporarily unavailable. Refresh access in a moment.';
-  }
-  // RLS permits only this user's records. The store SDK alone never enables
-  // server-backed features; this record is written only by trusted functions.
-  const { data, error } = await supabase
-    .from('entitlements')
-    .select('entitlement_id,expires_at,store,environment,updated_at')
-    .eq('user_id', userId)
-    .eq('entitlement_id', 'pro')
-    .maybeSingle();
-  if (error) throw new Error('Could not verify cloud access. Please try again.');
-  return { entitlement: data, syncError };
-}
+const sdk = loadSubscriptionSdk(
+  { enabled: purchaseConfig.enabled || reviewConfig.enabled },
+  {
+    hasNativeModule: !!NativeModules.RNPurchases,
+    load: () => require('react-native-purchases').default,
+  },
+);
 
 export function SubscriptionProvider({ children }) {
   const { user, ready: authReady } = useAuth();
@@ -58,11 +46,16 @@ export function SubscriptionProvider({ children }) {
     packages: [],
   });
   const controller = useRef(null);
+  const appState = useRef(AppState.currentState);
   if (!controller.current) {
     controller.current = createSubscriptionController({
       sdk,
       apiKey,
-      verify: verifyEntitlement,
+      apiKeyForScope: (scope) =>
+        scope.lane === 'review' ? reviewConfig.apiKey : purchaseConfig.apiKey,
+      resolveScope,
+      loadScope: (id) => registry.load(id),
+      verify: (id, options) => verifyAccountEntitlement(supabase, id, options),
       onChange: setState,
       sdkEntitlementId: process.env.EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID || 'sync_pro',
     });
@@ -71,8 +64,14 @@ export function SubscriptionProvider({ children }) {
     if (authReady) controller.current.identify(user?.id).catch(() => {});
   }, [authReady, user?.id]);
   useEffect(() => {
-    const timer = setInterval(() => controller.current.expire(), 1000);
+    const timer = setInterval(() => {
+      controller.current.expire();
+      controller.current
+        .renewReviewAccess({ foreground: appState.current === 'active' })
+        .catch(() => {});
+    }, 1000);
     const listener = AppState.addEventListener('change', (status) => {
+      appState.current = status;
       if (status === 'active') controller.current.refresh().catch(() => {});
     });
     return () => {
@@ -97,6 +96,8 @@ export function SubscriptionProvider({ children }) {
   const belongsToUser = state.userId === (user?.id || null);
   const value = {
     ...state,
+    scope: belongsToUser ? state.scope : null,
+    scopeConfirmed: authReady && belongsToUser && !!state.scopeConfirmed,
     ready: authReady && (belongsToUser ? state.ready : false),
     accessVerified: authReady && belongsToUser && !!state.accessVerified,
     isPro: belongsToUser && !!state.isPro,
@@ -106,7 +107,10 @@ export function SubscriptionProvider({ children }) {
     pending: belongsToUser && state.pending,
     loading: belongsToUser && !!state.loading,
     error: belongsToUser ? state.error : null,
-    requiresNativeBuild: !!apiKey && !sdk && Platform.OS !== 'web',
+    requiresNativeBuild:
+      !!(state.scope?.lane === 'review' ? reviewConfig.apiKey : apiKey) &&
+      !sdk &&
+      Platform.OS !== 'web',
     refresh: () => controller.current.refresh({ sync: true }),
     purchase: (pkg) => controller.current.purchase(pkg),
     restore: () => controller.current.restore(),
