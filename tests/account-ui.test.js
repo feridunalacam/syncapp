@@ -45,6 +45,10 @@ async function mount(overrides = {}) {
     async deleteAccount() {
       events.push('delete');
     },
+    async signInWithOAuth(provider) {
+      events.push(provider);
+      return { session: {} };
+    },
     ...overrides,
   };
   const context = {
@@ -60,6 +64,8 @@ async function mount(overrides = {}) {
     View: 'View',
     StyleSheet: { create: (value) => value },
     Sheet: ({ children }) => React.createElement('Sheet', null, children),
+    AppleSignInButton: ({ onPress, disabled }) =>
+      React.createElement('Pressable', { onPress, disabled }, 'Continue with Apple'),
     useAuth: () => auth,
     recoverySessionIdentity,
     useTheme: () => ({
@@ -230,6 +236,34 @@ test('an earlier recovery completion cannot replace the next account recovery fo
     assert.match(ui.text(), /Set a new password/);
     assert.doesNotMatch(ui.text(), /Your password has been updated/);
     assert.ok(ui.button('Update password'));
+  } finally {
+    await ui.close();
+  }
+});
+
+test('social sign-in options appear in sign-in and sign-up, require no password, and close after success', async () => {
+  const ui = await mount();
+  try {
+    assert.ok(ui.button('Continue with Google'));
+    assert.ok(ui.button('Continue with Apple'));
+    await ui.press('Continue with Google');
+    assert.deepEqual(ui.events, ['google', 'close']);
+    await ui.press('Create an account');
+    assert.ok(ui.button('Continue with Apple'));
+    assert.ok(ui.button('Continue with Google'));
+  } finally {
+    await ui.close();
+  }
+});
+
+test('cancelling social sign-in preserves the form without an error and guest mode remains available', async () => {
+  const ui = await mount({ signInWithOAuth: async () => ({ cancelled: true }) });
+  try {
+    await ui.press('Continue with Apple');
+    assert.deepEqual(ui.events, []);
+    assert.doesNotMatch(ui.text(), /cancelled|Enter your password/);
+    await ui.press('Continue without an account');
+    assert.deepEqual(ui.events, ['close']);
   } finally {
     await ui.close();
   }

@@ -17,6 +17,9 @@ class ExpoAVPlayer {
     this.isPlaying = false;
     this.onStatusUpdate = null;
     this.isInitialized = false;
+    this.prepared = null;
+    this.preparationVersion = 0;
+    this.initializing = null;
   }
 
   /**
@@ -25,18 +28,56 @@ class ExpoAVPlayer {
    */
   async initialize() {
     if (this.isInitialized) return;
-
-    try {
+    if (this.initializing) return this.initializing;
+    this.initializing = (async () => {
       await Audio.setAudioModeAsync({
         playsInSilentModeIOS: true,
         staysActiveInBackground: true,
         shouldDuckAndroid: true,
       });
       this.isInitialized = true;
-    } catch (error) {
-      console.error('❌ Error initializing ExpoAVPlayer:', error);
-      throw error;
-    }
+    })().finally(() => {
+      this.initializing = null;
+    });
+    return this.initializing;
+  }
+
+  // Only one silent, local next track is held. Remote streams keep their normal loading path.
+  prepareTrack(uri) {
+    if (!/^(file|content):\/\//i.test(uri || ''))
+      return Promise.resolve({ success: false, notSupported: true });
+    if (this.prepared?.uri === uri) return this.prepared.promise;
+    this.clearPrepared();
+    const version = this.preparationVersion;
+    const entry = { uri, sound: null, promise: null };
+    this.prepared = entry;
+    entry.promise = (async () => {
+      try {
+        await this.initialize();
+        if (version !== this.preparationVersion) return { success: true, cancelled: true };
+        const { sound } = await Audio.Sound.createAsync(
+          { uri },
+          { shouldPlay: false, volume: 0, positionMillis: 0 },
+        );
+        if (version !== this.preparationVersion) {
+          await sound.unloadAsync();
+          return { success: true, cancelled: true };
+        }
+        entry.sound = sound;
+        return { success: true };
+      } catch {
+        if (this.prepared === entry) this.prepared = null;
+        return { success: false };
+      }
+    })();
+    return entry.promise;
+  }
+
+  async clearPrepared() {
+    this.preparationVersion++;
+    const entry = this.prepared;
+    this.prepared = null;
+    if (entry?.sound) await entry.sound.unloadAsync().catch(() => {});
   }
 
   /**
@@ -56,15 +97,28 @@ class ExpoAVPlayer {
         await this.unload();
       }
 
-      // Load and play new track
-      const { sound } = await Audio.Sound.createAsync(
-        { uri },
-        {
-          shouldPlay: false,
-          positionMillis: options.positionMs || 0,
-          volume: Math.max(0, Math.min(100, options.volumePercent ?? 100)) / 100,
-        },
-      );
+      const initialStatus = {
+        shouldPlay: false,
+        positionMillis: options.positionMs || 0,
+        volume: Math.max(0, Math.min(100, options.volumePercent ?? 100)) / 100,
+      };
+      const entry = this.prepared;
+      let sound;
+      // Never wait behind unfinished speculative work. A late preload unloads itself.
+      if (entry?.uri === uri && entry.sound) {
+        sound = entry.sound;
+        this.prepared = null;
+        this.preparationVersion++;
+        try {
+          await sound.setStatusAsync(initialStatus);
+        } catch (error) {
+          await sound.unloadAsync().catch(() => {});
+          throw error;
+        }
+      } else {
+        await this.clearPrepared();
+        ({ sound } = await Audio.Sound.createAsync({ uri }, initialStatus));
+      }
 
       if (options.isCancelled?.()) {
         await sound.unloadAsync();
@@ -83,7 +137,7 @@ class ExpoAVPlayer {
 
       // Set up status update listener
       sound.setOnPlaybackStatusUpdate((status) => {
-        this._handleStatusUpdate(status);
+        if (this.sound === sound) this._handleStatusUpdate(status);
       });
 
       if (options.shouldPlay !== false) {
@@ -292,6 +346,7 @@ class ExpoAVPlayer {
    * @returns {Promise<void>}
    */
   async cleanup() {
+    await this.clearPrepared();
     await this.unload();
     this.currentTrack = null;
     this.onStatusUpdate = null;

@@ -11,6 +11,7 @@ import { createAuthOperationQueue } from '../src/lib/authOperations.js';
 import { createAuthFetch, AUTH_REQUEST_TIMEOUT_MS } from '../src/lib/authFetch.js';
 import { AUTH_REDIRECT, RECOVERY_REDIRECT, parseAuthLink } from '../src/lib/authLinks.js';
 import { authExchangeDiagnostic, createAuthCodeExchanger } from '../src/lib/authCodeExchange.js';
+import { createSocialAuth } from '../src/lib/socialAuth.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -106,6 +107,15 @@ async function harness(options = {}) {
     createAuthRecoveryState,
     recoverySessionIdentity,
     createAuthOperationQueue,
+    createSocialAuth,
+    AUTH_SERVICE_ORIGIN: 'https://fixture.supabase.co',
+    ensureSocialProvider: async () => {},
+    signInNativeApple: async () => null,
+    signInWithNativeIdToken: async () => assert.fail('Unexpected native login'),
+    authCredentialWriters: {
+      signInWithPassword: (credentials) => auth.signInWithPassword(credentials),
+      signUp: (credentials) => auth.signUp(credentials),
+    },
     __DEV__: false,
   };
   new Script(compiled).runInNewContext(context);

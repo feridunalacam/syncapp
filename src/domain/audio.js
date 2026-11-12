@@ -1,3 +1,5 @@
+import { buildTimeline } from './routines.js';
+
 /** Select one source per interval. A track overrides a playlist for that round. */
 export const resolveRoundAudio = (routine, phase, roundNumber, selectedPlatform) => {
   if (!routine || !['beforeStart', 'work', 'rest'].includes(phase)) return null;
@@ -28,11 +30,13 @@ export const resolveRoundAudio = (routine, phase, roundNumber, selectedPlatform)
   };
   const platform = source.uri?.startsWith('spotify:')
     ? 'spotify'
-    : source.uri?.startsWith('voices:')
-      ? 'voices'
-      : source.platform === 'url' || source.platform === 'browser'
-        ? 'device'
-        : source.platform || (song ? 'device' : selectedPlatform || 'spotify');
+    : source.uri?.startsWith('apple-music:')
+      ? 'appleMusic'
+      : source.uri?.startsWith('voices:')
+        ? 'voices'
+        : source.platform === 'url' || source.platform === 'browser'
+          ? 'device'
+          : source.platform || (song ? 'device' : selectedPlatform || 'spotify');
   return { source, platform, kind: song ? 'track' : 'playlist', playlistId };
 };
 
@@ -54,3 +58,13 @@ export const sameAudioSource = (a, b) =>
   a.platform === b.platform &&
   a.kind === b.kind &&
   (a.kind === 'track' ? a.source?.uri === b.source?.uri : a.playlistId === b.playlistId);
+
+export const resolveNextRoundAudio = (routine, phase, roundNumber, selectedPlatform) => {
+  const timeline = buildTimeline(routine);
+  const index = timeline.findIndex(
+    (item) => item.phase === phase && (phase === 'beforeStart' || item.round === roundNumber),
+  );
+  // Preparation already owns the first Work track; that boundary does not reload it.
+  const next = index >= 0 ? timeline[index + (phase === 'beforeStart' ? 2 : 1)] : null;
+  return next ? resolveRoundAudio(routine, next.phase, next.round, selectedPlatform) : null;
+};

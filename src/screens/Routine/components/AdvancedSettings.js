@@ -6,6 +6,7 @@ import Surface from '../../../components/common/Surface';
 import { useTheme } from '../../../context/ThemeContext';
 import { normalizeAlertConfig, createAlertPreset } from '../../../domain/alerts';
 import { SPOTIFY_AVAILABLE } from '../../../services/spotify/config';
+import appleMusicService from '../../../services/appleMusic';
 import DurationField from './DurationField';
 import AlertSoundPicker from './AlertSoundPicker';
 
@@ -200,6 +201,8 @@ export const AdvancedSettings = ({
             {volume('Rest music volume', restVolume, onRestVolumeChange)}
             <Text style={[styles.note, { color: theme.textSecondary }]}>
               Voice cues and alert sounds play with Device or Browser audio.
+              {appleMusicService.available &&
+                ' Apple Music intervals use the visual timer and device volume.'}
               {SPOTIFY_AVAILABLE && ' Spotify intervals use the visual timer.'}
             </Text>
             <View style={[styles.section, { borderColor: theme.border }]}>

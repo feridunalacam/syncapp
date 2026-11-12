@@ -23,12 +23,14 @@ import { getRoutineDuration } from '../../domain/routines';
 import { normalizeAlertConfig } from '../../domain/alerts';
 import useAlertPreview from '../../hooks/useAlertPreview';
 import useSpotifyConnection from '../Profile/hooks/useSpotifyConnection';
+import { useAppleMusicConnection } from '../../context/AppleMusicConnectionContext';
 import { useRoutineForm } from './hooks/useRoutineForm';
 
 export default function CreateRoutineScreen({ navigation, route }) {
   const { addRoutine, updateRoutine } = useRoutineContext();
   const { theme } = useTheme();
   const spotify = useSpotifyConnection();
+  const apple = useAppleMusicConnection();
   const { previewCue, stopPreview, previewing } = useAlertPreview();
 
   const templateRoutine = route?.params?.templateRoutine || null;
@@ -267,6 +269,16 @@ export default function CreateRoutineScreen({ navigation, route }) {
               onShuffleForRest={form.handleShuffleForRest}
               onConnect={spotify.connect}
               connecting={spotify.connecting}
+            />
+          )}
+          {apple.available && (
+            <PlaylistCard
+              platformId="appleMusic"
+              roundsOrder={form.roundsOrder}
+              onShuffleForWork={form.handleShuffleForWork}
+              onShuffleForRest={form.handleShuffleForRest}
+              onConnect={apple.connect}
+              connecting={apple.connecting}
             />
           )}
           <View

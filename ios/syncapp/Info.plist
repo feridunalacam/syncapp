@@ -57,6 +57,10 @@
       <key>NSAllowsLocalNetworking</key>
       <true/>
     </dict>
+    <key>CFBundleAllowMixedLocalizations</key>
+    <true/>
+    <key>NSAppleMusicUsageDescription</key>
+    <string>Sync uses Apple Music only when you connect it to choose and play songs and playlists for your workout rounds.</string>
     <key>NSCameraUsageDescription</key>
     <string>Sync uses the camera only when you choose to take a profile photo.</string>
     <key>NSPhotoLibraryUsageDescription</key>

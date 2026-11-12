@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Script } from 'node:vm';
 import { createRequire } from 'node:module';
+import { createAuthCredentialWriters } from '../src/lib/authCredentialWrites.js';
 
 const require = createRequire(import.meta.url);
 const { GoTrueClient, processLock } = require('@supabase/supabase-js');
@@ -26,6 +27,8 @@ function configuredLock() {
     SecureStore: {},
     AsyncStorage: {},
     processLock,
+    URL,
+    createAuthCredentialWriters,
     createAuthSessionStorage: () => ({}),
     installNativeAuthCrypto: () => true,
     createAuthFetch: (fetcher) => fetcher,

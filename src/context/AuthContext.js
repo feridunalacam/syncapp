@@ -4,11 +4,20 @@ import { clearAccountPlatforms } from '../lib/platformStorage';
 import { AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import { supabase, isSupabaseConfigured, authStorage } from '../lib/supabase';
+import {
+  supabase,
+  isSupabaseConfigured,
+  authStorage,
+  signInWithNativeIdToken,
+  authCredentialWriters,
+} from '../lib/supabase';
 import { AUTH_REDIRECT, RECOVERY_REDIRECT, parseAuthLink } from '../lib/authLinks';
 import { authExchangeDiagnostic, createAuthCodeExchanger } from '../lib/authCodeExchange';
 import { createAuthRecoveryState, recoverySessionIdentity } from '../lib/authRecoveryState';
 import { createAuthOperationQueue } from '../lib/authOperations';
+import { createSocialAuth } from '../lib/socialAuth';
+import { ensureSocialProvider, AUTH_SERVICE_ORIGIN } from '../services/auth/providers';
+import { signInNativeApple } from '../services/auth/apple';
 
 const AuthContext = createContext({ user: null, ready: false, configured: false });
 export const useAuth = () => useContext(AuthContext);
@@ -17,6 +26,7 @@ export function AuthProvider({ children }) {
   const [ready, setReady] = useState(!isSupabaseConfigured);
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [error, setError] = useState(null);
+  const [socialProvider, setSocialProvider] = useState(null);
   const currentUser = useRef(null);
   const currentSession = useRef(null);
   currentUser.current = session?.user?.id || null;
@@ -28,6 +38,23 @@ export function AuthProvider({ children }) {
   if (!exchangeCode.current && supabase) exchangeCode.current = createAuthCodeExchanger(supabase);
   const operations = useRef(null);
   if (!operations.current) operations.current = createAuthOperationQueue();
+  const social = useRef(null);
+  if (!social.current && supabase)
+    social.current = createSocialAuth({
+      client: supabase,
+      enqueue: (action) => operations.current(action),
+      exchangeCode: (parsed) => exchangeCode.current(parsed),
+      ensureProvider: ensureSocialProvider,
+      signInNativeApple,
+      signInWithIdToken: signInWithNativeIdToken,
+      openSession: (url, redirect) => WebBrowser.openAuthSessionAsync(url, redirect),
+      authorizationOrigin: AUTH_SERVICE_ORIGIN,
+      getIdentity: () => {
+        const identity = recoverySessionIdentity(currentSession.current);
+        return identity ? `${identity.userId}:${identity.sessionId}` : currentUser.current;
+      },
+      onBusy: setSocialProvider,
+    });
   const assertCurrentSession = (target) => {
     const expected = recoverySessionIdentity(target);
     const current = recoverySessionIdentity(currentSession.current);
@@ -57,7 +84,7 @@ export function AuthProvider({ children }) {
     const parsed = parseAuthLink(url);
     if (!parsed) return;
     if (parsed.error) throw new Error(parsed.error);
-    await operations.current(() => exchangeCode.current(parsed));
+    await social.current.receive(parsed);
   };
   useEffect(() => {
     if (!supabase) return;
@@ -123,6 +150,7 @@ export function AuthProvider({ children }) {
     const appState = AppState.addEventListener('change', refresh);
     return () => {
       alive = false;
+      social.current?.cancel();
       recovery.current.suspend();
       subscription.unsubscribe();
       links.remove();
@@ -131,16 +159,16 @@ export function AuthProvider({ children }) {
     };
   }, []);
   const signIn = (email, password) => {
-    const client = requireClient();
+    requireClient();
     return operations.current(() =>
-      checked(client.auth.signInWithPassword({ email: email.trim(), password })),
+      checked(authCredentialWriters.signInWithPassword({ email: email.trim(), password })),
     );
   };
   const signUp = (email, password) => {
-    const client = requireClient();
+    requireClient();
     return operations.current(async () => {
       const data = await checked(
-        client.auth.signUp({
+        authCredentialWriters.signUp({
           email: email.trim(),
           password,
           options: { emailRedirectTo: AUTH_REDIRECT },
@@ -171,20 +199,8 @@ export function AuthProvider({ children }) {
     });
   };
   const signInWithOAuth = async (provider) => {
-    if (!['apple', 'google'].includes(provider)) throw new Error('Unsupported sign-in provider.');
-    const data = await checked(
-      requireClient().auth.signInWithOAuth({
-        provider,
-        options: { redirectTo: AUTH_REDIRECT, skipBrowserRedirect: true },
-      }),
-    );
-    const result = await WebBrowser.openAuthSessionAsync(data.url, AUTH_REDIRECT);
-    if (result.type === 'success') {
-      const parsed = parseAuthLink(result.url);
-      if (!parsed?.code || parsed.error)
-        throw new Error(parsed?.error || 'Sign-in could not be completed.');
-      await exchangeLink(result.url);
-    } else throw new Error('Sign-in was cancelled.');
+    requireClient();
+    return social.current.signIn(provider);
   };
   const deleteAccount = async () => {
     const client = requireClient();
@@ -235,6 +251,7 @@ export function AuthProvider({ children }) {
         signOut,
         deleteAccount,
         signInWithOAuth,
+        socialProvider,
       }}
     >
       {children}

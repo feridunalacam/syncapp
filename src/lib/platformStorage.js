@@ -42,7 +42,8 @@ const splitPlatforms = (platforms) => {
   Object.entries(platforms || {}).forEach(([id, value]) => {
     const { accessToken, refreshToken, ...info } = value;
     metadata[id] = info;
-    if (id !== 'device') credentials[id] = { accessToken, refreshToken };
+    if (id !== 'device' && info.authentication !== 'native')
+      credentials[id] = { accessToken, refreshToken };
   });
   return { metadata, credentials };
 };
@@ -78,7 +79,8 @@ export const loadPlatforms = async (options = {}) => {
   const result = {};
   Object.entries(metadata || {}).forEach(([id, info]) => {
     result[id] = { ...info, ...credentials[id] };
-    if (id !== 'device' && !result[id].accessToken && !result[id].refreshToken)
+    const nativeMusic = id === 'appleMusic' && info.authentication === 'native';
+    if (id !== 'device' && !nativeMusic && !result[id].accessToken && !result[id].refreshToken)
       result[id].connected = false;
   });
   result.device = { connected: true, accessToken: 'device' };

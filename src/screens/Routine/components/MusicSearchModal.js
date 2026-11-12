@@ -19,6 +19,7 @@ import GlassSurface from '../../../components/common/GlassSurface';
 import { DEFAULT_VOICES } from './musicSearch/constants';
 import { useDeviceMediaPicker } from './musicSearch/useDeviceMediaPicker';
 import useSpotifyConnection from '../../Profile/hooks/useSpotifyConnection';
+import { useAppleMusicConnection } from '../../../context/AppleMusicConnectionContext';
 import BrowserAudioPanel from './musicSearch/BrowserAudioPanel';
 import {
   Artwork,
@@ -44,12 +45,23 @@ export const MusicSearchModal = ({
 }) => {
   const { theme } = useTheme();
   const spotify = useSpotifyConnection();
+  const apple = useAppleMusicConnection();
   const platforms = usePlatformContext();
-  const connected = !!platforms.connectedPlatforms.spotify?.connected;
+  const defaultSource =
+    platforms.selectedPlatform &&
+    platforms.connectedPlatforms[platforms.selectedPlatform]?.connected
+      ? platforms.selectedPlatform
+      : platforms.connectedPlatforms.appleMusic?.connected
+        ? 'appleMusic'
+        : platforms.connectedPlatforms.spotify?.connected
+          ? 'spotify'
+          : 'device';
   const music = useMusicSearch({ ...platforms, loadDeviceMusic });
-  const [source, setSource] = useState(
-    isForCountdownSound ? 'voices' : connected ? 'spotify' : 'device',
-  );
+  const [source, setSource] = useState(isForCountdownSound ? 'voices' : defaultSource);
+  const isRemote = source === 'spotify' || source === 'appleMusic';
+  const connected = !!platforms.connectedPlatforms[source]?.connected;
+  const connection = source === 'appleMusic' ? apple : spotify;
+  const providerName = source === 'appleMusic' ? 'Apple Music' : 'Spotify';
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('track');
   const [playlist, setPlaylist] = useState(null);
@@ -62,19 +74,20 @@ export const MusicSearchModal = ({
     setQuery('');
     setPlaylist(null);
     setDeviceLoaded(false);
-    if (visible) setSource(isForCountdownSound ? 'voices' : connected ? 'spotify' : 'device');
+    setCategory('track');
+    if (visible) setSource(isForCountdownSound ? 'voices' : defaultSource);
   }, [visible, isForCountdownSound, selectedRoundForSong, reset]);
   useEffect(() => {
-    if (visible && source === 'spotify' && connected) music.loadPlaylists('spotify');
+    if (visible && isRemote && connected) music.loadPlaylists(source);
   }, [visible, source, connected, music.loadPlaylists]);
   useEffect(() => {
-    if (!visible || source !== 'spotify' || !connected) return;
+    if (!visible || !isRemote || !connected) return;
     music.clearSearch();
     const timer = setTimeout(
       () =>
         music.searchMusic(
           query,
-          'spotify',
+          source,
           category === 'all' ? ['track', 'playlist', 'episode'] : [category],
         ),
       300,
@@ -87,6 +100,7 @@ export const MusicSearchModal = ({
     setQuery('');
     setPlaylist(null);
     setDeviceLoaded(false);
+    setCategory('track');
   };
   const close = () => {
     music.reset();
@@ -110,14 +124,17 @@ export const MusicSearchModal = ({
   ];
   const openPlaylist = (item) => {
     setPlaylist(item);
-    music.loadPlaylistTracks(item.id, 'spotify');
+    music.loadPlaylistTracks(item.id, source);
   };
   const renderTrack = (item, index) => (
     <MusicRow
       key={`${item.id || item.uri}-${index}`}
       item={item}
       selected={
-        item.type === 'playlist' ? selectedPlaylist?.id === item.id : selectedSong?.id === item.id
+        item.type === 'playlist'
+          ? selectedPlaylist?.id === item.id &&
+            (!selectedPlaylist.platform || selectedPlaylist.platform === item.platform)
+          : selectedSong?.uri === item.uri
       }
       actionIcon={item.type === 'playlist' ? 'chevron-forward' : 'add'}
       onPress={() => (item.type === 'playlist' ? openPlaylist(item) : choose(item))}
@@ -132,6 +149,9 @@ export const MusicSearchModal = ({
         { id: 'device', label: 'Device', icon: 'phone-portrait-outline' },
         ...(spotify.available
           ? [{ id: 'spotify', label: 'Spotify', icon: 'musical-notes-outline' }]
+          : []),
+        ...(apple.available
+          ? [{ id: 'appleMusic', label: 'Apple Music', icon: 'logo-apple' }]
           : []),
         { id: 'browser', label: 'Browser', icon: 'globe-outline' },
       ];
@@ -279,12 +299,15 @@ export const MusicSearchModal = ({
                   )}
                 </>
               )}
-              {source === 'spotify' &&
+              {isRemote &&
                 (!connected ? (
                   <PickerState
-                    title="Connect Spotify to choose songs and playlists."
-                    onRetry={spotify.connect}
-                    actionLabel={spotify.connecting ? 'Connecting…' : 'Connect Spotify'}
+                    title={`Connect ${providerName} to choose songs and playlists.`}
+                    error={connection.error}
+                    onRetry={
+                      connection.connecting || !connection.ready ? undefined : connection.connect
+                    }
+                    actionLabel={connection.connecting ? 'Connecting…' : `Connect ${providerName}`}
                   />
                 ) : playlist ? (
                   <>
@@ -296,7 +319,7 @@ export const MusicSearchModal = ({
                         alignItems: 'center',
                         paddingVertical: 15,
                       }}
-                      accessibilityLabel="Back to Spotify library"
+                      accessibilityLabel={`Back to ${providerName} library`}
                     >
                       <Ionicons name="chevron-back" size={18} color={theme.accent} />
                       <Text style={{ color: theme.accent, fontSize: 13 }}>Library</Text>
@@ -325,7 +348,7 @@ export const MusicSearchModal = ({
                       }
                       icon="albums-outline"
                       disabled={selectedPlaylist?.id === playlist.id}
-                      onPress={() => choose({ ...playlist, type: 'playlist', platform: 'spotify' })}
+                      onPress={() => choose({ ...playlist, type: 'playlist', platform: source })}
                     />
                     <View style={{ height: 10 }} />
                     {music.loadingPlaylistTracks ||
@@ -337,7 +360,7 @@ export const MusicSearchModal = ({
                         title="No playable tracks in this playlist."
                         onRetry={
                           music.tracksError
-                            ? () => music.loadPlaylistTracks(playlist.id, 'spotify')
+                            ? () => music.loadPlaylistTracks(playlist.id, source)
                             : undefined
                         }
                       />
@@ -356,7 +379,7 @@ export const MusicSearchModal = ({
                       items={[
                         { id: 'track', label: 'Songs' },
                         { id: 'playlist', label: 'Playlists' },
-                        { id: 'episode', label: 'Episodes' },
+                        ...(source === 'spotify' ? [{ id: 'episode', label: 'Episodes' }] : []),
                       ]}
                       value={category}
                       onChange={setCategory}
@@ -369,7 +392,7 @@ export const MusicSearchModal = ({
                           title="No results. Try another search."
                           onRetry={
                             music.searchError
-                              ? () => music.searchMusic(query, 'spotify', [category])
+                              ? () => music.searchMusic(query, source, [category])
                               : undefined
                           }
                         />
@@ -397,7 +420,7 @@ export const MusicSearchModal = ({
                             error={music.playlistError}
                             title="No saved playlists. Search for music above."
                             onRetry={
-                              music.playlistError ? () => music.loadPlaylists('spotify') : undefined
+                              music.playlistError ? () => music.loadPlaylists(source) : undefined
                             }
                           />
                         ) : (

@@ -39,6 +39,7 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
   };
   let audio;
   const routine = {
+    rounds: 2,
     roundsData: [
       {
         workSong: { uri: 'file:///one.mp3', name: 'One' },
@@ -50,14 +51,22 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
   function Harness() {
     audio = useAudioController({
       selectedRoutine: configuration.routine || routine,
-      services: { device: service, spotify: service },
-      connectedPlatforms: { spotify: { connected: true, accessToken: 'test-token' } },
+      services: {
+        device: service,
+        spotify: service,
+        appleMusic: { ...service, allowsLocalCues: false, localPlaybackControl: true },
+      },
+      connectedPlatforms: {
+        spotify: { connected: true, accessToken: 'test-token' },
+        appleMusic: { connected: true, accessToken: 'native:appleMusic' },
+      },
       countdownSoundPlayer: configuration.countdownSoundPlayer || {
         stop: async () => {},
         play: async () => {},
       },
       stopLocalCues: configuration.stopLocalCues,
       onPlaybackInterrupted: configuration.onPlaybackInterrupted,
+      getValidAccessToken: configuration.getValidAccessToken,
     });
     return null;
   }
@@ -88,6 +97,142 @@ test('a phase selected while paused waits for resume before starting audio', asy
   assert.deepEqual(
     h.calls.find((c) => c[0] === 'play'),
     ['play', 'file:///one.mp3'],
+  );
+});
+
+test('a slow playback metadata read cannot hold an already-started interval or the next transition', async (t) => {
+  const read = deferred();
+  const prepared = [];
+  let reads = 0;
+  const h = await mountAudio(t, {
+    getCurrentPlayback: () =>
+      ++reads === 1 ? read.promise : Promise.resolve({ item: { name: 'Rest' }, is_playing: true }),
+    prepareTrack: async (_token, uri) => prepared.push(uri),
+  });
+  let firstReady = false;
+  await act(async () => {
+    h.audio.handlePhaseChange('work', 1).then(() => {
+      firstReady = true;
+    });
+  });
+  assert.equal(firstReady, true);
+  assert.deepEqual(prepared, ['file:///rest.mp3']);
+  let restReady = false;
+  await act(async () => {
+    h.audio.handlePhaseChange('rest', 1).then(() => {
+      restReady = true;
+    });
+  });
+  assert.equal(restReady, true);
+  assert.equal(h.audio.track.title, 'Rest');
+  await act(async () => {
+    read.resolve({ item: { name: 'Retired metadata' }, is_playing: true });
+  });
+  assert.equal(h.audio.track.title, 'Rest');
+});
+
+test('Apple Music work/rest transitions, pause/resume and local-cue ownership use the shared controller', async (t) => {
+  const cues = [];
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      routine: {
+        roundsData: [
+          {
+            workSong: { uri: 'apple-music:song:123', platform: 'appleMusic' },
+            restSong: { uri: 'file:///rest.mp3', platform: 'device' },
+          },
+        ],
+      },
+      stopLocalCues: async () => cues.push('stop'),
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  assert.equal(h.audio.localCuesAllowed, false);
+  assert.deepEqual(
+    h.calls.find((call) => call[0] === 'play'),
+    ['play', 'apple-music:song:123'],
+  );
+  await act(async () => h.audio.pauseMusic());
+  assert.equal(h.audio.isMusicPlaying, false);
+  await act(async () => h.audio.resumeMusic());
+  assert.equal(h.audio.isMusicPlaying, true);
+  await act(async () => h.audio.handlePhaseChange('rest', 1));
+  assert.equal(h.audio.localCuesAllowed, true);
+  assert.ok(h.calls.some((call) => call[0] === 'play' && call[1] === 'file:///rest.mp3'));
+  assert.deepEqual(cues, ['stop']);
+  await act(async () => h.audio.stopMusic());
+  assert.equal(h.audio.isMusicPlaying, false);
+});
+
+test('Apple pause and stop remain local when subscription or permission verification fails', async (t) => {
+  let rejected = false,
+    checks = 0;
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      routine: {
+        rounds: 2,
+        roundsData: [{ workSong: { uri: 'apple-music:song:123', platform: 'appleMusic' } }],
+      },
+      getValidAccessToken: async () => {
+        checks++;
+        if (rejected) throw new Error('Subscription unavailable');
+        return 'native:appleMusic';
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  rejected = true;
+  const before = checks;
+  await act(async () => h.audio.pauseMusic());
+  assert.equal(h.audio.isMusicPlaying, false);
+  await act(async () => h.audio.stopMusic());
+  assert.equal(h.audio.audioError, null);
+  assert.equal(
+    checks,
+    before,
+    'local stop must not depend on subscription checks or a network response',
+  );
+  assert.ok(h.calls.some(([event]) => event === 'pause'));
+  assert.ok(h.calls.some(([event]) => event === 'cleanup'));
+});
+
+test('revoked Apple access cannot block switching to Device audio while new Apple starts still fail closed', async (t) => {
+  let rejected = false;
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      routine: {
+        rounds: 2,
+        roundsData: [
+          {
+            workSong: { uri: 'apple-music:song:123', platform: 'appleMusic' },
+            restSong: { uri: 'file:///rest.mp3', name: 'Local rest', platform: 'device' },
+          },
+          { workSong: { uri: 'apple-music:song:456', platform: 'appleMusic' } },
+        ],
+      },
+      getValidAccessToken: async () => {
+        if (rejected) throw new Error('Music permission denied');
+        return 'native:appleMusic';
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  rejected = true;
+  await act(async () => h.audio.handlePhaseChange('rest', 1));
+  assert.equal(h.audio.audioError, null);
+  assert.equal(h.audio.track.title, 'Local rest');
+  assert.ok(h.calls.some(([event, uri]) => event === 'play' && uri === 'file:///rest.mp3'));
+  await act(async () => h.audio.handlePhaseChange('work', 2));
+  assert.match(h.audio.audioError, /permission denied/);
+  assert.equal(
+    h.calls.some(([event, uri]) => event === 'play' && uri === 'apple-music:song:456'),
+    false,
   );
 });
 

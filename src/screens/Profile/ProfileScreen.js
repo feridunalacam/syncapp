@@ -1,5 +1,7 @@
 import Surface from '../../components/common/Surface';
 import SpotifyDevicePicker from '../../components/common/SpotifyDevicePicker';
+import MusicServicesPanel from '../../components/common/MusicServicesPanel';
+import { useAppleMusicConnection } from '../../context/AppleMusicConnectionContext';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -46,6 +48,7 @@ export default function ProfileScreen() {
   const { posts, addPost, deletePost } = usePostContext();
   const profile = useProfileData();
   const spotify = useSpotifyConnection();
+  const apple = useAppleMusicConnection();
   const [sheet, setSheet] = useState(null);
   const [caption, setCaption] = useState('');
   const [routineId, setRoutineId] = useState(null);
@@ -62,6 +65,7 @@ export default function ProfileScreen() {
     !auth.recoveryMode &&
     !auth.error &&
     !spotify.connecting &&
+    !apple.connecting &&
     workout?.isWorkoutRunning === false &&
     workout?.isMusicPlaying === false &&
     workout?.isAudioSyncing === false;
@@ -409,6 +413,7 @@ export default function ProfileScreen() {
               </Text>,
             )}
           {spotify.available && <SpotifyDevicePicker />}
+          <MusicServicesPanel />
           {row(
             'musical-notes-outline',
             'Device audio',
@@ -692,7 +697,7 @@ export default function ProfileScreen() {
           Sync brings intervals and music together for movement, study and focus.{'\n\n'}Use Sync on
           this device for free, or sign in to keep separate account data. Sync Pro adds private
           cloud backups for routines, activity and profile details across devices, plus no ads.
-          Local audio files and Spotify credentials stay on this device.{'\n\n'}Discover posts are
+          Local audio files and music connections stay on this device.{'\n\n'}Discover posts are
           private saved content, not public online publishing. Manage your membership and account in
           the Account section above.
         </Text>

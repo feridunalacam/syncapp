@@ -6,9 +6,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createAuthSessionStorage } from './authSessionStorage';
 import { installNativeAuthCrypto } from './authCrypto';
 import { createAuthFetch } from './authFetch';
+import { createAuthCredentialWriters } from './authCredentialWrites';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const key = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+// Match Supabase's existing default so installed sessions retain their storage slot.
+const authStorageKey = url ? `sb-${new URL(url).hostname.split('.')[0]}-auth-token` : null;
 const authCryptoReady = installNativeAuthCrypto({
   platform: Platform.OS,
   target: globalThis,
@@ -21,6 +24,7 @@ export const supabase = isSupabaseConfigured
   ? createClient(url, key, {
       global: { fetch: createAuthFetch(fetch.bind(globalThis), url) },
       auth: {
+        storageKey: authStorageKey,
         storage: authStorage,
         // The pinned SDK's updateUser can otherwise save its captured tokens
         // over a concurrent refresh. Keep SDK reads/refreshes on the same lock.
@@ -33,3 +37,11 @@ export const supabase = isSupabaseConfigured
       },
     })
   : null;
+export const authCredentialWriters = supabase
+  ? createAuthCredentialWriters({
+      auth: supabase.auth,
+      storageKey: authStorageKey,
+      lock: processLock,
+    })
+  : null;
+export const signInWithNativeIdToken = authCredentialWriters?.signInWithIdToken;

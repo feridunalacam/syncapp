@@ -14,13 +14,23 @@ import spotifyService from '../services/spotify';
 import { SPOTIFY_AVAILABLE } from '../services/spotify/config';
 import { SPOTIFY_UNAVAILABLE_MESSAGE } from '../services/spotify/availability';
 import deviceMusicService from '../services/deviceMusicService';
+import appleMusicService from '../services/appleMusic';
 import { loadPlatforms, savePlatforms } from '../lib/platformStorage';
 import { createMusicConnections } from '../lib/musicConnections';
 export const PLATFORMS = {
   spotify: { id: 'spotify', name: 'Spotify', color: '#1DB954', icon: 'musical-notes-outline' },
+  appleMusic: { id: 'appleMusic', name: 'Apple Music', color: '#FA445A', icon: 'logo-apple' },
   device: { id: 'device', name: 'Device', color: '#A4A8AC', icon: 'musical-notes' },
 };
-const services = { spotify: spotifyService, device: deviceMusicService };
+const services = {
+  spotify: spotifyService,
+  appleMusic: appleMusicService,
+  device: deviceMusicService,
+};
+const isAvailable = (id) =>
+  id === 'device' ||
+  (id === 'spotify' && SPOTIFY_AVAILABLE) ||
+  (id === 'appleMusic' && appleMusicService.available);
 const defaults = { device: { connected: true, accessToken: 'device' } };
 const PlatformContext = createContext({ connectedPlatforms: defaults, services, ready: false });
 export function PlatformProvider({ children }) {
@@ -43,7 +53,8 @@ export function PlatformProvider({ children }) {
           storage.getString(STORAGE_KEYS.SELECTED_PLATFORM),
         ]);
       } catch {
-        if (alive) setConnectionError('Saved connection could not be loaded. Reconnect Spotify.');
+        if (alive)
+          setConnectionError('Saved music connections could not be loaded. Please reconnect.');
       }
       if (!alive) return;
       const manager = createMusicConnections({
@@ -63,10 +74,7 @@ export function PlatformProvider({ children }) {
       });
       store.current = manager;
       setConnectedPlatforms(initial);
-      selected.current =
-        initial[selection]?.connected && (selection !== 'spotify' || SPOTIFY_AVAILABLE)
-          ? selection
-          : null;
+      selected.current = initial[selection]?.connected && isAvailable(selection) ? selection : null;
       setSelected(selected.current);
       setReady(true);
     })();
@@ -77,6 +85,7 @@ export function PlatformProvider({ children }) {
   }, []);
   const connectPlatform = useCallback(async (id, data) => {
     if (id === 'spotify' && !SPOTIFY_AVAILABLE) throw new Error(SPOTIFY_UNAVAILABLE_MESSAGE);
+    if (!isAvailable(id)) throw new Error('This music source cannot connect in this build.');
     if (!store.current) throw new Error('Music is still loading.');
     await store.current.connect(id, data);
     setConnectionError(null);
@@ -94,12 +103,13 @@ export function PlatformProvider({ children }) {
     const target = id || selected.current;
     if (target === 'spotify' && !SPOTIFY_AVAILABLE) return null;
     if (!target || target === 'device') return target === 'device' ? 'device' : null;
+    if (!isAvailable(target) || target === 'appleMusic') return null;
     try {
       const token = await store.current?.refresh(target);
       if (token) setConnectionError(null);
       return token;
     } catch {
-      setConnectionError('Spotify could not reconnect. Check your connection and try again.');
+      setConnectionError('Music could not reconnect. Check your connection and try again.');
       return null;
     }
   }, []);
@@ -107,8 +117,30 @@ export function PlatformProvider({ children }) {
     async (id) => {
       if (id === 'spotify' && !SPOTIFY_AVAILABLE) throw new Error(SPOTIFY_UNAVAILABLE_MESSAGE);
       if (id === 'device') return 'device';
+      if (!isAvailable(id))
+        throw new Error(
+          'This music source is unavailable in this build. Choose Device audio or reconnect in Profile.',
+        );
       const connection = store.current?.getState()[id];
       if (!connection?.connected) return null;
+      if (id === 'appleMusic') {
+        try {
+          return (await appleMusicService.getAccessToken()).accessToken;
+        } catch (error) {
+          if (['denied', 'restricted'].includes(error.code)) {
+            const manager = store.current;
+            if (manager?.getState()[id] === connection) {
+              try {
+                await manager.disconnect(id);
+              } catch {
+                /* Keep the request blocked even if persistence fails. */
+              }
+              setConnectionError(error.userMessage || 'Reconnect Apple Music in Profile.');
+            }
+          }
+          throw error;
+        }
+      }
       if (!connection.accessToken || !connection.expiresAt || connection.expiresAt <= Date.now())
         return refreshToken(id);
       return connection.accessToken;
@@ -116,7 +148,7 @@ export function PlatformProvider({ children }) {
     [refreshToken],
   );
   const handleSetSelectedPlatform = useCallback(async (id) => {
-    if (id === 'spotify' && !SPOTIFY_AVAILABLE) return;
+    if (id && !isAvailable(id)) return;
     if (id && !store.current?.getState()[id]?.connected) return;
     selected.current = id;
     setSelected(id);
@@ -127,8 +159,8 @@ export function PlatformProvider({ children }) {
     const check = () => {
       Object.entries(store.current.getState()).forEach(([id, data]) => {
         if (
-          id !== 'device' &&
-          (id !== 'spotify' || SPOTIFY_AVAILABLE) &&
+          isAvailable(id) &&
+          !!data.refreshToken &&
           data.connected &&
           (!data.expiresAt || data.expiresAt <= Date.now())
         )
@@ -148,9 +180,9 @@ export function PlatformProvider({ children }) {
   const value = useMemo(
     () => ({
       PLATFORMS,
-      connectedPlatforms: SPOTIFY_AVAILABLE
-        ? connectedPlatforms
-        : Object.fromEntries(Object.entries(connectedPlatforms).filter(([id]) => id !== 'spotify')),
+      connectedPlatforms: Object.fromEntries(
+        Object.entries(connectedPlatforms).filter(([id]) => isAvailable(id)),
+      ),
       selectedPlatform,
       musicPlayer: services[selectedPlatform] || services.device,
       services,
@@ -159,8 +191,7 @@ export function PlatformProvider({ children }) {
       connectPlatform,
       disconnectPlatform,
       setSelectedPlatform: handleSetSelectedPlatform,
-      isPlatformConnected: (id) =>
-        (id !== 'spotify' || SPOTIFY_AVAILABLE) && !!connectedPlatforms[id]?.connected,
+      isPlatformConnected: (id) => isAvailable(id) && !!connectedPlatforms[id]?.connected,
       refreshToken,
       getValidAccessToken,
       refreshSpotifyToken: () => refreshToken('spotify'),

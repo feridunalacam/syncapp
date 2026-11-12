@@ -14,6 +14,8 @@ import {
 } from '../src/services/spotify/availability.js';
 import { useMusicSearch } from '../src/hooks/useMusicSearch.js';
 import { normalizeAlertConfig, createAlertPreset } from '../src/domain/alerts.js';
+import { createAppleMusicService } from '../src/services/appleMusic/adapter.js';
+import { MUSIC_PROVIDERS, resolveMusicLink } from '../src/services/music/providers.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -85,7 +87,7 @@ function storedPlatforms(base, native) {
   return exports;
 }
 
-async function mount(t, content) {
+async function mount(t, content, appleMusicService = { available: false }) {
   const records = new Map([
     [
       '@syncapp/account/offline/connectedPlatforms',
@@ -159,6 +161,7 @@ async function mount(t, content) {
       },
     ),
     deviceMusicService: { getActiveDevice: async () => 'device' },
+    appleMusicService,
     AppState: {
       addEventListener: (_event, callback) => {
         listeners.add(callback);
@@ -195,12 +198,23 @@ async function mount(t, content) {
       Alert: { alert: noop },
     },
   );
+  const apple = load(
+    'context/AppleMusicConnectionContext.js',
+    ['AppleMusicConnectionProvider', 'useAppleMusicConnection'],
+    {
+      usePlatformContext: platform.usePlatformContext,
+      appleMusicService,
+    },
+  );
+  let appleValue;
   function Observer() {
     platformValue = platform.usePlatformContext();
     connectionValue = connection.useSpotifyConnectionContext();
+    appleValue = apple.useAppleMusicConnection();
     return content?.({
       usePlatformContext: platform.usePlatformContext,
       useSpotifyConnection: connection.useSpotifyConnectionContext,
+      useAppleMusicConnection: apple.useAppleMusicConnection,
     });
   }
   let root;
@@ -212,7 +226,11 @@ async function mount(t, content) {
         React.createElement(
           connection.SpotifyConnectionProvider,
           null,
-          React.createElement(Observer),
+          React.createElement(
+            apple.AppleMusicConnectionProvider,
+            null,
+            React.createElement(Observer),
+          ),
         ),
       ),
     );
@@ -231,6 +249,9 @@ async function mount(t, content) {
     },
     get connection() {
       return connectionValue;
+    },
+    get apple() {
+      return appleValue;
     },
     get spotifyCalls() {
       return spotifyCalls;
@@ -382,6 +403,7 @@ test('release Profile hides Spotify and keeps passive preferences accessible and
         useProfileData: () => ({ ready: true, picture: null, bio: '', links: {} }),
         Surface: 'Surface',
         SpotifyDevicePicker: 'SpotifyDevicePicker',
+        MusicServicesPanel: 'MusicServicesPanel',
         SpotifyLogo: 'SpotifyLogo',
         AccountPanel: 'AccountPanel',
         SubscriptionPanel: 'SubscriptionPanel',
@@ -438,6 +460,7 @@ test('audio alert helper follows Spotify release availability and retains the de
       ['AdvancedSettings'],
       {
         SPOTIFY_AVAILABLE: available,
+        appleMusicService: { available: false },
         normalizeAlertConfig,
         createAlertPreset,
         Surface: 'Surface',
@@ -469,4 +492,175 @@ test('audio alert helper follows Spotify release availability and retains the de
       await act(async () => root.unmount());
     }
   }
+});
+
+test('release Apple Music connection, tokenless persistence, source selection and disconnect work independently of Spotify', async (t) => {
+  let authorizations = 0,
+    stops = 0;
+  const service = createAppleMusicService({
+    supported: true,
+    authorize: async () => {
+      authorizations++;
+      return { status: 'authorized', canPlayCatalogContent: true };
+    },
+    getConnectionState: async () => ({ status: 'authorized', canPlayCatalogContent: true }),
+    stop: async () => {
+      stops++;
+    },
+  });
+  const h = await mount(t, null, service);
+  assert.equal(authorizations, 0);
+  assert.equal(h.apple.available, true);
+  await act(async () => h.apple.connect());
+  assert.equal(h.apple.connected, true);
+  assert.equal(authorizations, 1);
+  assert.equal(h.platform.connectedPlatforms.appleMusic.authentication, 'native');
+  assert.equal(h.platform.connectedPlatforms.appleMusic.accessToken, undefined);
+  assert.equal(await h.platform.getValidAccessToken('appleMusic'), 'native:appleMusic');
+  await h.foregroundAndTick();
+  assert.equal(authorizations, 1, 'foreground checks must not prompt again');
+  await act(async () => h.platform.setSelectedPlatform('appleMusic'));
+  assert.equal(h.platform.selectedPlatform, 'appleMusic');
+  await assert.rejects(h.platform.connectPlatform('youtubeMusic', {}), /cannot connect/);
+  await act(async () => h.apple.disconnect());
+  assert.equal(h.apple.connected, false);
+  assert.equal(h.platform.selectedPlatform, null);
+  assert.equal(stops, 1);
+  assert.equal(h.spotifyCalls, 0);
+  assert.equal(h.oauthStarts, 0);
+});
+
+test('revoking OS music permission clears the native connection before another request can play', async (t) => {
+  let status = 'authorized';
+  const service = createAppleMusicService({
+    supported: true,
+    authorize: async () => ({ status, canPlayCatalogContent: true }),
+    getConnectionState: async () => ({ status, canPlayCatalogContent: true }),
+  });
+  const h = await mount(t, null, service);
+  await act(async () => h.apple.connect());
+  status = 'denied';
+  await act(async () => assert.rejects(h.platform.getValidAccessToken('appleMusic'), /Settings/));
+  assert.equal(h.apple.connected, false);
+  assert.match(h.apple.error, /Settings/);
+  assert.equal(h.spotifyCalls, 0);
+});
+
+test('authorization returning after an account unmount cannot save a connection into that account', async (t) => {
+  let resolve;
+  const pending = new Promise((done) => {
+    resolve = done;
+  });
+  const service = createAppleMusicService({ supported: true, authorize: () => pending });
+  const h = await mount(t, null, service);
+  let connecting;
+  await act(async () => {
+    connecting = h.apple.connect();
+  });
+  await act(async () => h.root.unmount());
+  await act(async () => {
+    resolve({ status: 'authorized', canPlayCatalogContent: true });
+    await connecting;
+  });
+  assert.deepEqual(h.records, h.originalRecords);
+  assert.deepEqual(h.secure, h.originalSecure);
+});
+
+test('release Apple Music picker loads library playlists and assigns their tracks with the native platform', async (t) => {
+  let Modal, chosen;
+  const service = createAppleMusicService({
+    supported: true,
+    authorize: async () => ({ status: 'authorized', canPlayCatalogContent: true }),
+    getConnectionState: async () => ({ status: 'authorized', canPlayCatalogContent: true }),
+    getUserPlaylists: async () => [{ id: 'p.fixture', name: 'Apple library' }],
+    getPlaylistTracks: async () => [{ id: '123', name: 'Apple song', uri: 'apple-music:song:123' }],
+    search: async () => ({ tracks: [], playlists: [] }),
+  });
+  const h = await mount(
+    t,
+    (hooks) => {
+      if (!Modal)
+        Modal = load('screens/Routine/components/MusicSearchModal.js', ['MusicSearchModal'], {
+          ...hooks,
+          useMusicSearch,
+          loadDeviceMusic: async () => [],
+          Surface: 'Surface',
+          GlassSurface: 'GlassSurface',
+          BrowserAudioPanel: 'BrowserAudioPanel',
+          Artwork: 'Artwork',
+          PickerTabs: 'PickerTabs',
+          SearchField: 'SearchField',
+          MusicRow: 'MusicRow',
+          PickerState: 'PickerState',
+          PrimaryAction: 'PrimaryAction',
+          DEFAULT_VOICES: [],
+          useDeviceMediaPicker: () => ({}),
+          setTimeout: () => 1,
+          clearTimeout: noop,
+        }).MusicSearchModal;
+      return React.createElement(Modal, {
+        visible: true,
+        onClose: noop,
+        selectedRoundForSong: 2,
+        songType: 'rest',
+        attachSongToRound: (...args) => {
+          chosen = args;
+        },
+        attachPlaylistToRound: noop,
+      });
+    },
+    service,
+  );
+  assert.equal(
+    h.root.root
+      .findByType('PickerTabs')
+      .props.items.map((item) => item.id)
+      .join(','),
+    'device,appleMusic,browser',
+  );
+  await act(async () => h.root.root.findByType('PickerTabs').props.onChange('appleMusic'));
+  assert.equal(h.root.root.findByType('PickerState').props.actionLabel, 'Connect Apple Music');
+  await act(async () => h.root.root.findByType('PickerState').props.onRetry());
+  const playlistButton = h.root.root
+    .findAllByType('Pressable')
+    .find((item) => item.props.accessibilityLabel === 'Browse Apple library');
+  assert.ok(playlistButton);
+  await act(async () => playlistButton.props.onPress());
+  await act(async () => h.root.root.findByType('MusicRow').props.onPress());
+  assert.equal(chosen[0], 2);
+  assert.equal(chosen[1].platform, 'appleMusic');
+  assert.equal(chosen[1].uri, 'apple-music:song:123');
+  assert.equal(chosen[2], 'rest');
+  assert.equal(h.spotifyCalls, 0);
+});
+
+test('music services sheet opens only valid service links and does not mark external services connected', async (t) => {
+  let Panel;
+  const opened = [];
+  const h = await mount(t, (hooks) => {
+    if (!Panel)
+      Panel = load('components/common/MusicServicesPanel.js', ['MusicServicesPanel'], {
+        ...hooks,
+        useWorkout: () => ({ isWorkoutRunning: false }),
+        MUSIC_PROVIDERS,
+        resolveMusicLink,
+        Linking: { openURL: async (url) => opened.push(url) },
+      }).MusicServicesPanel;
+    return React.createElement(Panel);
+  });
+  const button = (label) =>
+    h.root.root.findAllByType('Pressable').find((item) => item.props.accessibilityLabel === label);
+  await act(async () => button('Open other music services').props.onPress());
+  await act(async () => button('Open YouTube Music').props.onPress());
+  assert.equal(opened[0], 'https://music.youtube.com/');
+  const input = h.root.root.findByType('TextInput');
+  await act(async () => input.props.onChangeText('https://music.youtube.com.evil.example/'));
+  await act(async () => button('Open music link').props.onPress());
+  assert.equal(opened.length, 1);
+  assert.equal(h.root.root.findAllByProps({ accessibilityRole: 'alert' }).length, 1);
+  await act(async () => input.props.onChangeText('https://music.youtube.com/watch?v=fixture'));
+  await act(async () => button('Open music link').props.onPress());
+  assert.equal(opened.length, 2);
+  assert.equal(h.platform.connectedPlatforms.youtubeMusic, undefined);
+  assert.equal(h.oauthStarts, 0);
 });

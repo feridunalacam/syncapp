@@ -85,6 +85,8 @@ class DeviceMusicPlayer {
 const deviceMusicPlayer = new DeviceMusicPlayer();
 
 const deviceMusicService = {
+  prepareTrack: (_token, uri) => deviceMusicPlayer.player.prepareTrack(uri),
+  releaseCurrent: () => deviceMusicPlayer.player.unload(),
   // Device doesn't need token refresh
   getAccessToken: () => Promise.resolve({ accessToken: 'device', expiresIn: 3600 }),
 

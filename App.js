@@ -2,7 +2,8 @@ import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { SubscriptionProvider } from './src/context/SubscriptionContext';
 import { AdsProvider } from './src/context/AdsContext';
 import { AccountDataProvider } from './src/context/AccountDataContext';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ActivityIndicator, View, Alert } from 'react-native';
 import * as Linking from 'expo-linking';
 import { StatusBar } from 'expo-status-bar';
@@ -16,6 +17,7 @@ import { PostProvider } from './src/context/PostContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { WorkoutProvider } from './src/context/WorkoutContext';
 import { SpotifyConnectionProvider } from './src/context/SpotifyConnectionContext';
+import { AppleMusicConnectionProvider } from './src/context/AppleMusicConnectionContext';
 import TabNavigator from './src/navigation/TabNavigator';
 import { getNavTheme } from './src/navigation/theme';
 import { createSafeStateFromPath } from './src/navigation/safeLinking';
@@ -56,6 +58,21 @@ function AppContent() {
 function AccountApp() {
   const { ready, user, recoveryMode, dismissRecovery, error, clearError } = useAuth();
   const [showAccount, setShowAccount] = useState(false);
+  const welcomeChecked = useRef(false);
+  useEffect(() => {
+    if (!ready || welcomeChecked.current) return;
+    welcomeChecked.current = true;
+    if (user || recoveryMode) return;
+    let alive = true;
+    AsyncStorage.getItem('@syncapp/welcome.dismissed')
+      .then((dismissed) => {
+        if (alive && dismissed !== 'true') setShowAccount(true);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [ready, user?.id, recoveryMode]);
   useEffect(() => {
     if (error)
       Alert.alert('Account link', error, [
@@ -84,17 +101,20 @@ function AccountApp() {
           onClose={() => {
             dismissRecovery();
             setShowAccount(false);
+            if (!user) AsyncStorage.setItem('@syncapp/welcome.dismissed', 'true').catch(() => {});
           }}
         />
         <AccountDataProvider key={user?.id || 'guest'}>
           <RoutineProvider>
             <PlatformProvider>
               <SpotifyConnectionProvider>
-                <PostProvider>
-                  <WorkoutProvider>
-                    <AppContent />
-                  </WorkoutProvider>
-                </PostProvider>
+                <AppleMusicConnectionProvider>
+                  <PostProvider>
+                    <WorkoutProvider>
+                      <AppContent />
+                    </WorkoutProvider>
+                  </PostProvider>
+                </AppleMusicConnectionProvider>
               </SpotifyConnectionProvider>
             </PlatformProvider>
           </RoutineProvider>

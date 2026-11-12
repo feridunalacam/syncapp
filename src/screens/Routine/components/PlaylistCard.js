@@ -50,11 +50,13 @@ export const PlaylistCard = ({
   onShuffleForRest,
   onConnect,
   connecting = false,
+  platformId = 'spotify',
 }) => {
   const { theme } = useTheme();
   const platform = usePlatformContext();
   const music = useMusicSearch(platform);
-  const connected = !!platform.connectedPlatforms.spotify?.connected;
+  const providerName = platformId === 'appleMusic' ? 'Apple Music' : 'Spotify';
+  const connected = !!platform.connectedPlatforms[platformId]?.connected;
   const [phase, setPhase] = useState('work');
   const [query, setQuery] = useState('');
   const [detail, setDetail] = useState(null);
@@ -67,7 +69,7 @@ export const PlaylistCard = ({
   const autoRefresh = useRef(null);
   if (!autoRefresh.current) {
     autoRefresh.current = createAutoRefresh(() =>
-      loadLibrary.current('spotify', { preserveItems: true }),
+      loadLibrary.current(platformId, { preserveItems: true }),
     );
   }
   useEffect(() => {
@@ -94,7 +96,7 @@ export const PlaylistCard = ({
   useEffect(() => {
     if (!connected) return;
     music.clearSearch();
-    const timer = setTimeout(() => music.searchMusic(query, 'spotify', ['playlist']), 300);
+    const timer = setTimeout(() => music.searchMusic(query, platformId, ['playlist']), 300);
     return () => clearTimeout(timer);
   }, [query, connected, music.searchMusic, music.clearSearch]);
   const shuffle = async (playlist) => {
@@ -106,7 +108,7 @@ export const PlaylistCard = ({
     setFeedback('');
     const ticket = version.current;
     try {
-      const songs = await music.shufflePlaylistForRounds(playlist.id, 'spotify', targets);
+      const songs = await music.shufflePlaylistForRounds(playlist.id, platformId, targets);
       if (ticket !== version.current) return;
       if (!songs) {
         setFeedback('No playable tracks loaded. Try again.');
@@ -124,7 +126,7 @@ export const PlaylistCard = ({
   };
   const open = (playlist) => {
     setDetail(playlist);
-    music.loadPlaylistTracks(playlist.id, 'spotify');
+    music.loadPlaylistTracks(playlist.id, platformId);
   };
   const list = query.trim() ? music.searchResults : music.playlists;
   const loading = query.trim() ? music.isSearching : music.loadingPlaylists;
@@ -146,7 +148,7 @@ export const PlaylistCard = ({
           <Artwork size={42} icon="albums-outline" />
           <View style={{ flex: 1 }}>
             <Text style={{ color: theme.text, fontSize: 13, fontWeight: '500' }}>
-              Spotify playlists
+              {providerName} playlists
             </Text>
             <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 4 }}>
               Connect to browse and shuffle
@@ -160,6 +162,9 @@ export const PlaylistCard = ({
         </Surface>
       ) : (
         <>
+          <Text style={{ color: theme.textSecondary, fontSize: 12, marginBottom: 6 }}>
+            {providerName} playlists
+          </Text>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <SearchField
@@ -209,13 +214,15 @@ export const PlaylistCard = ({
             <PickerState
               loading={loading}
               error={error}
-              title={query ? 'No playlists found' : 'Your Spotify playlists will appear here.'}
+              title={
+                query ? 'No playlists found' : `Your ${providerName} playlists will appear here.`
+              }
               onRetry={
                 error
                   ? () =>
                       query
-                        ? music.searchMusic(query, 'spotify', ['playlist'])
-                        : music.loadPlaylists('spotify')
+                        ? music.searchMusic(query, platformId, ['playlist'])
+                        : music.loadPlaylists(platformId)
                   : undefined
               }
             />
@@ -307,7 +314,9 @@ export const PlaylistCard = ({
               error={music.tracksError}
               title="No playable tracks"
               onRetry={
-                music.tracksError ? () => music.loadPlaylistTracks(detail.id, 'spotify') : undefined
+                music.tracksError
+                  ? () => music.loadPlaylistTracks(detail.id, platformId)
+                  : undefined
               }
             />
           ) : (
