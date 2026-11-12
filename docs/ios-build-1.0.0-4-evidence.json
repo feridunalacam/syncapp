@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "platform": "iOS",
+  "version": "1.0.0",
+  "buildNumber": "4",
+  "bundleIdentifier": "com.feridun.syncapp",
+  "sourceCommit": "083a67e8946c1e6c82e913bb66cd543df7861ba5",
+  "runtimeSourceRevision": "d918565",
+  "easBuildId": "2fec44ea-895c-4847-8740-c81e0aa06bbf",
+  "requestedAtUTC": "2026-11-12T13:05:12.127Z",
+  "lastObservedStatus": "Apple VALID; existing owner-only internal group visibly Testing",
+  "distribution": "STORE",
+  "buildProfile": "production",
+  "paidPlanActivated": false,
+  "signingPreparation": {
+    "appleProfileId": "99FY234H79",
+    "profileUUID": "fe6766e0-5559-42ca-9f87-b3b90ba49d9a",
+    "profileSHA256": "8986ac6092c23d8bf19c32cf7cd97b43c0d5dccf4fd4e28a0d8b9933a2b06d6f",
+    "applePortalActiveWithMusicKitAndAppleSignInObserved": true,
+    "sameEASProfileRecordAndStoreBinding": true,
+    "certificateUnchanged": true,
+    "archiveSignatureAndEntitlementsVerified": true
+  },
+  "sourceChecks": {
+    "testsPassed": 576,
+    "iosAndAndroidHermesExportsPassed": true,
+    "runtimePackageNativeConfigFilesUnchangedVersusBuild3": 141,
+    "sourcePackagingPrivateArtifactExclusionsPassed": true
+  },
+  "delivery": {
+    "buildFinished": true,
+    "archiveChecksPassed": true,
+    "submittedToAppStoreConnect": true,
+    "testFlightReady": true,
+    "internalGroup": "Sync Internal QA",
+    "externalBetaReviewSubmitted": false,
+    "appReviewSubmitted": false,
+    "publicAppRelease": false,
+    "internalGroupId": "e7f6d708-755b-4376-9693-f0d99c388f73",
+    "groupTesterCount": 1,
+    "groupBuildCount": 2,
+    "groupBuild4VisibleStatus": "Testing",
+    "groupAssignmentObservedAtUTC": "2026-11-12T14:20:35.992069Z",
+    "groupScreenshot": "testflight-1.0.0-4-group-ready.png",
+    "build4DeviceInstallationObserved": false,
+    "testNotesSavedInAppStoreConnect": true,
+    "testNotesScreenshot": "testflight-1.0.0-4-test-notes-saved.png",
+    "ownerReportedBuild4Installed": true
+  },
+  "limitations": [
+    "Build4 is available in the existing owner-only TestFlight group; no external beta review or public app release occurred.",
+    "The owner reports successful native Apple sign-in after the explicit build4 update request; general physical runtime and subscriber MusicKit playback still require further evidence.",
+    "Google/cold-start/guest-isolation QA was on the d918565 Debug client; it is not relabelled as physical Store4 proof.",
+    "Real paid lifecycle, sandbox/review isolation, merchant and final privacy/rating checks remain release gates.",
+    "The owner reports missing Pro prices on the physical client; purchase-to-Pro is not verified. Apple merchant setup and review screenshots remain incomplete."
+  ],
+  "completedAtUTC": "2026-11-12T13:11:22.354Z",
+  "artifact": {
+    "bytes": 23567747,
+    "sha256": "705df433d4a7e914aad639cf4b09a3b12760070a268941ad0c8aa4016e73bae7"
+  },
+  "archiveVerification": {
+    "strictDeepCodesignPassed": true,
+    "packageChecksPassed": 20,
+    "requiredConfigurationAndPermissionChecksPassed": 9,
+    "actualSignerCertificateMatches": true,
+    "bothNativeAppleModulesPresent": true,
+    "productionPublicRuntimeMatchesApprovedPriorStoreBuild": true,
+    "syntheticQAFixturesAbsent": true,
+    "testStoreKeyAbsent": true,
+    "privacyManifestCount": 15,
+    "privacyCollectionDeclarations": 11,
+    "privacyCategories": 8,
+    "independentManifestReviewPassed": true,
+    "officialXcodeAggregate": false
+  },
+  "submission": {
+    "id": "a3627151-d59b-46be-be73-6d0ed0fb3617",
+    "status": "FINISHED, independently verified by supported EAS status/view",
+    "firstAttempt": "Rejected before scheduling because changelog requires Enterprise plan; existing submission list confirmed no new job",
+    "fallback": "Free basic submission without changelog/groups; existing one-owner internal group manually assigned in App Store Connect",
+    "paidPlanActivated": false,
+    "clientObserverExitCode": 1,
+    "clientObserverFailure": "DNS lookup api.expo.dev failed while observing; remote job and Apple receipt were separately verified. No duplicate upload was scheduled."
+  },
+  "appleStatus": {
+    "buildId": "8ac6a8f4-6416-4661-bfbc-508c3bd48c21",
+    "processingState": "VALID",
+    "internalStateBeforeGroupAssignment": "READY_FOR_BETA_TESTING",
+    "externalState": "READY_FOR_BETA_SUBMISSION",
+    "expired": false,
+    "uploadDate": "2026-11-12T05:27:04-08:00",
+    "readOnlyStatusObservedAtUTC": "2026-11-12T14:15:59.073791+00:00"
+  },
+  "physicalOwnerFeedback": {
+    "reportedOn": "2026-11-12",
+    "source": "Owner reply to the explicit TestFlight 1.0.0 (4) QA request; user-reported, not independently observed device telemetry",
+    "nativeAppleSignIn": "Owner reports success",
+    "subscriptionPrices": "Owner reports prices still absent",
+    "purchaseStarted": null,
+    "purchaseStartedEvidence": "No purchase was requested in the QA task and no purchase attempt or completion was reported; actual transaction state was not independently observed."
+  },
+  "subscriptionAvailabilityInvestigation": {
+    "checkedOn": "2026-11-12",
+    "appleMonthly": {
+      "productId": "com.feridun.syncapp.pro.monthly",
+      "duration": "1 month",
+      "currentUSPriceUSD": "2.99",
+      "availability": "All current 175 countries/regions",
+      "englishLocalizationPresent": true,
+      "reviewScreenshotPresent": false
+    },
+    "appleYearly": {
+      "productId": "com.feridun.syncapp.pro.yearly",
+      "duration": "1 year",
+      "currentUSPriceUSD": "18.00",
+      "availability": "All current 175 countries/regions; one-year upfront",
+      "englishLocalizationPresent": true,
+      "reviewScreenshotPresent": false
+    },
+    "revenueCat": {
+      "defaultOffering": "default",
+      "monthlyPackage": "$rc_monthly",
+      "monthlyProduct": "com.feridun.syncapp.pro.monthly",
+      "annualPackage": "$rc_annual",
+      "annualProduct": "com.feridun.syncapp.pro.yearly",
+      "dashboardEmailConfirmationWarningPresent": true
+    },
+    "appleBusiness": {
+      "paidAppsAgreement": "Pending User Info",
+      "freeAppsAgreement": "Active",
+      "bankAccount": "Not configured; Add Bank Account shown",
+      "usCertificateOfForeignStatus": "Missing Tax Info",
+      "usFormW8BEN": "Missing Tax Info",
+      "digitalServicesAct": "Active"
+    },
+    "conclusion": "Apple financial/contract setup is a confirmed availability gate, not proof that it is the sole cause. Current price and offering mappings were independently read in their dashboards. No financial or tax declaration was entered.",
+    "reference": "https://developer.apple.com/documentation/technotes/tn3186-troubleshooting-in-app-purchases-availability-in-the-sandbox"
+  }
+}

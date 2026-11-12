@@ -140,5 +140,12 @@
     "Apple merchant requirements being completed separately by owner",
     "authorized review/sandbox configuration and real paid/Pro lifecycle",
     "final store screenshots and privacy/age-rating decisions"
-  ]
+  ],
+  "subsequentOwnerInstallationObservation": {
+    "observedOn": "2026-11-12",
+    "source": "App Store Connect existing internal tester status",
+    "installedVersion": "1.0.0 (2)",
+    "actualOwnerInstalled": true,
+    "noNewInvitationOrTesterAdded": true
+  }
 }

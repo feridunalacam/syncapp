@@ -1,6 +1,6 @@
 # iOS subscription validation
 
-This checklist distinguishes source coverage, hosted verification and actual Apple billing. It does not establish that paid subscriptions are ready to release. The current scope is **iOS only**. Apple banking, tax and seller/commercial setup remain partially complete and deferred by the owner. The owner declined a new Supabase QA project; keep using the existing project. The production-only receipt boundary below is the current implementation and release policy, not a separate quotation of that user answer.
+This checklist distinguishes source coverage, hosted verification and actual Apple billing. It does not establish that paid subscriptions are ready to release. The current scope is **iOS only**. On 12 November, Apple Business showed Paid Apps Agreement **Pending User Info**, no bank account, and both U.S. tax forms **Missing Tax Info**; Digital Services Act was **Active**. The owner reports physical TestFlight 4 Apple sign-in success but missing Pro prices. Current prices and default offering mappings match; banking/tax entries remain for the owner. See the current investigation in `app-store-release.md`. The owner declined a new Supabase QA project; keep using the existing project. The production-only receipt boundary below is the current implementation and release policy, not a separate quotation of that user answer.
 
 ## Environment boundaries
 
@@ -27,9 +27,11 @@ The proposed implementation would require:
 - An explicit Apple notification decision: Apple has one production and one sandbox URL. Routing sandbox notifications to the review project affects all sandbox notifications for this bundle. Do not assume duplicate delivery to both RevenueCat projects. [Apple server notification URLs](https://developer.apple.com/help/app-store-connect/configure-in-app-purchase-settings/enter-server-urls-for-app-store-server-notifications/)
 - Actual purchase, renewal, refund, restore/transfer, revocation and account/data-isolation checks before declaring the path usable.
 
-No review project, key, reservation, account, migration, function or notification setting was created by this investigation. Build **1.0.0 (2)** contains none of this proposal. Any new credential access and notification cutover must be reviewed as concrete actions before execution; the owner's deferred Apple commercial declarations remain a separate release gate.
+No review project, key, reservation, account, migration, function or notification setting was created by this investigation. Delivered build **1.0.0 (4)** contains none of this proposal. Any new credential access and notification cutover must be reviewed as concrete actions before execution; the owner's deferred Apple commercial declarations remain a separate release gate.
 
-## Evidence matrix
+## Historical build 2 evidence matrix
+
+This matrix retains its build 2 source/test scope. Current build 4 delivery, owner-reported Apple login and missing-price diagnosis are recorded in `app-store-release.md` and `ios-build-1.0.0-4-evidence.json`; the historical invitation and device-installation boundaries below are not the latest delivery status.
 
 | Behavior | Evidence available | Remaining live check |
 | --- | --- | --- |
