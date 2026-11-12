@@ -1,6 +1,6 @@
 import Surface from '../../components/common/Surface';
 import SpotifyDevicePicker from '../../components/common/SpotifyDevicePicker';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet, Alert } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, {
@@ -15,6 +15,7 @@ import { useWorkout } from '../../context/WorkoutContext';
 import { getRoutineDuration, buildTimeline } from '../../domain/routines';
 import { formatTime } from '../../utils/timeFormatters';
 import { navigateToCreateRoutine } from '../../navigation/navigationHelpers';
+import { createRoutineSelectionController } from '../../navigation/routineSelection';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
 import GlassSurface from '../../components/common/GlassSurface';
 import Sheet from '../../components/common/Sheet';
@@ -62,11 +63,30 @@ export default function HomeScreen({ navigation, route }) {
     musicProgress,
     isMusicPlaying,
   } = workout;
+  const latestSelection = useRef(null);
+  latestSelection.current = { routines, workout };
+  const selection = useRef(null);
+  if (!selection.current)
+    selection.current = createRoutineSelectionController({
+      getState: () => ({
+        routines: latestSelection.current.routines,
+        active: latestSelection.current.workout.isWorkoutRunning,
+        selectedId: latestSelection.current.workout.selectedRoutine?.id,
+      }),
+      selectRoutine: (id) => latestSelection.current.workout.selectRoutine(id),
+      confirmSwitch: (onConfirm) =>
+        Alert.alert('Switch routine?', 'Your current session will end and be saved.', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Switch', onPress: onConfirm },
+        ]),
+      onMissing: () => Alert.alert('Routine not found', 'This routine may have been deleted.'),
+      onSelected: () => setPicker(false),
+    });
+  useEffect(() => () => selection.current.dispose(), []);
   useEffect(() => {
     const id = route?.params?.routineId;
     if (!id) return;
-    if (routines.some((r) => r.id === id)) workout.selectRoutine(id);
-    else Alert.alert('Routine not found', 'This routine may have been deleted.');
+    selection.current.request(id);
     navigation.setParams({ routineId: undefined });
   }, [route?.params?.routineId]);
   const edit = () => navigateToCreateRoutine(navigation, selectedRoutine);
@@ -75,18 +95,7 @@ export default function HomeScreen({ navigation, route }) {
       { text: 'Cancel', style: 'cancel' },
       { text: 'End session', onPress: workout.stop },
     ]);
-  const choose = (id) => {
-    const select = () => {
-      workout.selectRoutine(id);
-      setPicker(false);
-    };
-    if (isWorkoutRunning)
-      Alert.alert('Switch routine?', 'Your current session will end and be saved.', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Switch', onPress: select },
-      ]);
-    else select();
-  };
+  const choose = (id) => selection.current.request(id);
   const timeline = selectedRoutine ? buildTimeline(selectedRoutine) : [];
   const index = isWorkoutRunning ? workout.session.index : -1;
   const upcoming = timeline.slice(Math.max(0, index), Math.max(0, index) + 3);

@@ -15,10 +15,12 @@ function memoryStorage(initial = {}, hooks = {}) {
       values.set(key, value);
     },
     removeItem: async (key) => {
+      await hooks.beforeRemove?.(key);
       values.delete(key);
     },
     getAllKeys: async () => [...values.keys()],
     multiRemove: async (keys) => {
+      await hooks.beforeMultiRemove?.(keys);
       keys.forEach((key) => values.delete(key));
     },
   };
@@ -125,6 +127,249 @@ test('guest import preserves an intentionally empty existing account profile fie
   assert.equal(await account.getString('profileBio'), '');
 });
 
+test('guest import waits for an already queued guest save before copying and cleaning up', async () => {
+  const waiting = deferred();
+  const base = memoryStorage(
+    { profileBio: 'Old guest bio' },
+    {
+      beforeSet: (key) => (key === 'profileBio' ? waiting.promise : undefined),
+    },
+  );
+  const guest = createAccountStore(base, null);
+  const account = createAccountStore(base, 'a');
+  const saving = guest.setString('profileBio', 'Latest guest bio');
+  await settle();
+  const importing = account.importGuestData();
+  await settle();
+  waiting.resolve();
+  assert.equal(await saving, true);
+  await importing;
+  assert.equal(await account.getString('profileBio'), 'Latest guest bio');
+  assert.equal(await guest.getString('profileBio'), null);
+});
+
+test('a failed guest cleanup is retried without copying over later account edits', async () => {
+  let fail = true;
+  const base = memoryStorage(
+    { routines: JSON.stringify([{ id: 'guest' }]), profileBio: 'Guest bio' },
+    {
+      beforeMultiRemove: () => {
+        if (fail) throw new Error('Storage unavailable');
+      },
+    },
+  );
+  const account = createAccountStore(base, 'a');
+  await assert.rejects(account.importGuestData(), /Storage unavailable/);
+  assert.equal(base.values.get('@syncapp_guest_import_owner'), 'a');
+  assert.equal(base.values.has('routines'), true);
+  assert.deepEqual(await account.guestImportState(), {
+    hasGuestData: true,
+    importComplete: false,
+  });
+  await account.setString('profileBio', 'Updated account bio');
+  fail = false;
+  await account.importGuestData();
+  assert.equal(base.values.has('routines'), false);
+  assert.equal(base.values.has('profileBio'), false);
+  assert.equal(base.values.has('@syncapp_guest_import_cleanup'), false);
+  assert.equal(await account.getString('profileBio'), 'Updated account bio');
+  assert.deepEqual(await account.getJSON('routines'), [{ id: 'guest' }]);
+});
+
+test('an interrupted owner commit reserves the import before another account can change any records', async () => {
+  let interruptOwner = true;
+  const base = memoryStorage(
+    { routines: JSON.stringify([{ id: 'guest' }]), profileBio: 'Guest bio' },
+    {
+      beforeSet: (key) => {
+        if (key === '@syncapp_guest_import_owner' && interruptOwner)
+          throw new Error('Interrupted owner commit');
+      },
+    },
+  );
+  const a = createAccountStore(base, 'a');
+  const b = createAccountStore(base, 'b');
+  await b.setString('profileBio', 'Existing account B bio');
+  await assert.rejects(a.importGuestData(), /Interrupted owner commit/);
+  assert.equal(base.values.has('@syncapp_guest_import_owner'), false);
+  const beforeOtherClaim = new Map(base.values);
+  await assert.rejects(b.importGuestData(), /another account/);
+  assert.deepEqual(base.values, beforeOtherClaim, 'Rejected claimant changes no stored value');
+  assert.equal(await b.getString('profileBio'), 'Existing account B bio');
+  assert.deepEqual(await b.getJSON('routines', []), []);
+  assert.deepEqual(await b.guestImportState(), { hasGuestData: false, importComplete: false });
+  assert.deepEqual(await a.guestImportState(), { hasGuestData: true, importComplete: false });
+  await a.setString('profileBio', 'Later account A edit');
+  interruptOwner = false;
+  await a.importGuestData();
+  assert.equal(await a.getString('profileBio'), 'Later account A edit');
+  assert.deepEqual(await a.getJSON('routines'), [{ id: 'guest' }]);
+  assert.equal(base.values.has('routines'), false);
+  assert.equal(base.values.has('@syncapp_guest_import_cleanup'), false);
+  assert.equal(base.values.get('@syncapp_guest_import_owner'), 'a');
+  assert.deepEqual(await a.guestImportState(), { hasGuestData: false, importComplete: true });
+});
+
+test('a failed partial copy keeps its durable claim and resumes only for the original account', async () => {
+  let interruptCopy = true;
+  const base = memoryStorage(
+    { routines: '[{"id":"guest","name":"Guest routine"}]', profileBio: 'Guest bio' },
+    {
+      beforeSet: (key) => {
+        if (key === scopedKey('a', 'profileBio') && interruptCopy)
+          throw new Error('Interrupted copy');
+      },
+    },
+  );
+  const a = createAccountStore(base, 'a');
+  const b = createAccountStore(base, 'b');
+  await assert.rejects(a.importGuestData(), /Interrupted copy/);
+  assert.equal(base.values.get('@syncapp_guest_import_claim'), 'a');
+  assert.equal(base.values.has('@syncapp_guest_import_cleanup'), false);
+  assert.equal(base.values.has('@syncapp_guest_import_owner'), false);
+  assert.deepEqual(await a.getJSON('routines'), [{ id: 'guest', name: 'Guest routine' }]);
+  const beforeOtherClaim = new Map(base.values);
+  await assert.rejects(b.importGuestData(), /another account/);
+  assert.deepEqual(base.values, beforeOtherClaim);
+  assert.deepEqual(await b.getJSON('routines', []), []);
+  assert.deepEqual(await a.guestImportState(), { hasGuestData: true, importComplete: false });
+  await a.setJSON('routines', [{ id: 'guest', name: 'Later account edit' }]);
+  interruptCopy = false;
+  await a.importGuestData();
+  assert.deepEqual(await a.getJSON('routines'), [{ id: 'guest', name: 'Later account edit' }]);
+  assert.equal(await a.getString('profileBio'), 'Guest bio');
+  assert.equal(base.values.has('routines'), false);
+  assert.equal(base.values.has('@syncapp_guest_import_claim'), false);
+});
+
+test('deletion before import commit preserves guest originals across every awaited commit boundary', async () => {
+  for (const blockingKey of [
+    '@syncapp_guest_import_claim',
+    scopedKey('a', 'profileBio'),
+    '@syncapp_guest_import_cleanup',
+    '@syncapp_guest_import_owner',
+  ]) {
+    const reached = deferred();
+    const waiting = deferred();
+    const originals = { routines: '[{"id":"guest"}]', profileBio: 'Guest bio' };
+    const base = memoryStorage(originals, {
+      beforeSet: (key) => {
+        if (key !== blockingKey) return;
+        reached.resolve();
+        return waiting.promise;
+      },
+    });
+    const importing = createAccountStore(base, 'a').importGuestData();
+    await reached.promise;
+    const deleting = clearAccountStore(base, 'a');
+    waiting.resolve();
+    await assert.rejects(importing, /deleted/);
+    await deleting;
+    for (const [key, raw] of Object.entries(originals)) assert.equal(base.values.get(key), raw);
+    assert.equal(base.values.has('@syncapp_guest_import_owner'), false);
+    assert.equal(base.values.has('@syncapp_guest_import_claim'), false);
+    assert.equal(base.values.has('@syncapp_guest_import_cleanup'), false);
+    assert.equal(
+      [...base.values.keys()].some((key) => key.startsWith(scopedKey('a', ''))),
+      false,
+    );
+  }
+});
+
+test('deletion after ownership commit removes the imported account copy without reopening guest ownership', async () => {
+  const reached = deferred();
+  const waiting = deferred();
+  const base = memoryStorage(
+    { routines: '[{"id":"guest"}]' },
+    {
+      beforeMultiRemove: (keys) => {
+        if (!keys.includes('routines')) return;
+        reached.resolve();
+        return waiting.promise;
+      },
+    },
+  );
+  const importing = createAccountStore(base, 'a').importGuestData();
+  await reached.promise;
+  assert.equal(base.values.get('@syncapp_guest_import_owner'), 'a');
+  const deleting = clearAccountStore(base, 'a');
+  waiting.resolve();
+  await importing;
+  await deleting;
+  assert.equal(base.values.has('routines'), false);
+  assert.equal(base.values.has(scopedKey('a', 'routines')), false);
+  assert.equal(base.values.get('@syncapp_guest_import_owner'), 'a');
+});
+
+test('deleting an interrupted import releases its reservation without removing uncleaned guest records', async () => {
+  let interruptOwner = true;
+  const guestRaw = JSON.stringify([{ id: 'guest' }]);
+  const base = memoryStorage(
+    { routines: guestRaw },
+    {
+      beforeSet: (key) => {
+        if (key === '@syncapp_guest_import_owner' && interruptOwner)
+          throw new Error('Interrupted owner commit');
+      },
+    },
+  );
+  const a = createAccountStore(base, 'a');
+  await assert.rejects(a.importGuestData(), /Interrupted owner commit/);
+  await clearAccountStore(base, 'a');
+  assert.equal(base.values.has('@syncapp_guest_import_cleanup'), false);
+  assert.equal(base.values.has('@syncapp_guest_import_claim'), false);
+  assert.equal(base.values.get('routines'), guestRaw);
+  assert.equal(
+    [...base.values.keys()].some((key) => key.startsWith(scopedKey('a', ''))),
+    false,
+  );
+  interruptOwner = false;
+  const b = createAccountStore(base, 'b');
+  await b.importGuestData();
+  assert.deepEqual(await b.getJSON('routines'), [{ id: 'guest' }]);
+  assert.equal(base.values.get('@syncapp_guest_import_owner'), 'b');
+});
+
+test('an invalid pending cleanup fails closed before an import can replace it or claim ownership', async () => {
+  for (const raw of [
+    '{invalid',
+    JSON.stringify({ userId: 'a', entries: [['other-key', 'value']] }),
+  ]) {
+    const base = memoryStorage({
+      routines: '[{"id":"guest"}]',
+      '@syncapp_guest_import_cleanup': raw,
+    });
+    const before = new Map(base.values);
+    await assert.rejects(createAccountStore(base, 'b').importGuestData(), /could not be cleaned/);
+    assert.deepEqual(base.values, before);
+  }
+});
+
+test('retrying guest cleanup preserves new guest edits and a completed import is a no-op', async () => {
+  let fail = true;
+  const base = memoryStorage(
+    { routines: JSON.stringify([{ id: 'imported' }]), profileBio: 'Imported bio' },
+    {
+      beforeMultiRemove: () => {
+        if (fail) throw new Error('Storage unavailable');
+      },
+    },
+  );
+  const account = createAccountStore(base, 'a');
+  const guest = createAccountStore(base, null);
+  await assert.rejects(account.importGuestData(), /Storage unavailable/);
+  await guest.setJSON('routines', [{ id: 'new-guest-edit' }]);
+  await guest.setString('profileBio', 'New guest bio');
+  fail = false;
+  await account.importGuestData();
+  assert.deepEqual(await guest.getJSON('routines'), [{ id: 'new-guest-edit' }]);
+  assert.equal(await guest.getString('profileBio'), 'New guest bio');
+  assert.deepEqual(await account.getJSON('routines'), [{ id: 'imported' }]);
+  await account.importGuestData();
+  assert.deepEqual(await guest.getJSON('routines'), [{ id: 'new-guest-edit' }]);
+  assert.equal(await guest.getString('profileBio'), 'New guest bio');
+});
+
 test('an unsigned guest cannot claim an import', async () => {
   const account = createAccountStore(memoryStorage({ profileBio: 'Guest bio' }), null);
   await assert.rejects(account.importGuestData(), /Sign in/);
@@ -223,12 +468,167 @@ test('valid restore keeps a recoverable device copy and rejects malformed format
   assert.deepEqual(await account.getJSON('routines'), [{ id: 'cloud-copy' }]);
 });
 
+test('a failed cloud replacement rolls back exact local media and preserves a queued edit', async () => {
+  const waiting = deferred();
+  let fail = true;
+  const base = memoryStorage(
+    {},
+    {
+      beforeSet: async (key, raw) => {
+        if (key === scopedKey('a', 'profileBio') && raw === 'Cloud bio' && fail) {
+          await waiting.promise;
+          fail = false;
+          throw new Error('Storage unavailable');
+        }
+      },
+    },
+  );
+  const account = createAccountStore(base, 'a');
+  const routines = [{ id: 'device', workSong: { id: 'song', uri: 'file:///local.mp3' } }];
+  await account.setJSON('routines', routines);
+  await account.setString('profileBio', 'Device bio');
+  const before = await account.snapshot();
+  const restoring = account.replaceFromCloud(
+    payload({ routines: [{ id: 'cloud' }], profileBio: 'Cloud bio' }),
+    4,
+    before.meta.counter,
+  );
+  await settle();
+  const saving = account.setString('profileBio', 'Edit queued during restore');
+  waiting.resolve();
+  await assert.rejects(restoring, /Storage unavailable/);
+  assert.equal(await saving, true);
+  assert.deepEqual(await account.getJSON('routines'), routines);
+  assert.equal(await account.getString('profileBio'), 'Edit queued during restore');
+  const after = await account.snapshot();
+  assert.equal(after.meta.revision, before.meta.revision);
+  assert.equal(after.meta.counter, before.meta.counter + 1);
+  assert.equal(after.meta.dirty, true);
+  assert.equal(base.values.has(scopedKey('a', '@cloud-restore-pending')), false);
+  const recovery = JSON.parse(base.values.get(scopedKey('a', '@before-cloud-restore')));
+  assert.deepEqual(recovery.payload, before.payload);
+});
+
+test('a new adapter recovers an interrupted rollback before reading or uploading mixed data', async () => {
+  let restoring = false;
+  let rollbackBlocked = false;
+  const base = memoryStorage(
+    {},
+    {
+      beforeSet: (key, raw) => {
+        if (!restoring) return;
+        if (key === scopedKey('a', 'profileBio') && raw === 'Cloud bio') {
+          rollbackBlocked = true;
+          throw new Error('Cloud write failed');
+        }
+        if (rollbackBlocked) throw new Error('Recovery temporarily unavailable');
+      },
+    },
+  );
+  const account = createAccountStore(base, 'a');
+  const routines = [{ id: 'device', workSong: { id: 'song', uri: 'content://local-song' } }];
+  await account.setJSON('routines', routines);
+  await account.setString('profileBio', 'Device bio');
+  const before = await account.snapshot();
+  restoring = true;
+  await assert.rejects(
+    account.replaceFromCloud(
+      payload({ routines: [{ id: 'cloud' }], profileBio: 'Cloud bio' }),
+      4,
+      before.meta.counter,
+    ),
+    /Recovery temporarily unavailable/,
+  );
+  assert.equal(base.values.has(scopedKey('a', '@cloud-restore-pending')), true);
+  const reopened = createAccountStore(base, 'a');
+  await assert.rejects(reopened.snapshot(), /Recovery temporarily unavailable/);
+  restoring = false;
+  assert.deepEqual(await reopened.snapshot(), before);
+  assert.deepEqual(await reopened.getJSON('routines'), routines);
+  assert.equal(await reopened.getString('profileBio'), 'Device bio');
+  assert.equal(base.values.has(scopedKey('a', '@cloud-restore-pending')), false);
+});
+
+test('starting a workout partway through replacement rolls back without changing revision', async () => {
+  let allowed = true;
+  const base = memoryStorage(
+    {},
+    {
+      beforeSet: (key, raw) => {
+        if (key === scopedKey('a', 'routines') && raw === '[{"id":"cloud"}]') allowed = false;
+      },
+    },
+  );
+  const account = createAccountStore(base, 'a');
+  await account.setJSON('routines', [{ id: 'device' }]);
+  await account.setString('profileBio', 'Device bio');
+  const before = await account.snapshot();
+  assert.equal(
+    await account.replaceFromCloud(
+      payload({ routines: [{ id: 'cloud' }], profileBio: 'Cloud bio' }),
+      4,
+      before.meta.counter,
+      () => allowed,
+    ),
+    false,
+  );
+  assert.deepEqual(await account.snapshot(), before);
+  assert.equal(await account.getString('profileBio'), 'Device bio');
+  assert.equal(base.values.has(scopedKey('a', '@cloud-restore-pending')), false);
+});
+
+test('a workout starting during final journal removal rolls back exact values before a queued edit', async () => {
+  const reached = deferred();
+  const waiting = deferred();
+  let allowed = true;
+  const base = memoryStorage(
+    {},
+    {
+      beforeRemove: (key) => {
+        if (key !== scopedKey('a', '@cloud-restore-pending')) return;
+        reached.resolve();
+        return waiting.promise;
+      },
+    },
+  );
+  const account = createAccountStore(base, 'a');
+  const routines = [{ id: 'device', workSong: { id: 'song', uri: 'file:///device-song.mp3' } }];
+  await account.setJSON('routines', routines);
+  await account.setString('profileBio', 'Device bio');
+  const before = await account.snapshot();
+  const restoring = account.replaceFromCloud(
+    payload({ routines: [{ id: 'cloud' }], profileBio: 'Cloud bio' }),
+    4,
+    before.meta.counter,
+    () => allowed,
+  );
+  await reached.promise;
+  const saving = account.setString('profileBio', 'Edit queued during final commit');
+  allowed = false;
+  waiting.resolve();
+  assert.equal(await restoring, false);
+  assert.equal(await saving, true);
+  assert.deepEqual(await account.getJSON('routines'), routines);
+  assert.equal(await account.getString('profileBio'), 'Edit queued during final commit');
+  const after = await account.snapshot();
+  assert.deepEqual(after.meta, {
+    ...before.meta,
+    counter: before.meta.counter + 1,
+    dirty: true,
+  });
+  assert.equal(base.values.has(scopedKey('a', '@cloud-restore-pending')), false);
+});
+
 test('deleting an account local cache keeps other accounts and global preferences', async () => {
   const base = memoryStorage({
     [scopedKey('a', 'routines')]: '[]',
     [scopedKey('a', '@syncmeta')]: '{}',
     [scopedKey('b', 'routines')]: '[1]',
     '@syncapp_theme_preference': 'dark',
+    '@syncapp_guest_import_cleanup': JSON.stringify({
+      userId: 'a',
+      entries: [['profileBio', 'Imported bio']],
+    }),
     routines: '[2]',
   });
   await clearAccountStore(base, 'a');
@@ -236,6 +636,7 @@ test('deleting an account local cache keeps other accounts and global preference
   assert.equal(base.values.has(scopedKey('a', '@syncmeta')), false);
   assert.equal(base.values.get(scopedKey('b', 'routines')), '[1]');
   assert.equal(base.values.get('@syncapp_theme_preference'), 'dark');
+  assert.equal(base.values.has('@syncapp_guest_import_cleanup'), false);
   assert.equal(base.values.get('routines'), '[2]');
   await assert.rejects(clearAccountStore(base, null), /account is required/);
 });

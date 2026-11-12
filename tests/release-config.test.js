@@ -1,0 +1,150 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {
+  checkReleaseConfig,
+  resolveProfile,
+  runPreflight,
+} from '../scripts/check-release-config.mjs';
+
+const values = {
+  EXPO_PUBLIC_SUPABASE_URL: 'https://testfixture.supabase.co',
+  EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_PublicFixture123',
+  EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: 'appl_PublicFixture123',
+  EXPO_PUBLIC_PRIVACY_URL: 'https://sync-app-support.feridun.chatgpt.site/privacy',
+  EXPO_PUBLIC_TERMS_URL: 'https://sync-app-support.feridun.chatgpt.site/terms',
+};
+const eas = {
+  build: {
+    base: { env: { EXPO_PUBLIC_ADS_ENABLED: 'false' } },
+    production: { extends: 'base', environment: 'production' },
+    preview: { extends: 'base', environment: 'preview' },
+    development: { extends: 'base', environment: 'development' },
+  },
+};
+
+test('local/profile preflight is platform-aware and never claims cloud readiness', () => {
+  const result = checkReleaseConfig({ platform: 'ios', env: values, eas });
+  assert.deepEqual(result.errors, []);
+  assert.deepEqual(result.warnings, ['cloud']);
+  assert.ok(
+    checkReleaseConfig({ platform: 'android', env: values, eas }).errors.includes('revenuecat'),
+  );
+});
+
+test('release profiles reject Test Store, private keys and placeholder account config', () => {
+  for (const profile of ['preview', 'production']) {
+    for (const key of ['test_Release123', 'goog_Wrong123', 'sk_Private123']) {
+      assert.ok(
+        checkReleaseConfig({
+          platform: 'ios',
+          profile,
+          env: { ...values, EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: key },
+          eas,
+        }).errors.includes('revenuecat'),
+      );
+    }
+  }
+  const missing = checkReleaseConfig({ platform: 'ios', env: {}, eas });
+  assert.ok(missing.errors.includes('supabaseUrl'));
+  assert.ok(missing.errors.includes('supabaseKey'));
+  assert.ok(missing.errors.includes('legal'));
+  assert.ok(
+    checkReleaseConfig({
+      platform: 'ios',
+      env: {
+        ...values,
+        EXPO_PUBLIC_SUPABASE_URL: 'https://YOUR_PROJECT.supabase.co',
+        EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_REPLACE_ME',
+      },
+      eas,
+    }).errors.includes('supabaseKey'),
+  );
+  for (const role of ['anon', 'service_role', 'supabase_admin']) {
+    const jwt = [
+      'header',
+      Buffer.from(JSON.stringify({ role })).toString('base64url'),
+      'signature',
+    ].join('.');
+    const result = checkReleaseConfig({
+      platform: 'ios',
+      env: { ...values, EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: jwt },
+      eas,
+    });
+    assert.equal(result.errors.includes('supabaseKey'), role !== 'anon');
+  }
+  for (const key of [
+    'sb_secret_PrivateFixture123',
+    `${values.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY}\n`,
+  ]) {
+    assert.ok(
+      checkReleaseConfig({
+        platform: 'ios',
+        env: { ...values, EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: key },
+        eas,
+      }).errors.includes('supabaseKey'),
+    );
+  }
+});
+
+test('profile inheritance is checked and profile overrides win over local env', () => {
+  const config = structuredClone(eas);
+  config.build.production.env = { EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: 'test_WrongProfile123' };
+  assert.ok(
+    checkReleaseConfig({ platform: 'ios', env: values, eas: config }).errors.includes('revenuecat'),
+  );
+  config.build.base.extends = 'production';
+  assert.throws(() => resolveProfile(config, 'production'), /circular/);
+  assert.deepEqual(checkReleaseConfig({ platform: 'ios', env: values, eas: config }).errors, [
+    'inheritance',
+  ]);
+});
+
+test('enabled release ads require matching real IDs only for the selected platform', () => {
+  const config = structuredClone(eas);
+  config.build.base.env.EXPO_PUBLIC_ADS_ENABLED = 'true';
+  const env = {
+    ...values,
+    ADMOB_IOS_APP_ID: 'ca-app-pub-1234567890123456~1234567890',
+    EXPO_PUBLIC_ADMOB_IOS_BANNER_ID: 'ca-app-pub-1234567890123456/1234567890',
+  };
+  assert.deepEqual(checkReleaseConfig({ platform: 'ios', env, eas: config }).errors, []);
+  env.EXPO_PUBLIC_ADMOB_IOS_BANNER_ID = 'ca-app-pub-9999999999999999/1234567890';
+  assert.ok(checkReleaseConfig({ platform: 'ios', env, eas: config }).errors.includes('adIds'));
+  config.build.base.env.EXPO_PUBLIC_ADS_ENABLED = 'TRUE';
+  assert.ok(checkReleaseConfig({ platform: 'ios', env, eas: config }).errors.includes('adFlag'));
+});
+
+test('preflight output never echoes credential values or untrusted arguments', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-release-preflight-'));
+  fs.writeFileSync(path.join(root, 'eas.json'), JSON.stringify(eas));
+  const secret = 'sk_NeverEchoThisSecret123';
+  const lines = [];
+  try {
+    assert.equal(
+      runPreflight(['--platform', 'ios'], {
+        root,
+        env: {
+          ...values,
+          EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: secret,
+          EXPO_PUBLIC_BAD_SECRET: secret,
+        },
+        write: (line) => lines.push(line),
+      }),
+      1,
+    );
+    assert.equal(
+      runPreflight(['--unknown', secret], { root, env: {}, write: (line) => lines.push(line) }),
+      1,
+    );
+    const output = lines.join('\n');
+    assert.ok(!output.includes(secret));
+    assert.ok(!output.includes(values.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY));
+    assert.ok(output.includes('Remote EAS values'));
+    assert.ok(output.includes('Private credentials'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
