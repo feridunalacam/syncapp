@@ -51,8 +51,8 @@
     "Build4 is available in the existing owner-only TestFlight group; no external beta review or public app release occurred.",
     "The owner reports successful native Apple sign-in after the explicit build4 update request; general physical runtime and subscriber MusicKit playback still require further evidence.",
     "Google/cold-start/guest-isolation QA was on the d918565 Debug client; it is not relabelled as physical Store4 proof.",
-    "Real paid lifecycle, sandbox/review isolation, merchant and final privacy/rating checks remain release gates.",
-    "The owner reports missing Pro prices on the physical client; purchase-to-Pro is not verified. Apple merchant setup and review screenshots remain incomplete."
+    "Real paid lifecycle, usable sandbox/review isolation, product review assets and final privacy/rating checks remain release gates. The later listed commercial statuses are Active; a separate native catalog probe passed, but physical Store4 pricing after it remains unverified.",
+    "The owner reported missing Pro prices on the physical client before the subsequent successful standalone native catalog probe; physical Store4 pricing after that probe and purchase-to-Pro are not verified. Both subscription review screenshots and usable reviewer access remain incomplete."
   ],
   "completedAtUTC": "2026-11-12T13:11:22.354Z",
   "artifact": {
@@ -127,14 +127,120 @@
       "dashboardEmailConfirmationWarningPresent": true
     },
     "appleBusiness": {
-      "paidAppsAgreement": "Pending User Info",
+      "paidAppsAgreement": "Active",
       "freeAppsAgreement": "Active",
-      "bankAccount": "Not configured; Add Bank Account shown",
-      "usCertificateOfForeignStatus": "Missing Tax Info",
-      "usFormW8BEN": "Missing Tax Info",
+      "bankAccount": "One row, Active",
+      "usCertificateOfForeignStatus": "Active",
+      "usFormW8BEN": "Active",
       "digitalServicesAct": "Active"
     },
-    "conclusion": "Apple financial/contract setup is a confirmed availability gate, not proof that it is the sole cause. Current price and offering mappings were independently read in their dashboards. No financial or tax declaration was entered.",
-    "reference": "https://developer.apple.com/documentation/technotes/tn3186-troubleshooting-in-app-purchases-availability-in-the-sandbox"
+    "conclusion": "All listed agreement/bank/tax/DSA statuses are Active; earlier incomplete statuses remain historical. A subsequent separate native simulator probe fetched both real Apple subscription products and the default RevenueCat offering. Physical Store4 prices after that probe and purchase-to-Pro remain unverified; no sole causal fix is established. Review-lane source is prepared and validated (696 tests including 17 actual SQL tests, both Hermes exports), but is not deployed or live-configured. Two live review setup approvals, product review screenshots and usable reviewer access remain open.",
+    "reference": "https://developer.apple.com/documentation/technotes/tn3186-troubleshooting-in-app-purchases-availability-in-the-sandbox",
+    "historicalAppleBusinessChecks": [
+      {
+        "checkedOn": "2026-11-12",
+        "sequence": "Earlier same-day read-only receipt, before the all-Active recheck",
+        "observationTimeUTC": null,
+        "observationTimeNote": "Only the existing checkedOn date was recorded; no clock timestamp is invented.",
+        "statuses": {
+          "paidAppsAgreement": "Pending User Info",
+          "freeAppsAgreement": "Active",
+          "bankAccount": "Not configured; Add Bank Account shown",
+          "usCertificateOfForeignStatus": "Missing Tax Info",
+          "usFormW8BEN": "Missing Tax Info",
+          "digitalServicesAct": "Active"
+        }
+      }
+    ],
+    "appleBusinessRecheck": {
+      "checkedOn": "2026-11-12",
+      "sequence": "Later than the historical Pending User Info/no-bank/Missing Tax Info receipt",
+      "observationTimeUTC": null,
+      "observationTimeNote": "Exact observation clock time was not supplied; same-day ordering only.",
+      "evidenceSource": "Root-relayed read-only App Store Connect CUA observation of headings/statuses",
+      "allListedStatusesActive": true,
+      "privateFinancialValuesReadOrExported": false,
+      "ownerPriceRetryAfterRecheck": "Owner still reports prices unavailable on the physical TestFlight client",
+      "productCatalogOrPurchaseSuccessEstablished": false
+    },
+    "reviewLanePreparation": {
+      "status": "Prepared and validated SOURCE; not deployed",
+      "separateRevenueCatReviewLane": true,
+      "existingSupabaseProjectOnly": true,
+      "includedInDeliveredStore4": false,
+      "completedImplementationReported": true,
+      "passingValidationReported": true,
+      "deployedOrLiveConfiguredReported": false,
+      "purchaseToProVerified": false,
+      "validationScope": "Offline source and synthetic client/handler checks plus actual ephemeral PostgreSQL migrations/RLS/RPCs; not live configuration or a real store purchase",
+      "liveApprovalsPending": 2,
+      "pendingApprovalScope": "Live review resources, deployment, reviewer-account/reservation setup and notification changes",
+      "liveReviewResourcesOrAccountCreated": false,
+      "notificationCutoverPerformed": false,
+      "sourceValidation": {
+        "testsPassed": 696,
+        "testsFailed": 0,
+        "testsSkipped": 0,
+        "actualSQLTestsPassed": 17,
+        "realTwoConnectionConcurrencyVerified": false,
+        "iosAndAndroidHermesExportsPassed": true,
+        "runtimeFileCount": 149,
+        "runtimeHashesStable": true,
+        "runtimeManifestSHA256": "893285f59795a686a3776264b2b3d1b01aff1dec1331ce1f8f7a4f2d13bd181c",
+        "environment": "Synthetic public fixtures; production profile; Ads/Spotify/native Apple Music controls/web media acquisition disabled; no dotenv; no account/store transaction",
+        "offlineEvidenceFile": "review-billing-offline-evidence.json",
+        "finalTestLog": "/private/tmp/syncapp-final-source-checks/full-tests.log",
+        "finalExportsEvidence": "/private/tmp/syncapp-final-source-checks/exports-evidence.json"
+      }
+    }
+  },
+  "subsequentReadOnlyCatalogProbe": {
+    "evidenceFile": "ios-catalog-validation-evidence.json",
+    "bothProductsAndDefaultOfferingFetched": true,
+    "nativeReferenceScope": "585b64b simulator Release clone with standalone read-only JS, not Store4",
+    "physicalStore4PriceRetestAfterThisProbe": false,
+    "purchaseOrProUnlockVerified": false
+  },
+  "subsequentCandidateSource": {
+    "includedInDeliveredStore4": false,
+    "validationSource": "Final combined source; same source-validation receipt as reviewLanePreparation, not a second independent full-suite run",
+    "productionAndPreviewGuards": {
+      "spotifyAccountAndPlaybackDisabled": true,
+      "nativeAppleMusicConnectionLibraryAndTimedPlaybackDisabled": true,
+      "embeddedWebMediaExtractionDownloadAndNewURLAcquisitionDisabled": true,
+      "ownerDevelopmentRequiresHardDevelopmentAndExplicitFlags": true,
+      "ordinaryExternalLinksAndFilesImportPreserved": true,
+      "savedURLAndMusicMetadataPreserved": true,
+      "musicPolicyFile": "music-release-policy.md"
+    },
+    "accountLocalReadiness": {
+      "unknownScopeDoesNotPrepareOrMountEditableConsumers": true,
+      "matchingValidatedCachedScopeAllowsOfflineLocalRecords": true,
+      "cachedScopeDoesNotAuthorizeCloudOrPro": true,
+      "scopeFailureOffersRetryAndNormalAuthSignOut": true,
+      "localReadRecoveryRetryRemainsSeparate": true,
+      "staleDifferentUserActionCallbacksRejected": true,
+      "unresolvedGuestAndOtherNamespaceDataNotAutoImportedOrRemoved": true
+    },
+    "unrestrictedWebAccessDraft": "No for the guarded candidate; historical Store4 embedded-browser Yes inference retained. Not entered or calculated in App Store Connect.",
+    "finalPostGuardNativeRelease": "PASS: local Simulator Release compile and strict/deep signature checks; ad-hoc simulator signing and synthetic public fixtures, not installed or launched",
+    "newNativeOrPhysicalRuntimeResultEstablished": false,
+    "newCloudDeliveryOrBackendDeploymentEstablished": false,
+    "validatedSourceCommit": "555a24752ec6dd899681e0f83a2674b0965f8c24",
+    "nativeCompileAndSignature": {
+      "evidenceSource": "Root-relayed independent strict/deep codesign and executable/Hermes/inspection hash verification",
+      "exitCode": 0,
+      "strictDeepCodesignPassed": true,
+      "snapshotApp": "/private/tmp/syncapp-review-native-qa-vvk5p7ud/snapshot-final-893285f/Sync.app",
+      "runtimeFilesMatched": 149,
+      "copiedInputsMatched": 183,
+      "runtimeManifestSHA256": "893285f59795a686a3776264b2b3d1b01aff1dec1331ce1f8f7a4f2d13bd181c",
+      "bothSimulatorArchitectures": true,
+      "podVersionsUnchangedCount": 183,
+      "syntheticPublicFixtures": true,
+      "installedOrLaunched": false,
+      "currentNativeUIObserved": false,
+      "distributionArchiveOrLiveServiceProof": false
+    }
   }
 }
