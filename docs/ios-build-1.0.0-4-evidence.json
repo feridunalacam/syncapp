@@ -51,8 +51,8 @@
     "Build4 is available in the existing owner-only TestFlight group; no external beta review or public app release occurred.",
     "The owner reports successful native Apple sign-in after the explicit build4 update request; general physical runtime and subscriber MusicKit playback still require further evidence.",
     "Google/cold-start/guest-isolation QA was on the d918565 Debug client; it is not relabelled as physical Store4 proof.",
-    "Real paid lifecycle, usable sandbox/review isolation, product review assets and final privacy/rating checks remain release gates. The later listed commercial statuses are Active; a separate native catalog probe passed, but physical Store4 pricing after it remains unverified.",
-    "The owner reported missing Pro prices on the physical client before the subsequent successful standalone native catalog probe; physical Store4 pricing after that probe and purchase-to-Pro are not verified. Both subscription review screenshots and usable reviewer access remain incomplete."
+    "Real paid lifecycle, purchase/restore isolation and final privacy/rating checks remain release gates; later product review screenshots/notes are saved. The later listed commercial statuses are Active; a separate native catalog probe passed, but physical Store4 pricing after it remains unverified.",
+    "The owner reported missing Pro prices on the physical client before the subsequent successful standalone native catalog probe; physical Store4 pricing after that probe and purchase-to-Pro are not verified. The later subscription review screenshots/notes are saved; selected-distribution reviewer access remains incomplete."
   ],
   "completedAtUTC": "2026-11-12T13:11:22.354Z",
   "artifact": {
@@ -108,7 +108,11 @@
       "currentUSPriceUSD": "2.99",
       "availability": "All current 175 countries/regions",
       "englishLocalizationPresent": true,
-      "reviewScreenshotPresent": false
+      "reviewScreenshotPresent": true,
+      "reviewScreenshotPresentAtEarlierCatalogCheck": false,
+      "reviewNotesSaved": true,
+      "reviewAssetsSavedOn": "2026-11-12",
+      "reviewAssetsEvidenceFile": "review-billing-live-setup-evidence.json"
     },
     "appleYearly": {
       "productId": "com.feridun.syncapp.pro.yearly",
@@ -116,7 +120,11 @@
       "currentUSPriceUSD": "18.00",
       "availability": "All current 175 countries/regions; one-year upfront",
       "englishLocalizationPresent": true,
-      "reviewScreenshotPresent": false
+      "reviewScreenshotPresent": true,
+      "reviewScreenshotPresentAtEarlierCatalogCheck": false,
+      "reviewNotesSaved": true,
+      "reviewAssetsSavedOn": "2026-11-12",
+      "reviewAssetsEvidenceFile": "review-billing-live-setup-evidence.json"
     },
     "revenueCat": {
       "defaultOffering": "default",
@@ -134,7 +142,7 @@
       "usFormW8BEN": "Active",
       "digitalServicesAct": "Active"
     },
-    "conclusion": "All listed agreement/bank/tax/DSA statuses are Active; earlier incomplete statuses remain historical. A subsequent separate native simulator probe fetched both real Apple subscription products and the default RevenueCat offering. Physical Store4 prices after that probe and purchase-to-Pro remain unverified; no sole causal fix is established. Review-lane source is prepared and validated (696 tests including 17 actual SQL tests, both Hermes exports), but is not deployed or live-configured. Two live review setup approvals, product review screenshots and usable reviewer access remain open.",
+    "conclusion": "Earlier commercial/catalog and physical Store4 evidence retains its original scope. Subsequent local actual-public QA passed A/B login, plan prices and Refresh controls. A generation2/B generation1 inactive review-only Free rows are consistent with deployed refresh; no paid lease, backup, production-row change or raw upstream response inspection is established. Review provisioning, default offering, TEST200 webhook, saved Transfer policy and Apple sandbox URL save/readback are complete; Apple event delivery and purchase/restore-to-Pro remain unverified. Store build5 finished and passed24/24 archive checks; internal-QA-only submission is IN_QUEUE (initial Free-tier estimate about 60.7 minutes, no error), with no Apple upload/VALID or group5 delivery evidence yet.",
     "reference": "https://developer.apple.com/documentation/technotes/tn3186-troubleshooting-in-app-purchases-availability-in-the-sandbox",
     "historicalAppleBusinessChecks": [
       {
@@ -164,19 +172,19 @@
       "productCatalogOrPurchaseSuccessEstablished": false
     },
     "reviewLanePreparation": {
-      "status": "Prepared and validated SOURCE; not deployed",
+      "status": "Owner-approved live setup partially complete; purchase path not verified",
       "separateRevenueCatReviewLane": true,
       "existingSupabaseProjectOnly": true,
       "includedInDeliveredStore4": false,
       "completedImplementationReported": true,
       "passingValidationReported": true,
-      "deployedOrLiveConfiguredReported": false,
+      "deployedOrLiveConfiguredReported": true,
       "purchaseToProVerified": false,
       "validationScope": "Offline source and synthetic client/handler checks plus actual ephemeral PostgreSQL migrations/RLS/RPCs; not live configuration or a real store purchase",
-      "liveApprovalsPending": 2,
-      "pendingApprovalScope": "Live review resources, deployment, reviewer-account/reservation setup and notification changes",
-      "liveReviewResourcesOrAccountCreated": false,
-      "notificationCutoverPerformed": false,
+      "liveApprovalsPending": 0,
+      "pendingApprovalScope": null,
+      "liveReviewResourcesOrAccountCreated": true,
+      "notificationCutoverPerformed": true,
       "sourceValidation": {
         "testsPassed": 696,
         "testsFailed": 0,
@@ -191,7 +199,40 @@
         "offlineEvidenceFile": "review-billing-offline-evidence.json",
         "finalTestLog": "/private/tmp/syncapp-final-source-checks/full-tests.log",
         "finalExportsEvidence": "/private/tmp/syncapp-final-source-checks/exports-evidence.json"
-      }
+      },
+      "previousTwoPendingApprovalRequestsSuperseded": true,
+      "ownerApprovedOn": "2026-11-12",
+      "liveSetupComplete": false,
+      "dedicatedConfirmedReviewAccountsReserved": 2,
+      "reviewReservationWindowDays": 30,
+      "manualProGrantCreated": false,
+      "defaultReviewOfferingAndPackagesConfigured": true,
+      "liveSetupEvidenceFile": "review-billing-live-setup-evidence.json",
+      "remainingLiveSteps": [
+        "Observe IN_QUEUE internal-QA submission through upload, Apple processing/group delivery",
+        "Verify actual Apple sandbox notification delivery",
+        "Selected-distribution reviewer login and credential entry",
+        "Canonical App Store sandbox purchase/restore-to-Pro and lifecycle/isolation checks"
+      ],
+      "reviewWebhookConfigured": true,
+      "reviewWebhookTESTConnectivityPassed": true,
+      "reviewAccountALocalNativeLoginPassed": true,
+      "reviewAccountANativePlanPricesLoaded": true,
+      "reviewAccountAInactiveFreeStateConsistentWithDeployedSync": true,
+      "rawUpstreamCanonicalResponseInspected": false,
+      "savedRestorePolicy": "Transfer to new App User ID; different sandbox behavior off",
+      "actualRestoreTransferVerified": false,
+      "appleSandboxURLBlocker": null,
+      "appleSandboxURLSavedAndReadbackMatched": true,
+      "productionAppleNotificationURLUnchanged": true,
+      "appleNotificationDeliveryVerified": false,
+      "reviewAccountBLocalNativeLoginAndPricesPassed": true,
+      "reviewAccountBInactiveFreeStateConsistentWithDeployedSync": true,
+      "bothAccountsHaveInactiveReviewFreeRows": true,
+      "productReviewScreenshotsPrepared": 2,
+      "productReviewScreenshotsUploadedOrSaved": true,
+      "productReviewNotesSavedForBothProducts": true,
+      "productReviewScreenshotGateComplete": true
     }
   },
   "subsequentReadOnlyCatalogProbe": {
@@ -224,8 +265,8 @@
     },
     "unrestrictedWebAccessDraft": "No for the guarded candidate; historical Store4 embedded-browser Yes inference retained. Not entered or calculated in App Store Connect.",
     "finalPostGuardNativeRelease": "PASS: local Simulator Release compile and strict/deep signature checks; ad-hoc simulator signing and synthetic public fixtures, not installed or launched",
-    "newNativeOrPhysicalRuntimeResultEstablished": false,
-    "newCloudDeliveryOrBackendDeploymentEstablished": false,
+    "newNativeOrPhysicalRuntimeResultEstablished": true,
+    "newCloudDeliveryOrBackendDeploymentEstablished": true,
     "validatedSourceCommit": "555a24752ec6dd899681e0f83a2674b0965f8c24",
     "nativeCompileAndSignature": {
       "evidenceSource": "Root-relayed independent strict/deep codesign and executable/Hermes/inspection hash verification",
@@ -241,6 +282,27 @@
       "installedOrLaunched": false,
       "currentNativeUIObserved": false,
       "distributionArchiveOrLiveServiceProof": false
+    },
+    "newCloudDeliveryEstablished": false,
+    "reviewBackendDeploymentEstablished": true,
+    "liveSetupEvidenceFile": "review-billing-live-setup-evidence.json",
+    "newNativeRuntimeResultScope": "Root-owned local actual-public QA: A/B login and both prices, Guest3/A0 separation, error-free completed Refresh; A generation2/B generation1 inactive review-only Free-state consistency. Not physical Store4 or delivered build5.",
+    "newCloudBuildStarted": true,
+    "buildOnly5": {
+      "id": "2bdd44f8-8b70-4840-8cf1-43420a7b3958",
+      "sourceCommit": "577e1ff26a619c0a62b1967bd0be9f1698c0cf11",
+      "statusAtSnapshot": "FINISHED",
+      "finishedAtUTC": "2026-11-12T17:35:22Z",
+      "archiveChecksPassed": 24,
+      "ipaSHA256": "f8cca61e057225d9331f44dceee4f980c9490cb5ccdfb194317e1a2ec1c5b4fc",
+      "actualPublicRuntimeAndNoSyntheticFixturesVerified": true,
+      "priorSubmitHoldSuperseded": true,
+      "submissionId": "2b268d9e-9643-4f20-9ec1-bff07c02b149",
+      "submissionStatusAtSnapshot": "IN_QUEUE; internal QA only",
+      "appleProcessingOrInternalGroupDeliveryVerified": false,
+      "delivered": false,
+      "initialFreeTierEstimatedWaitMinutes": 60.7,
+      "submissionError": null
     }
   }
 }
