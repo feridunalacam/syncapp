@@ -81,7 +81,7 @@ export default function AdBanner({ placementVisible = true, hasBlockingModal = f
     isMusicPlaying: workout?.isMusicPlaying,
     isAudioSyncing: workout?.isAudioSyncing,
   };
-  const prepare = !!workout && canPrepareAds(flags);
+  const prepare = ads.bannerEnabled !== false && !!workout && canPrepareAds(flags);
   const prepareRef = useRef(false);
   prepareRef.current = prepare;
   const acquirePlacement = ads.acquirePlacement;

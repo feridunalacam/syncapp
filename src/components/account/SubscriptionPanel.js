@@ -86,10 +86,10 @@ export default function SubscriptionPanel({ visible, onClose, onSignIn }) {
           {subscription.isPro ? 'Your routines, backed up.' : 'Keep your training with you.'}
         </Text>
         {text(
-          'Back up your routines, activity and profile, sync them across your devices, and keep Discover ad-free.',
+          'Back up your routines, activity and profile, sync them across your devices, and remove all ads.',
         )}
         {text(
-          'Timer, music and local routines stay free. Free Discover may show a labelled advertisement when you are not in a session. Imported audio files remain on the device where you added them.',
+          'Timer, music and local routines stay free. Free accounts may see ads before starting or after finishing a session, plus a labelled Discover banner. Ads never interrupt a running or paused session. Imported audio files remain on the device where you added them.',
         )}
         {subscription.isPro &&
           text(

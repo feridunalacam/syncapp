@@ -333,10 +333,10 @@ export default function ProfileScreen() {
             'sparkles-outline',
             subscription.isPro ? 'Sync Pro' : 'Explore Sync Pro',
             subscription.isPro
-              ? 'Your Pro membership is active. Discover stays ad-free.'
+              ? 'Your Pro membership is active. All ads are removed.'
               : subscription.pending
                 ? 'Confirming your purchase with the store…'
-                : 'Cloud backup, device sync and an ad-free Discover.',
+                : 'Cloud backup, device sync and no ads.',
             () => setSheet('subscription'),
             <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>
               {subscription.isPro ? 'Pro' : subscription.pending ? 'Verifying' : 'Free'}
@@ -687,10 +687,10 @@ export default function ProfileScreen() {
         <Text style={[styles.prose, { color: theme.text }]}>
           Sync brings intervals and music together for movement, study and focus.{'\n\n'}Use Sync on
           this device for free, or sign in to keep separate account data. Sync Pro adds private
-          cloud backups for routines, activity and profile details across devices, plus an ad-free
-          Discover. Local audio files and Spotify credentials stay on this device.{'\n\n'}Discover
-          posts are private saved content, not public online publishing. Manage your membership and
-          account in the Account section above.
+          cloud backups for routines, activity and profile details across devices, plus no ads.
+          Local audio files and Spotify credentials stay on this device.{'\n\n'}Discover posts are
+          private saved content, not public online publishing. Manage your membership and account in
+          the Account section above.
         </Text>
       </Sheet>
     </ScreenWrapper>

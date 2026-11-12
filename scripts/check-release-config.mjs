@@ -16,7 +16,8 @@ const messages = {
   legal: 'EXPO_PUBLIC_PRIVACY_URL and EXPO_PUBLIC_TERMS_URL must be public HTTPS pages.',
   publicSecrets: 'Private credentials must not use EXPO_PUBLIC_ variables.',
   adFlag: 'EXPO_PUBLIC_ADS_ENABLED must be exactly true or false when supplied.',
-  adIds: 'Enabled release ads need matching real app and banner IDs for the selected platform.',
+  adIds:
+    'Enabled release ads need matching real app, banner and interstitial IDs for the selected platform.',
   environment: 'The selected EAS environment is not explicit; verify remote environment selection.',
   cloud:
     'Only supplied local process variables (.env.local when explicitly loaded) plus inherited eas.json values were checked. Remote EAS values, project linking, signing, store approval and live services are not verified.',
@@ -102,9 +103,17 @@ export function checkReleaseConfig({ platform, profile = 'production', env = {},
       platform === 'ios'
         ? values.EXPO_PUBLIC_ADMOB_IOS_BANNER_ID
         : values.EXPO_PUBLIC_ADMOB_ANDROID_BANNER_ID;
-    const app = /^ca-app-pub-(\d{16})~\d{10}$/.exec(appId || '');
-    const banner = /^ca-app-pub-(\d{16})\/\d{10}$/.exec(bannerId || '');
-    if (!app || !banner || app[1] !== banner[1] || app[1] === '3940256099942544')
+    const interstitialId =
+      platform === 'ios'
+        ? values.EXPO_PUBLIC_ADMOB_IOS_INTERSTITIAL_ID
+        : values.EXPO_PUBLIC_ADMOB_ANDROID_INTERSTITIAL_ID;
+    const exact = (value, pattern) =>
+      typeof value === 'string' && value.trim() === value ? pattern.exec(value) : null;
+    const app = exact(appId, /^ca-app-pub-(\d{16})~\d{10}$/);
+    const units = [bannerId, interstitialId].map((id) =>
+      exact(id, /^ca-app-pub-(\d{16})\/\d{10}$/),
+    );
+    if (!app || app[1] === '3940256099942544' || units.some((unit) => !unit || app[1] !== unit[1]))
       errors.push('adIds');
   }
   if (selected.environment !== profile) warnings.push('environment');

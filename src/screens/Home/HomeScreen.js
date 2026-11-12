@@ -21,6 +21,8 @@ import GlassSurface from '../../components/common/GlassSurface';
 import Sheet from '../../components/common/Sheet';
 import { TimerDesign } from './components/TimerDesign';
 import { MusicPlayerPreview } from './components/MusicPlayerPreview';
+import useSessionAds from '../../hooks/useSessionAds';
+import { sessionToLog } from '../../domain/workout';
 
 const intervalLayout = LinearTransition.duration(240).reduceMotion(ReduceMotion.System);
 const intervalEnter = FadeInDown.duration(220).reduceMotion(ReduceMotion.System);
@@ -51,6 +53,14 @@ export default function HomeScreen({ navigation, route }) {
   const { routines } = useRoutineContext();
   const workout = useWorkout();
   const [picker, setPicker] = useState(false);
+  const [dismissedSession, setDismissedSession] = useState(null);
+  const finished = sessionToLog(workout.session);
+  const sessionAds = useSessionAds({
+    workout,
+    blocked: picker,
+    sessionKey: finished?.sessionId || null,
+    onFinish: setDismissedSession,
+  });
   const {
     selectedRoutine,
     isWorkoutRunning,
@@ -80,7 +90,10 @@ export default function HomeScreen({ navigation, route }) {
           { text: 'Switch', onPress: onConfirm },
         ]),
       onMissing: () => Alert.alert('Routine not found', 'This routine may have been deleted.'),
-      onSelected: () => setPicker(false),
+      onSelected: () => {
+        setPicker(false);
+        sessionAds.recordRoutineSelection();
+      },
     });
   useEffect(() => () => selection.current.dispose(), []);
   useEffect(() => {
@@ -110,12 +123,16 @@ export default function HomeScreen({ navigation, route }) {
           <IconButton
             icon="add"
             label="Create routine"
+            disabled={sessionAds.busy}
             onPress={() => navigateToCreateRoutine(navigation)}
           />
         </View>
         <Pressable
           onPress={() => setPicker(true)}
           accessibilityLabel="Choose routine"
+          accessibilityRole="button"
+          disabled={sessionAds.busy}
+          accessibilityState={{ disabled: sessionAds.busy }}
           style={styles.selection}
         >
           <View style={{ flex: 1 }}>
@@ -164,7 +181,7 @@ export default function HomeScreen({ navigation, route }) {
             </Text>
             <Pressable
               onPress={edit}
-              disabled={!selectedRoutine}
+              disabled={!selectedRoutine || sessionAds.busy}
               accessibilityLabel="Edit current routine"
             >
               <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>Edit</Text>
@@ -179,11 +196,17 @@ export default function HomeScreen({ navigation, route }) {
             disabled={!isWorkoutRunning}
           />
           <Pressable
-            onPress={workout.toggle}
-            disabled={!selectedRoutine}
+            onPress={sessionAds.startOrToggle}
+            disabled={!selectedRoutine || sessionAds.busy}
             accessibilityRole="button"
             accessibilityLabel={
-              isPaused ? 'Resume session' : isWorkoutRunning ? 'Pause session' : 'Start session'
+              sessionAds.busy
+                ? 'Preparing session'
+                : isPaused
+                  ? 'Resume session'
+                  : isWorkoutRunning
+                    ? 'Pause session'
+                    : 'Start session'
             }
             style={[
               styles.start,
@@ -202,7 +225,13 @@ export default function HomeScreen({ navigation, route }) {
                 fontSize: 16,
               }}
             >
-              {isPaused ? 'Resume' : isWorkoutRunning ? 'Pause' : 'Start session'}
+              {sessionAds.busy
+                ? 'Please wait…'
+                : isPaused
+                  ? 'Resume'
+                  : isWorkoutRunning
+                    ? 'Pause'
+                    : 'Start session'}
             </Text>
           </Pressable>
           <IconButton
@@ -212,6 +241,32 @@ export default function HomeScreen({ navigation, route }) {
             disabled={!isWorkoutRunning}
           />
         </View>
+        {!isWorkoutRunning && sessionAds.adSupported && (
+          <Text style={[styles.adNotice, { color: theme.textSecondary }]}>
+            Free sessions may show an ad before starting or after finishing. Sync Pro removes all
+            ads.
+          </Text>
+        )}
+        {finished && finished.sessionId !== dismissedSession && !isWorkoutRunning && (
+          <Surface variant="card" style={[styles.sessionSummary, { backgroundColor: theme.card }]}>
+            <Text style={{ color: theme.text, fontWeight: '700', fontSize: 17 }}>
+              {finished.status === 'completed' ? 'Session complete' : 'Session ended'}
+            </Text>
+            <Text style={{ color: theme.textSecondary, marginTop: 7, lineHeight: 20 }}>
+              {finished.name} · {formatTime(finished.actualDurationSec)} ·{' '}
+              {finished.roundsCompleted} rounds completed
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Finish session"
+              disabled={sessionAds.busy}
+              onPress={sessionAds.finish}
+              style={[styles.finishButton, { backgroundColor: theme.cardSecondary }]}
+            >
+              <Text style={{ color: theme.text, fontWeight: '600' }}>Continue</Text>
+            </Pressable>
+          </Surface>
+        )}
         {isWorkoutRunning && (
           <Pressable onPress={stop} accessibilityLabel="End session" style={styles.end}>
             <Text style={{ color: theme.textSecondary, fontSize: 12 }}>End session</Text>
@@ -235,7 +290,7 @@ export default function HomeScreen({ navigation, route }) {
             />
             <Pressable
               onPress={edit}
-              disabled={!selectedRoutine}
+              disabled={!selectedRoutine || sessionAds.busy}
               accessibilityLabel="Edit routine audio"
               style={{ padding: 8 }}
             >
@@ -436,6 +491,9 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   end: { alignSelf: 'center', paddingHorizontal: 16, paddingBottom: 14 },
+  adNotice: { fontSize: 11, lineHeight: 16, textAlign: 'center', marginTop: -4, marginBottom: 16 },
+  sessionSummary: { padding: 18, borderRadius: 20, marginBottom: 18 },
+  finishButton: { padding: 14, borderRadius: 14, alignItems: 'center', marginTop: 14 },
   music: { padding: 14, borderRadius: 21, borderWidth: StyleSheet.hairlineWidth, marginBottom: 18 },
   musicTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   musicControls: {
