@@ -349,12 +349,24 @@ test('release music picker exposes Device and Browser, imports Device audio, and
   assert.equal(h.oauthStarts, 0);
 });
 
-test('release Profile hides Spotify connection and device controls while keeping Device audio visible', async (t) => {
+test('release Profile hides Spotify and keeps passive preferences accessible and account rows actionable', async (t) => {
   let Profile;
+  let themeToggles = 0;
   const h = await mount(t, (hooks) => {
     if (!Profile)
       Profile = load('screens/Profile/ProfileScreen.js', ['ProfileScreen'], {
         ...hooks,
+        useTheme: () => {
+          const [isDark, setIsDark] = React.useState(false);
+          return {
+            theme,
+            isDark,
+            toggleTheme: () => {
+              themeToggles++;
+              setIsDark((value) => !value);
+            },
+          };
+        },
         useIsFocused: () => true,
         useAuth: () => ({ user: null, error: null, recoveryMode: false }),
         useAccountData: () => ({ status: 'local', hasGuestData: false }),
@@ -392,6 +404,30 @@ test('release Profile hides Spotify connection and device controls while keeping
   assert.equal(h.root.root.findAllByType('SpotifyLogo').length, 0);
   assert.equal(h.spotifyCalls, 0);
   assert.equal(h.oauthStarts, 0);
+
+  const appearance = h.root.root.findByProps({ accessibilityLabel: 'Dark appearance' });
+  assert.equal(appearance.type, 'Switch');
+  assert.equal(appearance.parent.type, 'View');
+  assert.equal(appearance.parent.props.accessible, false);
+  for (let ancestor = appearance.parent; ancestor; ancestor = ancestor.parent) {
+    assert.notEqual(ancestor.type, 'Pressable');
+    assert.notEqual(ancestor.props.disabled, true);
+    assert.notEqual(ancestor.props.accessibilityState?.disabled, true);
+    assert.equal(ancestor.props.onPress, undefined);
+  }
+  assert.equal(appearance.props.value, false);
+  await act(async () => appearance.props.onValueChange(true));
+  assert.equal(themeToggles, 1);
+  assert.equal(appearance.props.value, true);
+
+  const accountRow = h.root.root
+    .findAllByType('Pressable')
+    .find((node) => textOf(node).includes('Sign in or create account'));
+  assert.ok(accountRow);
+  assert.equal(accountRow.props.accessibilityRole, 'button');
+  assert.notEqual(accountRow.props.disabled, true);
+  await act(async () => accountRow.props.onPress());
+  assert.equal(h.root.root.findByType('AccountPanel').props.visible, true);
 });
 
 test('audio alert helper follows Spotify release availability and retains the development explanation', async () => {

@@ -164,35 +164,38 @@ export default function ProfileScreen() {
   const section = (title) => (
     <Text style={[styles.section, { color: theme.textSecondary }]}>{title}</Text>
   );
-  const row = (icon, label, detail, onPress, right, divided = false) => (
-    <Pressable
-      onPress={onPress}
-      disabled={!onPress}
-      style={[
-        styles.row,
-        divided && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
-      ]}
-      accessibilityRole={onPress ? 'button' : undefined}
-    >
-      <View style={[styles.rowIcon, { backgroundColor: theme.cardSecondary }]}>
-        {icon === 'logo-spotify' ? (
-          <SpotifyLogo iconSize={20} showText={false} />
-        ) : (
-          <Ionicons name={icon} size={19} color={theme.textSecondary} />
-        )}
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>{label}</Text>
-        {detail && (
-          <Text style={{ color: theme.textSecondary, fontSize: 11, lineHeight: 17, marginTop: 4 }}>
-            {detail}
-          </Text>
-        )}
-      </View>
-      {right ||
-        (onPress && <Ionicons name="chevron-forward" size={16} color={theme.textTertiary} />)}
-    </Pressable>
-  );
+  const row = (icon, label, detail, onPress, right, divided = false) => {
+    const Container = onPress ? Pressable : View;
+    return (
+      <Container
+        {...(onPress ? { onPress, accessibilityRole: 'button' } : { accessible: false })}
+        style={[
+          styles.row,
+          divided && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
+        ]}
+      >
+        <View style={[styles.rowIcon, { backgroundColor: theme.cardSecondary }]}>
+          {icon === 'logo-spotify' ? (
+            <SpotifyLogo iconSize={20} showText={false} />
+          ) : (
+            <Ionicons name={icon} size={19} color={theme.textSecondary} />
+          )}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>{label}</Text>
+          {detail && (
+            <Text
+              style={{ color: theme.textSecondary, fontSize: 11, lineHeight: 17, marginTop: 4 }}
+            >
+              {detail}
+            </Text>
+          )}
+        </View>
+        {right ||
+          (onPress && <Ionicons name="chevron-forward" size={16} color={theme.textTertiary} />)}
+      </Container>
+    );
+  };
   const button = (label, onPress) => (
     <Pressable
       onPress={onPress}
