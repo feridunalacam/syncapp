@@ -74,7 +74,7 @@ export default function MusicServicesPanel() {
             ? apple.connected
               ? 'Connected · songs and playlists for each round'
               : 'Songs and playlists · Apple Music subscription required'
-            : 'Opens Apple Music. In-app playback is unavailable on this device.',
+            : 'Opens Apple Music. Playback stays in Apple Music.',
         apple.available
           ? apple.connected
             ? apple.disconnect

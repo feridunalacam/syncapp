@@ -5,11 +5,12 @@ const MESSAGES = {
   subscription: 'An active Apple Music subscription is required to play catalog songs.',
 };
 
-export function createAppleMusicService(native) {
+export function createAppleMusicService(native, { unavailableMessage } = {}) {
   const available = native?.supported === true;
   const fail = (code, fallback) => {
     const error = new Error(
-      MESSAGES[code] ||
+      (code === 'unavailable' && unavailableMessage) ||
+        MESSAGES[code] ||
         fallback ||
         'Apple Music could not complete this request. Please try again.',
     );
@@ -46,8 +47,9 @@ export function createAppleMusicService(native) {
   };
   return {
     available,
-    localPlaybackControl: true,
-    // Apple Music must not be mixed with local alerts or other streaming content.
+    unavailableMessage,
+    localPlaybackControl: available,
+    // Keep local cues separate from MusicKit playback.
     allowsLocalCues: false,
     async authorize() {
       verify(await call('authorize'));
@@ -86,7 +88,10 @@ export function createAppleMusicService(native) {
       revision++;
       return call('releaseCurrent');
     },
-    getActiveDevice: async () => 'appleMusic',
+    getActiveDevice: async () => {
+      if (!available) fail('unavailable');
+      return 'appleMusic';
+    },
     getCurrentPlayback: () => call('getCurrentPlayback'),
     setRepeat: (_token, mode) => call('setRepeat', mode),
     setShuffle: (_token, enabled) => call('setShuffle', enabled),

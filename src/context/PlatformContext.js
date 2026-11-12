@@ -119,7 +119,8 @@ export function PlatformProvider({ children }) {
       if (id === 'device') return 'device';
       if (!isAvailable(id))
         throw new Error(
-          'This music source is unavailable in this build. Choose Device audio or reconnect in Profile.',
+          services[id]?.unavailableMessage ||
+            'This music source is unavailable in this build. Choose Device audio or reconnect in Profile.',
         );
       const connection = store.current?.getState()[id];
       if (!connection?.connected) return null;

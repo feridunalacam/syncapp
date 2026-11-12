@@ -10,12 +10,27 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const hook = path.join(root, 'scripts/eas-build-preflight.mjs');
 const baseEnv = { PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin` };
 const publicValues = {
+  EXPO_PUBLIC_WEB_MEDIA_IMPORT_ENABLED: 'false',
+  EXPO_PUBLIC_APPLE_MUSIC_ENABLED: 'false',
   EXPO_PUBLIC_SUPABASE_URL: 'https://cloudfixture.supabase.co',
   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_PublicFixture123',
   EXPO_PUBLIC_PRIVACY_URL: 'https://sync-app-support.feridun.chatgpt.site/privacy',
   EXPO_PUBLIC_TERMS_URL: 'https://sync-app-support.feridun.chatgpt.site/terms',
   EXPO_PUBLIC_ADS_ENABLED: 'false',
 };
+
+test('registered iOS release hook rejects enabled, missing or malformed native Apple Music flags', () => {
+  for (const profile of ['preview', 'production'])
+    for (const value of [undefined, '', 'true', 'FALSE', 'untrusted-value']) {
+      const result = run(
+        { ...releaseEnv('ios', profile), EXPO_PUBLIC_APPLE_MUSIC_ENABLED: value },
+        { npmHook: true },
+      );
+      assert.equal(result.status, 1);
+      assert.match(result.output, /APPLE_MUSIC_ENABLED must be exactly false/);
+      assert.doesNotMatch(result.output, /untrusted-value/);
+    }
+});
 
 function releaseEnv(platform = 'ios', profile = 'production') {
   return {
@@ -34,6 +49,19 @@ function releaseEnv(platform = 'ios', profile = 'production') {
       : {}),
   };
 }
+
+test('registered release hook rejects enabled, missing or malformed generic web media import flags', () => {
+  for (const profile of ['preview', 'production'])
+    for (const value of [undefined, '', 'true', 'FALSE', 'untrusted-value']) {
+      const result = run(
+        { ...releaseEnv('ios', profile), EXPO_PUBLIC_WEB_MEDIA_IMPORT_ENABLED: value },
+        { npmHook: true },
+      );
+      assert.equal(result.status, 1);
+      assert.match(result.output, /WEB_MEDIA_IMPORT_ENABLED must be exactly false/);
+      assert.doesNotMatch(result.output, /untrusted-value/);
+    }
+});
 
 function run(env, { cwd = root, npmHook = false } = {}) {
   const result = spawnSync(

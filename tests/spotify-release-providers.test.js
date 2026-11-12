@@ -16,6 +16,8 @@ import { useMusicSearch } from '../src/hooks/useMusicSearch.js';
 import { normalizeAlertConfig, createAlertPreset } from '../src/domain/alerts.js';
 import { createAppleMusicService } from '../src/services/appleMusic/adapter.js';
 import { MUSIC_PROVIDERS, resolveMusicLink } from '../src/services/music/providers.js';
+import { useAudioController } from '../src/hooks/useAudioController.js';
+import { APPLE_MUSIC_UNAVAILABLE_MESSAGE } from '../src/services/appleMusic/config.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -61,6 +63,7 @@ function load(relative, names, overrides) {
     Ionicons: 'Icon',
     useTheme: () => ({ theme, isDark: true, toggleTheme: noop }),
     Sheet,
+    WEB_MEDIA_IMPORT_AVAILABLE: false,
     ...overrides,
   };
   new Script(compiled).runInNewContext(scope);
@@ -87,16 +90,22 @@ function storedPlatforms(base, native) {
   return exports;
 }
 
-async function mount(t, content, appleMusicService = { available: false }) {
+async function mount(
+  t,
+  content,
+  appleMusicService = { available: false },
+  { savedApple = false } = {},
+) {
   const records = new Map([
     [
       '@syncapp/account/offline/connectedPlatforms',
       JSON.stringify({
         spotify: { connected: true, expiresAt: 0, name: 'Retained offline fixture' },
         device: { connected: true },
+        ...(savedApple ? { appleMusic: { connected: true, authentication: 'native' } } : {}),
       }),
     ],
-    ['@syncapp/account/offline/selectedPlatform', 'spotify'],
+    ['@syncapp/account/offline/selectedPlatform', savedApple ? 'appleMusic' : 'spotify'],
   ]);
   const secure = new Map([
     [
@@ -356,6 +365,7 @@ test('release music picker exposes Device and Browser, imports Device audio, and
   });
   const tabs = h.root.root.findByType('PickerTabs');
   assert.equal(tabs.props.items.map((item) => item.id).join(','), 'device,browser');
+  assert.equal(tabs.props.items.find((item) => item.id === 'browser').label, 'Find audio');
   assert.equal(imports, 0, 'mounting must not request device permission');
   await act(async () => h.root.root.findByType('PrimaryAction').props.onPress());
   assert.equal(imports, 1);
@@ -485,7 +495,7 @@ test('audio alert helper follows Spotify release availability and retains the de
       const textOf = (node) =>
         typeof node === 'string' ? node : (node?.children || []).map(textOf).join('');
       const output = textOf(root.toJSON());
-      assert.match(output, /Voice cues and alert sounds play with Device or Browser audio\./);
+      assert.match(output, /Voice cues and alert sounds play with Device audio\./);
       assert.equal(output.includes('Spotify intervals use the visual timer.'), available, profile);
       if (!available) assert.doesNotMatch(output, /Spotify/, profile);
     } finally {
@@ -494,7 +504,7 @@ test('audio alert helper follows Spotify release availability and retains the de
   }
 });
 
-test('release Apple Music connection, tokenless persistence, source selection and disconnect work independently of Spotify', async (t) => {
+test('enabled owner Apple Music connection, tokenless persistence, source selection and disconnect work independently of Spotify', async (t) => {
   let authorizations = 0,
     stops = 0;
   const service = createAppleMusicService({
@@ -566,7 +576,7 @@ test('authorization returning after an account unmount cannot save a connection 
   assert.deepEqual(h.secure, h.originalSecure);
 });
 
-test('release Apple Music picker loads library playlists and assigns their tracks with the native platform', async (t) => {
+test('enabled owner Apple Music picker loads library playlists and assigns their tracks with the native platform', async (t) => {
   let Modal, chosen;
   const service = createAppleMusicService({
     supported: true,
@@ -663,4 +673,104 @@ test('music services sheet opens only valid service links and does not mark exte
   assert.equal(opened.length, 2);
   assert.equal(h.platform.connectedPlatforms.youtubeMusic, undefined);
   assert.equal(h.oauthStarts, 0);
+});
+
+test('blocked Apple Music retains saved selections without native access and leaves an ordinary Open action', async (t) => {
+  let lookups = 0,
+    nativeCalls = 0,
+    audio,
+    Panel;
+  const opened = [];
+  const source = readFileSync(
+    new URL('../src/services/appleMusic/index.js', import.meta.url),
+    'utf8',
+  )
+    .replace(/^import .*;\n/gm, '')
+    .replace(
+      'export default createAppleMusicService',
+      'globalThis.service = createAppleMusicService',
+    );
+  const context = {
+    Platform: { OS: 'ios' },
+    APPLE_MUSIC_AVAILABLE: false,
+    APPLE_MUSIC_UNAVAILABLE_MESSAGE,
+    createAppleMusicService,
+    requireOptionalNativeModule: () => {
+      lookups++;
+      return new Proxy(
+        { supported: true },
+        {
+          get: (target, key) =>
+            key === 'supported'
+              ? true
+              : async () => {
+                  nativeCalls++;
+                },
+        },
+      );
+    },
+  };
+  new Script(source).runInNewContext(context);
+  const routine = {
+    id: 'retained-apple-round',
+    roundAudioOnly: true,
+    roundsData: [
+      { workSong: { uri: 'apple-music:song:123', platform: 'appleMusic', name: 'Saved song' } },
+    ],
+  };
+  const before = JSON.stringify(routine);
+  const h = await mount(
+    t,
+    (hooks) => {
+      const platform = hooks.usePlatformContext();
+      audio = useAudioController({
+        ...platform,
+        selectedRoutine: routine,
+        countdownSoundPlayer: { stop: async () => {} },
+      });
+      if (!Panel)
+        Panel = load('components/common/MusicServicesPanel.js', ['MusicServicesPanel'], {
+          ...hooks,
+          useWorkout: () => ({ isWorkoutRunning: false }),
+          MUSIC_PROVIDERS,
+          resolveMusicLink,
+          Linking: { openURL: async (url) => opened.push(url) },
+        }).MusicServicesPanel;
+      return React.createElement(Panel);
+    },
+    context.service,
+    { savedApple: true },
+  );
+  assert.equal(h.platform.connectedPlatforms.appleMusic, undefined);
+  assert.equal(h.platform.selectedPlatform, null);
+  assert.equal(h.apple.available, false);
+  assert.equal(h.apple.connected, false);
+  await act(async () => {
+    await h.apple.connect();
+    await h.apple.disconnect();
+  });
+  let failed;
+  await act(async () => {
+    failed = await audio.handlePhaseChange('work', 1);
+  });
+  assert.equal(failed.success, false);
+  assert.equal(audio.audioError, APPLE_MUSIC_UNAVAILABLE_MESSAGE);
+  assert.equal(audio.isMusicPlaying, false);
+  const open = h.root.root
+    .findAllByType('Pressable')
+    .find((node) => node.props.accessibilityLabel === 'Open Apple Music');
+  assert.ok(open);
+  const text = (node) =>
+    typeof node === 'string' ? node : (node?.children || []).map(text).join('');
+  assert.match(text(h.root.toJSON()), /Opens Apple Music\. Playback stays in Apple Music\./);
+  await act(async () => open.props.onPress());
+  assert.deepEqual(opened, ['https://music.apple.com/']);
+  await h.foregroundAndTick();
+  assert.equal(lookups, 0);
+  assert.equal(nativeCalls, 0);
+  assert.deepEqual(h.records, h.originalRecords);
+  assert.deepEqual(h.secure, h.originalSecure);
+  assert.deepEqual(h.writes, []);
+  assert.deepEqual(h.nativeWrites, []);
+  assert.equal(JSON.stringify(routine), before);
 });

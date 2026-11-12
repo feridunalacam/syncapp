@@ -51,6 +51,7 @@ function load(relative, name, overrides = {}) {
     PixelRatio: { get: () => 2 },
     useTheme: () => ({ theme: {} }),
     musicArtworkUrls,
+    WEB_MEDIA_IMPORT_AVAILABLE: true,
     resolveRoundAudio,
     normalizeRoutine,
     validateRoutine,

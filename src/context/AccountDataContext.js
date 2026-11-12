@@ -15,22 +15,47 @@ import { useTheme } from './ThemeContext';
 import { createAccountStore } from '../lib/accountStore';
 import { createBackupSync } from '../lib/backupSync';
 import { supabase } from '../lib/supabase';
-import { billingScopeActive, sameBillingScope } from '../lib/accountBillingScope';
+import {
+  billingScopeActive,
+  parseBillingScope,
+  sameBillingScope,
+} from '../lib/accountBillingScope';
 import { createAccountBackupRemote } from '../lib/accountBackupRemote';
 
 const Context = createContext(null);
 export const useAccountData = () => useContext(Context);
 export function AccountDataProvider({ children }) {
-  const { user, session } = useAuth();
+  const { user, session, signOut } = useAuth();
   const authSession = useRef(session);
   authSession.current = session;
   const {
     isPro,
     ready: subscriptionReady,
-    scope,
+    scope: subscriptionScope,
     scopeConfirmed,
     accessVerified,
+    error: subscriptionError,
+    refresh,
   } = useSubscription();
+  const scope = useMemo(() => {
+    if (!user) return null;
+    try {
+      return parseBillingScope(subscriptionScope, user.id);
+    } catch {
+      return null;
+    }
+  }, [subscriptionScope, user?.id]);
+  const hasLocalScope = !user || !!scope;
+  const currentUser = useRef(user?.id);
+  currentUser.current = user?.id;
+  const scopeOperation = useRef(null);
+  const [scopeAction, setScopeAction] = useState(null);
+  useEffect(() => {
+    setScopeAction(null);
+    return () => {
+      scopeOperation.current = null;
+    };
+  }, [user?.id]);
   const access = useRef(null);
   access.current = { userId: user?.id, scope, scopeConfirmed, accessVerified, isPro };
   const { theme } = useTheme();
@@ -52,7 +77,31 @@ export function AccountDataProvider({ children }) {
       }),
     [user?.id, scope?.namespace],
   );
-  const localReady = preparedStorage === storage;
+  const localReady = hasLocalScope && preparedStorage === storage;
+  const scopeBusy = scopeAction?.userId === user?.id && scopeAction?.pending;
+  const scopeFailed =
+    !hasLocalScope &&
+    !scopeBusy &&
+    (subscriptionReady || subscriptionError || scopeAction?.userId === user?.id);
+  const retryAccountAccess = async (withoutAccount = false) => {
+    const userId = user?.id;
+    if (!userId || currentUser.current !== userId || scopeOperation.current?.userId === userId)
+      return;
+    const operation = { userId };
+    scopeOperation.current = operation;
+    setScopeAction({ userId, pending: true });
+    try {
+      if (withoutAccount) await signOut();
+      else await refresh();
+    } catch {
+      // Keep the account screen closed; neither action may select another namespace.
+    } finally {
+      if (scopeOperation.current === operation) {
+        scopeOperation.current = null;
+        if (currentUser.current === userId) setScopeAction({ userId, pending: false });
+      }
+    }
+  };
   const reportLoadFailure = useCallback(() => {
     setPreparedStorage(null);
     setLocalError(true);
@@ -67,6 +116,7 @@ export function AccountDataProvider({ children }) {
     let alive = true;
     setPreparedStorage(null);
     setLocalError(false);
+    if (!hasLocalScope) return;
     storage.prepare().then(
       () => {
         if (alive) setPreparedStorage(storage);
@@ -78,7 +128,7 @@ export function AccountDataProvider({ children }) {
     return () => {
       alive = false;
     };
-  }, [storage, loadAttempt]);
+  }, [storage, loadAttempt, hasLocalScope]);
   useEffect(() => {
     if (!localReady || !subscriptionReady) return;
     let alive = true;
@@ -199,7 +249,28 @@ export function AccountDataProvider({ children }) {
         <React.Fragment key={`${storage.namespace || 'guest'}:${epoch}`}>{children}</React.Fragment>
       ) : (
         <View style={{ flex: 1, justifyContent: 'center', backgroundColor: theme.background }}>
-          {localError ? (
+          {scopeFailed ? (
+            <View style={{ padding: 24, gap: 16, alignItems: 'center' }}>
+              <Text accessibilityRole="alert" style={{ color: theme.text, textAlign: 'center' }}>
+                Account access could not be checked. Your saved records remain on this device. Retry
+                to open this account’s records, or use Sync without an account.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => retryAccountAccess()}
+                style={{ padding: 16, borderRadius: 16, backgroundColor: theme.accent }}
+              >
+                <Text style={{ color: theme.accentText, fontWeight: '600' }}>Retry</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => retryAccountAccess(true)}
+                style={{ padding: 16 }}
+              >
+                <Text style={{ color: theme.text }}>Use without an account</Text>
+              </Pressable>
+            </View>
+          ) : hasLocalScope && localError ? (
             <View style={{ padding: 24, gap: 16, alignItems: 'center' }}>
               <Text accessibilityRole="alert" style={{ color: theme.text, textAlign: 'center' }}>
                 Saved records could not be opened. Retry to recover this device’s data.

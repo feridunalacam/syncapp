@@ -1,184 +1,85 @@
-import React, { useState } from 'react';
-import { View, Text, Pressable, ScrollView, Keyboard } from 'react-native';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import { WebView } from 'react-native-webview';
+import React, { useRef, useState } from 'react';
+import { View, Text, Pressable, ScrollView } from 'react-native';
+import * as Linking from 'expo-linking';
 import { useTheme } from '../../../../context/ThemeContext';
-import { useMediaWebView } from './useMediaWebView';
-import { BOOKMARK_SITES, MEDIA_DETECTION_SCRIPT } from './constants';
-import { SearchField, MusicRow, PrimaryAction, PickerState } from './MusicPickerParts';
+import { WEB_MEDIA_IMPORT_AVAILABLE } from '../../../../services/mediaImport/config';
+import { BOOKMARK_SITES } from './constants';
+import { PrimaryAction } from './MusicPickerParts';
+
+// Do not evaluate the legacy WebView/extractor module in a release build.
+const LegacyBrowserAudioPanel = WEB_MEDIA_IMPORT_AVAILABLE
+  ? require('./LegacyBrowserAudioPanel').default
+  : null;
 
 export default function BrowserAudioPanel({ picker }) {
+  return LegacyBrowserAudioPanel ? (
+    <LegacyBrowserAudioPanel picker={picker} />
+  ) : (
+    <FindAudioPanel picker={picker} />
+  );
+}
+
+function FindAudioPanel({ picker }) {
   const { theme } = useTheme();
-  const browser = useMediaWebView({ active: true });
-  const [address, setAddress] = useState(browser.browserUrl);
-  const [pageError, setPageError] = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [canGoBack, setCanGoBack] = useState(false);
-  const open = (value) => {
-    let url = value.trim();
-    if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
+  const [error, setError] = useState(null);
+  const [opening, setOpening] = useState(false);
+  const lock = useRef(false);
+  const open = async (site) => {
+    if (lock.current) return;
+    lock.current = true;
+    setOpening(true);
+    setError(null);
     try {
-      const parsed = new URL(url);
-      if (!['http:', 'https:'].includes(parsed.protocol)) return;
+      await Linking.openURL(site.url);
     } catch {
-      return;
+      setError('This sound library could not be opened. Please try again.');
+    } finally {
+      lock.current = false;
+      setOpening(false);
     }
-    setSelected(null);
-    browser.setDetectedMedia([]);
-    browser.setBrowserUrl(url);
-    setAddress(url);
-    setPageError(false);
-    Keyboard.dismiss();
   };
-  if (selected)
-    return (
-      <View style={{ flex: 1, paddingTop: 18 }}>
-        <Pressable
-          onPress={() => setSelected(null)}
-          accessibilityLabel="Back to browser"
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 12 }}
-        >
-          <Ionicons name="chevron-back" size={18} color={theme.accent} />
-          <Text style={{ color: theme.accent }}>Browser</Text>
-        </Pressable>
-        <Text
-          numberOfLines={2}
-          style={{ color: theme.text, fontSize: 21, fontWeight: '600', marginVertical: 16 }}
-        >
-          {selected.name}
-        </Text>
-        <Text
-          style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 20 }}
-        >
-          Download a copy for offline use, or play from its web address.
-        </Text>
-        <PrimaryAction
-          label="Download & add"
-          icon="download-outline"
-          onPress={() => picker.downloadFromUrl(selected.url, selected.name)}
-          loading={picker.isDownloading}
-        />
-        <View style={{ height: 10 }} />
-        <PrimaryAction
-          label="Use web audio"
-          icon="link-outline"
-          onPress={() => picker.addFromUrl(selected.url, selected.name)}
-          disabled={picker.isDownloading}
-        />
-      </View>
-    );
   return (
-    <View style={{ flex: 1 }}>
-      <SearchField
-        value={address}
-        onChange={setAddress}
-        placeholder="Website address"
-        keyboardType="url"
-        onSubmit={() => open(address)}
-      />
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={{ flexGrow: 0, marginBottom: 12 }}
-        contentContainerStyle={{ gap: 8 }}
-      >
+    <ScrollView contentContainerStyle={{ paddingTop: 12, paddingBottom: 20 }}>
+      <Text style={{ color: theme.text, fontSize: 21, fontWeight: '600', marginBottom: 12 }}>
+        Find audio
+      </Text>
+      <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 20, marginBottom: 16 }}>
+        Open a sound library in your browser. Check the sound’s license, then import the file with
+        Files.
+      </Text>
+      <View style={{ gap: 8, marginBottom: 20 }}>
         {BOOKMARK_SITES.map((site) => (
           <Pressable
             key={site.name}
-            onPress={() => open(site.url)}
+            onPress={() => open(site)}
+            disabled={opening}
+            accessibilityRole="link"
+            accessibilityLabel={`Open ${site.name}`}
+            accessibilityState={{ disabled: opening }}
             style={{
-              paddingHorizontal: 13,
-              paddingVertical: 9,
+              padding: 14,
               borderRadius: 13,
               backgroundColor: theme.cardSecondary,
+              opacity: opening ? 0.5 : 1,
             }}
           >
-            <Text style={{ color: theme.textSecondary, fontSize: 12 }}>{site.name}</Text>
+            <Text style={{ color: theme.text }}>{site.name}</Text>
           </Pressable>
         ))}
-      </ScrollView>
-      <View
-        style={{
-          flex: 1,
-          minHeight: 180,
-          borderRadius: 19,
-          overflow: 'hidden',
-          backgroundColor: theme.cardSecondary,
-        }}
-      >
-        {pageError ? (
-          <PickerState
-            title="This page could not load."
-            onRetry={() => {
-              setPageError(false);
-              browser.webViewRef.current?.reload();
-            }}
-          />
-        ) : (
-          <WebView
-            ref={browser.webViewRef}
-            source={{ uri: browser.browserUrl }}
-            onError={() => setPageError(true)}
-            onNavigationStateChange={(state) => {
-              setCanGoBack(state.canGoBack);
-              if (state.loading) browser.setDetectedMedia([]);
-              if (state.url) setAddress(state.url);
-            }}
-            onLoadStart={() => {
-              browser.setDetectedMedia([]);
-              if (browser.scanIntervalRef.current) clearInterval(browser.scanIntervalRef.current);
-            }}
-            onLoadEnd={() => {
-              browser.webViewRef.current?.injectJavaScript(MEDIA_DETECTION_SCRIPT);
-              if (browser.scanIntervalRef.current) clearInterval(browser.scanIntervalRef.current);
-              browser.scanIntervalRef.current = setInterval(
-                () => browser.webViewRef.current?.injectJavaScript(MEDIA_DETECTION_SCRIPT),
-                2000,
-              );
-            }}
-            onMessage={browser.handleWebViewMessage}
-            javaScriptEnabled
-            domStorageEnabled
-            allowsInlineMediaPlayback
-          />
-        )}
       </View>
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 15 }}>
-        <Pressable
-          disabled={!canGoBack}
-          onPress={() => browser.webViewRef.current?.goBack()}
-          accessibilityLabel="Previous web page"
-          hitSlop={8}
+      <PrimaryAction
+        label="Choose from Files"
+        icon="folder-outline"
+        onPress={picker.handlePickFile}
+      />
+      {!!error && (
+        <Text
+          accessibilityRole="alert"
+          style={{ color: theme.textSecondary, fontSize: 12, marginTop: 12 }}
         >
-          <Ionicons
-            name="chevron-back"
-            size={20}
-            color={canGoBack ? theme.text : theme.textTertiary}
-          />
-        </Pressable>
-        <Pressable
-          onPress={() => browser.webViewRef.current?.reload()}
-          accessibilityLabel="Reload web page"
-          hitSlop={8}
-        >
-          <Ionicons name="reload" size={18} color={theme.text} />
-        </Pressable>
-        <Text style={{ flex: 1, textAlign: 'right', color: theme.textSecondary, fontSize: 11 }}>
-          {browser.detectedMedia.length
-            ? `${browser.detectedMedia.length} audio files found`
-            : 'Open a page with an audio file'}
+          {error}
         </Text>
-      </View>
-      <ScrollView style={{ maxHeight: 150 }}>
-        {browser.detectedMedia.map((media) => (
-          <MusicRow
-            key={media.url}
-            item={{ name: media.name }}
-            detail="Web audio"
-            onPress={() => setSelected(media)}
-          />
-        ))}
-      </ScrollView>
-    </View>
+      )}
+    </ScrollView>
   );
 }

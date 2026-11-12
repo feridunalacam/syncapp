@@ -10,6 +10,8 @@ import {
 } from '../scripts/check-release-config.mjs';
 
 const values = {
+  EXPO_PUBLIC_WEB_MEDIA_IMPORT_ENABLED: 'false',
+  EXPO_PUBLIC_APPLE_MUSIC_ENABLED: 'false',
   EXPO_PUBLIC_SUPABASE_URL: 'https://testfixture.supabase.co',
   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_PublicFixture123',
   EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: 'appl_PublicFixture123',
@@ -17,6 +19,30 @@ const values = {
   EXPO_PUBLIC_PRIVACY_URL: 'https://sync-app-support.feridun.chatgpt.site/privacy',
   EXPO_PUBLIC_TERMS_URL: 'https://sync-app-support.feridun.chatgpt.site/terms',
 };
+
+test('iOS release preflight requires Apple Music to remain explicitly disabled', () => {
+  for (const profile of ['preview', 'production'])
+    for (const enabled of [undefined, '', 'true', 'FALSE', 'unexpected-value']) {
+      assert.deepEqual(
+        checkReleaseConfig({
+          platform: 'ios',
+          profile,
+          eas,
+          env: { ...values, EXPO_PUBLIC_APPLE_MUSIC_ENABLED: enabled },
+        }).errors,
+        ['appleMusic'],
+      );
+    }
+  assert.deepEqual(
+    checkReleaseConfig({
+      platform: 'ios',
+      profile: 'development',
+      eas,
+      env: { ...values, EXPO_PUBLIC_APPLE_MUSIC_ENABLED: 'true' },
+    }).errors,
+    [],
+  );
+});
 const eas = {
   build: {
     base: { env: { EXPO_PUBLIC_ADS_ENABLED: 'false' } },
@@ -25,6 +51,25 @@ const eas = {
     development: { extends: 'base', environment: 'development' },
   },
 };
+
+test('release preflight requires generic web media importing to remain explicitly disabled', () => {
+  for (const platform of ['ios', 'android'])
+    for (const profile of ['preview', 'production'])
+      for (const enabled of [undefined, '', 'true', 'FALSE', 'unexpected-value'])
+        assert.deepEqual(
+          checkReleaseConfig({
+            platform,
+            profile,
+            eas,
+            env: {
+              ...values,
+              EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY: 'goog_PublicFixture123',
+              EXPO_PUBLIC_WEB_MEDIA_IMPORT_ENABLED: enabled,
+            },
+          }).errors,
+          ['webMediaImport'],
+        );
+});
 
 test('local/profile preflight is platform-aware and never claims cloud readiness', () => {
   const result = checkReleaseConfig({ platform: 'ios', env: values, eas });

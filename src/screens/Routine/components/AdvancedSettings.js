@@ -200,7 +200,7 @@ export const AdvancedSettings = ({
             {volume('Work music volume', workVolume, onWorkVolumeChange)}
             {volume('Rest music volume', restVolume, onRestVolumeChange)}
             <Text style={[styles.note, { color: theme.textSecondary }]}>
-              Voice cues and alert sounds play with Device or Browser audio.
+              Voice cues and alert sounds play with Device audio.
               {appleMusicService.available &&
                 ' Apple Music intervals use the visual timer and device volume.'}
               {SPOTIFY_AVAILABLE && ' Spotify intervals use the visual timer.'}

@@ -7,12 +7,17 @@ import React, { act } from 'react';
 import { create } from 'react-test-renderer';
 import { createAccountStore } from '../src/lib/accountStore.js';
 import { createBackupSync } from '../src/lib/backupSync.js';
-import { billingScopeActive, sameBillingScope } from '../src/lib/accountBillingScope.js';
+import {
+  billingScopeActive,
+  parseBillingScope,
+  sameBillingScope,
+} from '../src/lib/accountBillingScope.js';
 import { createAccountBackupRemote } from '../src/lib/accountBackupRemote.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const ACCOUNT_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const source = readFileSync(
   new URL('../src/context/AccountDataContext.js', import.meta.url),
   'utf8',
@@ -46,6 +51,9 @@ async function mount({
     : null,
   scopeConfirmed = true,
   accessVerified = subscriptionReady,
+  subscriptionError = null,
+  refresh = async () => {},
+  signOut = async () => {},
   beforeRead = () => {},
   remote,
 } = {}) {
@@ -87,13 +95,19 @@ async function mount({
     View: 'View',
     AppState: { addEventListener: () => ({ remove: () => {} }) },
     AsyncStorage: base,
-    useAuth: () => ({ user, session: user ? { user, access_token: 'offline-fixture' } : null }),
+    useAuth: () => ({
+      user,
+      session: user ? { user, access_token: 'offline-fixture' } : null,
+      signOut,
+    }),
     useSubscription: () => ({
       isPro: pro,
       ready: subscriptionReady,
       scope,
       scopeConfirmed,
       accessVerified,
+      error: subscriptionError,
+      refresh,
     }),
     useTheme: () => ({
       theme: { background: '#000', text: '#fff', accent: '#0f0', accentText: '#000' },
@@ -101,6 +115,7 @@ async function mount({
     createAccountStore,
     createBackupSync,
     billingScopeActive,
+    parseBillingScope,
     sameBillingScope,
     createAccountBackupRemote,
     supabase: remote || null,
@@ -134,8 +149,23 @@ async function mount({
       return value;
     },
     text: () => textOf(renderer.toJSON()),
+    accountAction: (label) =>
+      renderer.root.findAllByType('Pressable').find((node) => textOf(node) === label).props.onPress,
     async retry() {
-      await act(async () => renderer.root.findByType('Pressable').props.onPress());
+      await act(async () =>
+        renderer.root
+          .findAllByType('Pressable')
+          .find((node) => textOf(node) === 'Retry')
+          .props.onPress(),
+      );
+    },
+    async useWithoutAccount() {
+      await act(async () =>
+        renderer.root
+          .findAllByType('Pressable')
+          .find((node) => textOf(node) === 'Use without an account')
+          .props.onPress(),
+      );
     },
     async close() {
       await act(async () => renderer.unmount());
@@ -145,6 +175,8 @@ async function mount({
       if (Object.hasOwn(next, 'pro')) pro = next.pro;
       if (Object.hasOwn(next, 'scopeConfirmed')) scopeConfirmed = next.scopeConfirmed;
       if (Object.hasOwn(next, 'accessVerified')) accessVerified = next.accessVerified;
+      if (Object.hasOwn(next, 'subscriptionReady')) subscriptionReady = next.subscriptionReady;
+      if (Object.hasOwn(next, 'subscriptionError')) subscriptionError = next.subscriptionError;
       if (Object.hasOwn(next, 'user')) user = next.user;
       await act(async () =>
         renderer.update(
@@ -180,7 +212,7 @@ test('a failed local startup read keeps consumers unmounted and Retry opens the 
 });
 
 test('unrecoverable journal data never reaches a Free account consumer before exact recovery succeeds', async () => {
-  const prefix = '@syncapp/account/a/';
+  const prefix = `@syncapp/account/${ACCOUNT_ID}/`;
   const entries = [
     ['routines', '[{"id":"original"}]'],
     ['completedRoutines', null],
@@ -192,7 +224,7 @@ test('unrecoverable journal data never reaches a Free account consumer before ex
   const journal = JSON.stringify({ version: 1, entries });
   let blocked = true;
   const app = await mount({
-    user: { id: 'a' },
+    user: { id: ACCOUNT_ID },
     initial: {
       [prefix + 'routines']: '[{"id":"half-restored-cloud"}]',
       [prefix + '@cloud-restore-pending']: journal,
@@ -216,8 +248,8 @@ test('unrecoverable journal data never reaches a Free account consumer before ex
 });
 
 test('large Free and guest local records preserve exact files without invoking cloud backup', async () => {
-  for (const user of [null, { id: 'free' }]) {
-    const prefix = user ? '@syncapp/account/free/' : '';
+  for (const user of [null, { id: ACCOUNT_ID }]) {
+    const prefix = user ? `@syncapp/account/${user.id}/` : '';
     const original = JSON.stringify([
       { id: 'large', note: 'x'.repeat(2200000), uri: 'file:///local.mp3' },
     ]);
@@ -239,9 +271,9 @@ test('large Free and guest local records preserve exact files without invoking c
 
 test('waiting for subscription verification never blocks readable local account records', async () => {
   const app = await mount({
-    user: { id: 'waiting' },
+    user: { id: ACCOUNT_ID },
     subscriptionReady: false,
-    initial: { '@syncapp/account/waiting/profileBio': 'Available offline' },
+    initial: { [`@syncapp/account/${ACCOUNT_ID}/profileBio`]: 'Available offline' },
     remote: { from: () => assert.fail('Unverified access must not start backup') },
   });
   try {
@@ -318,8 +350,8 @@ test('a consumer read failure closes the gate and Retry recovers before mounting
 });
 
 test('damaged guest and account JSON never mounts consumers or overwrites its recoverable raw value', async () => {
-  for (const user of [null, { id: 'a' }]) {
-    const key = user ? '@syncapp/account/a/routines' : 'routines';
+  for (const user of [null, { id: ACCOUNT_ID }]) {
+    const key = user ? `@syncapp/account/${user.id}/routines` : 'routines';
     const damaged = '[{"id":"recoverable"},';
     const app = await mount({ user, initial: { [key]: damaged } });
     try {
@@ -339,7 +371,7 @@ test('damaged guest and account JSON never mounts consumers or overwrites its re
   }
 });
 
-test('an unknown scope uses isolated local scratch and later opens only the confirmed review namespace', async () => {
+test('a held first scope keeps consumers and editable scratch unmounted until its exact namespace is known', async () => {
   const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const scope = {
     user_id: id,
@@ -352,20 +384,21 @@ test('an unknown scope uses isolated local scratch and later opens only the conf
   const app = await mount({
     user: { id },
     scope: null,
+    subscriptionReady: false,
     scopeConfirmed: false,
     accessVerified: false,
     initial: {
       routines: '[{"id":"guest-private"}]',
       [`@syncapp/account/${id}/routines`]: '[{"id":"production-private"}]',
       [`@syncapp/account/${scope.namespace}/routines`]: '[{"id":"review-local"}]',
+      [`@syncapp/account/unresolved:${id}/routines`]: '[{"id":"earlier-scratch"}]',
     },
     remote: { from: () => assert.fail('Unknown/unverified scope must not query cloud') },
   });
   try {
-    assert.equal(app.value.storage.namespace, `unresolved:${id}`);
-    assert.deepEqual(await app.value.storage.getJSON('routines', []), []);
-    await assert.rejects(app.value.importGuestData());
-    await app.value.storage.setJSON('routines', [{ id: 'temporary-local' }]);
+    assert.equal(app.mounts, 0);
+    assert.equal(app.value, undefined);
+    assert.deepEqual(app.writes, []);
     await app.updateAccess({ scope });
     assert.equal(app.value.storage.namespace, scope.namespace);
     assert.deepEqual(await app.value.storage.getJSON('routines'), [{ id: 'review-local' }]);
@@ -377,9 +410,184 @@ test('an unknown scope uses isolated local scratch and later opens only the conf
     );
     assert.equal(
       app.values.get(`@syncapp/account/unresolved:${id}/routines`),
-      '[{"id":"temporary-local"}]',
+      '[{"id":"earlier-scratch"}]',
     );
-    assert.ok(app.mounts >= 2);
+    assert.equal(app.mounts, 1);
+    assert.deepEqual(app.writes, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test('failed first scope resolution retries account access before opening preserved records', async () => {
+  let refreshes = 0;
+  const original = '[{"id":"preserved-account"}]';
+  const app = await mount({
+    user: { id: ACCOUNT_ID },
+    scope: null,
+    scopeConfirmed: false,
+    accessVerified: false,
+    subscriptionError: 'Network unavailable',
+    initial: { [`@syncapp/account/${ACCOUNT_ID}/routines`]: original },
+    refresh: async () => {
+      refreshes++;
+      if (refreshes === 1) throw new Error('Still offline');
+    },
+  });
+  try {
+    assert.equal(app.mounts, 0);
+    assert.match(app.text(), /Account access could not be checked/);
+    assert.doesNotMatch(app.text(), /Saved records could not be opened/);
+    await app.retry();
+    assert.equal(refreshes, 1);
+    assert.equal(app.mounts, 0);
+    assert.match(app.text(), /Account access could not be checked/);
+    await app.retry();
+    assert.equal(refreshes, 2);
+    assert.equal(app.mounts, 0);
+    await app.updateAccess({
+      scope: {
+        user_id: ACCOUNT_ID,
+        lane: 'production',
+        namespace: ACCOUNT_ID,
+        epoch: 0,
+        active: true,
+        expires_at: null,
+      },
+    });
+    assert.equal(app.mounts, 1);
+    assert.equal(await app.value.storage.getString('routines'), original);
+    assert.deepEqual(app.writes, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test('cached matching scopes keep exact local records available offline without granting cloud access', async () => {
+  for (const lane of ['production', 'review']) {
+    const namespace = lane === 'production' ? ACCOUNT_ID : `review:1:${ACCOUNT_ID}`;
+    const original = '[{"id":"cached-local"}]';
+    const app = await mount({
+      user: { id: ACCOUNT_ID },
+      pro: true,
+      subscriptionReady: false,
+      scopeConfirmed: false,
+      accessVerified: false,
+      scope: {
+        user_id: ACCOUNT_ID,
+        lane,
+        namespace,
+        epoch: lane === 'production' ? 0 : 1,
+        active: lane === 'production',
+        expires_at: lane === 'production' ? null : '2020-01-01T00:00:00Z',
+      },
+      initial: { [`@syncapp/account/${namespace}/routines`]: original },
+      remote: {
+        from: () => assert.fail('Cached routing cannot authorize cloud access'),
+        rpc: () => assert.fail('Cached routing cannot authorize cloud writes'),
+      },
+    });
+    try {
+      assert.equal(app.mounts, 1);
+      assert.equal(app.value.storage.namespace, namespace);
+      assert.equal(await app.value.storage.getString('routines'), original);
+      await app.updateAccess({ subscriptionReady: true, subscriptionError: 'Offline' });
+      assert.equal(app.mounts, 1);
+      assert.equal(app.value.status, 'local');
+      assert.deepEqual(app.writes, []);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test('a mismatched or malformed scope cannot mount account consumers or prepare another namespace', async () => {
+  for (const scope of [
+    {
+      user_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      namespace: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      lane: 'production',
+      epoch: 0,
+      active: true,
+      expires_at: null,
+    },
+    { user_id: ACCOUNT_ID, namespace: ACCOUNT_ID, lane: 'review', epoch: 0, active: true },
+  ]) {
+    let reads = 0;
+    const app = await mount({
+      user: { id: ACCOUNT_ID },
+      scope,
+      beforeRead: () => reads++,
+    });
+    try {
+      assert.equal(app.mounts, 0);
+      assert.equal(reads, 0);
+      assert.deepEqual(app.writes, []);
+      assert.match(app.text(), /Account access could not be checked/);
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test('using Sync without an account calls normal sign out and preserves all account and guest records', async () => {
+  let signOuts = 0;
+  const initial = {
+    routines: '[{"id":"guest"}]',
+    [`@syncapp/account/${ACCOUNT_ID}/routines`]: '[{"id":"account"}]',
+  };
+  const app = await mount({
+    user: { id: ACCOUNT_ID },
+    scope: null,
+    initial,
+    signOut: async () => {
+      signOuts++;
+      if (signOuts === 1) throw new Error('Sign out unavailable');
+    },
+  });
+  try {
+    await app.useWithoutAccount();
+    assert.equal(signOuts, 1);
+    assert.equal(app.mounts, 0);
+    assert.match(app.text(), /Account access could not be checked/);
+    await app.useWithoutAccount();
+    assert.equal(signOuts, 2);
+    assert.equal(app.mounts, 0);
+    await app.updateAccess({ user: null, scope: null });
+    assert.equal(app.mounts, 1);
+    assert.equal(await app.value.storage.getString('routines'), initial.routines);
+    assert.deepEqual(Object.fromEntries(app.values), initial);
+    assert.deepEqual(app.writes, []);
+  } finally {
+    await app.close();
+  }
+});
+
+test('failure-screen callbacks captured for an old user cannot refresh or sign out a new identity', async () => {
+  let refreshes = 0;
+  let signOuts = 0;
+  const app = await mount({
+    user: { id: ACCOUNT_ID },
+    scope: null,
+    refresh: async () => refreshes++,
+    signOut: async () => signOuts++,
+  });
+  try {
+    const oldRetry = app.accountAction('Retry');
+    const oldSignOut = app.accountAction('Use without an account');
+    await app.updateAccess({
+      user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+      scope: null,
+      subscriptionReady: false,
+    });
+    await act(async () => {
+      await oldRetry();
+      await oldSignOut();
+    });
+    assert.equal(refreshes, 0);
+    assert.equal(signOuts, 0);
+    assert.equal(app.mounts, 0);
+    assert.deepEqual(app.writes, []);
   } finally {
     await app.close();
   }

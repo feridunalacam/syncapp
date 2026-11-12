@@ -39,7 +39,7 @@ export function AppleMusicConnectionProvider({ children }) {
     }
   }, [ready, connectPlatform]);
   const disconnect = useCallback(async () => {
-    if (pending.current) return;
+    if (pending.current || !appleMusicService.available) return;
     pending.current = true;
     setConnecting(true);
     try {
@@ -58,9 +58,9 @@ export function AppleMusicConnectionProvider({ children }) {
       value={{
         available: appleMusicService.available,
         ready,
-        connected: !!connectedPlatforms.appleMusic?.connected,
+        connected: appleMusicService.available && !!connectedPlatforms.appleMusic?.connected,
         connecting,
-        error: error || connectionError,
+        error: appleMusicService.available ? error || connectionError : null,
         connect,
         disconnect,
       }}

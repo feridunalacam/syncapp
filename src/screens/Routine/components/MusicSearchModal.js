@@ -18,6 +18,7 @@ import { loadDeviceMusic } from '../../../services/deviceMusicLibrary';
 import GlassSurface from '../../../components/common/GlassSurface';
 import { DEFAULT_VOICES } from './musicSearch/constants';
 import { useDeviceMediaPicker } from './musicSearch/useDeviceMediaPicker';
+import { WEB_MEDIA_IMPORT_AVAILABLE } from '../../../services/mediaImport/config';
 import useSpotifyConnection from '../../Profile/hooks/useSpotifyConnection';
 import { useAppleMusicConnection } from '../../../context/AppleMusicConnectionContext';
 import BrowserAudioPanel from './musicSearch/BrowserAudioPanel';
@@ -153,7 +154,11 @@ export const MusicSearchModal = ({
         ...(apple.available
           ? [{ id: 'appleMusic', label: 'Apple Music', icon: 'logo-apple' }]
           : []),
-        { id: 'browser', label: 'Browser', icon: 'globe-outline' },
+        {
+          id: 'browser',
+          label: WEB_MEDIA_IMPORT_AVAILABLE ? 'Browser' : 'Find audio',
+          icon: 'globe-outline',
+        },
       ];
   const deviceTracks = music.popularSongs.filter((item) =>
     [item.name, item.artist].some((text) =>

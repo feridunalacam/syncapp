@@ -15,6 +15,10 @@ export const releaseConfigMessages = {
     'The selected platform needs its matching public RevenueCat SDK key. Test Store keys are debug-development only.',
   revenuecatReview:
     'iOS preview and production need a distinct App Store public RevenueCat review SDK key. Supplied iOS development review keys must also be valid; Test Store, private and placeholder keys are not allowed.',
+  appleMusic:
+    'EXPO_PUBLIC_APPLE_MUSIC_ENABLED must be exactly false in iOS preview and production.',
+  webMediaImport:
+    'EXPO_PUBLIC_WEB_MEDIA_IMPORT_ENABLED must be exactly false in preview and production.',
   legal: 'EXPO_PUBLIC_PRIVACY_URL and EXPO_PUBLIC_TERMS_URL must be public HTTPS pages.',
   publicSecrets: 'Private credentials must not use EXPO_PUBLIC_ variables.',
   adFlag: 'EXPO_PUBLIC_ADS_ENABLED must be exactly true or false when supplied.',
@@ -79,6 +83,10 @@ export function checkReleaseValues({ platform, profile = 'production', env: valu
   if (!profiles.includes(profile)) errors.push('profile');
   if (errors.length) return errors;
   const release = profile !== 'development';
+  if (release && values.EXPO_PUBLIC_WEB_MEDIA_IMPORT_ENABLED !== 'false')
+    errors.push('webMediaImport');
+  if (platform === 'ios' && release && values.EXPO_PUBLIC_APPLE_MUSIC_ENABLED !== 'false')
+    errors.push('appleMusic');
   if (!httpsPublic(values.EXPO_PUBLIC_SUPABASE_URL)) errors.push('supabaseUrl');
   if (!publicSupabaseKey(values.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY)) errors.push('supabaseKey');
   const subscription = createSubscriptionConfig({ platform, profile, dev: !release, env: values });
