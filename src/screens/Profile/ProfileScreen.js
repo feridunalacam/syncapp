@@ -32,6 +32,7 @@ import ScreenWrapper from '../../components/common/ScreenWrapper';
 import ScreenHeader from '../../components/common/ScreenHeader';
 import GlassSurface from '../../components/common/GlassSurface';
 import Sheet from '../../components/common/Sheet';
+import OpenSourceNotices from '../../components/common/OpenSourceNotices';
 import useProfileData from './hooks/useProfileData';
 import SpotifyLogo from './components/SpotifyLogo';
 import useSpotifyConnection from './hooks/useSpotifyConnection';
@@ -479,6 +480,14 @@ export default function ProfileScreen() {
             null,
             true,
           )}
+          {row(
+            'document-text-outline',
+            'Open-source notices',
+            'Software and icon licenses, available offline.',
+            () => setSheet('notices'),
+            null,
+            true,
+          )}
         </Surface>
         <View style={styles.sectionRow}>
           {section('Your posts')}
@@ -533,6 +542,7 @@ export default function ProfileScreen() {
         onClose={() => setSheet(null)}
         onManageSubscription={() => setSheet('subscription')}
       />
+      <OpenSourceNotices visible={sheet === 'notices'} onClose={() => setSheet(null)} />
       <SubscriptionPanel
         visible={sheet === 'subscription'}
         onClose={() => setSheet(null)}

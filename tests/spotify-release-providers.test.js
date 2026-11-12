@@ -435,6 +435,7 @@ test('release Profile hides Spotify and keeps passive preferences accessible and
         SpotifyLogo: 'SpotifyLogo',
         AccountPanel: 'AccountPanel',
         SubscriptionPanel: 'SubscriptionPanel',
+        OpenSourceNotices: 'OpenSourceNotices',
         ScreenWrapper: 'ScreenWrapper',
         ScreenHeader: 'ScreenHeader',
         GlassSurface: 'GlassSurface',

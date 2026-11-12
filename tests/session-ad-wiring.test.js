@@ -238,6 +238,7 @@ async function mount(options = {}) {
           'SpotifyLogo',
           'AccountPanel',
           'SubscriptionPanel',
+          'OpenSourceNotices',
           'ScreenWrapper',
           'ScreenHeader',
           'GlassSurface',
