@@ -244,7 +244,8 @@ export default function LogScreen({ embedded = false }) {
                 {formatTime(getLogDuration(selectedLog))}
               </Text>
               <Text style={{ color: theme.text, fontSize: 15, marginBottom: 8 }}>
-                {getLogRounds(selectedLog)} of {selectedLog.rounds} rounds completed
+                {getLogRounds(selectedLog)} of {selectedLog.rounds} round
+                {selectedLog.rounds === 1 ? '' : 's'} completed
               </Text>
               <Text
                 style={{

@@ -147,7 +147,11 @@ export const useAudioController = ({
     const version = revision.current;
     try {
       const { service, token, refresh } = await connection(current.platform, true);
-      const playback = await service?.getCurrentPlayback(token, refresh);
+      const playback = await service?.getCurrentPlayback(
+        token,
+        refresh,
+        current.platform === 'spotify' ? { reportErrors: true } : undefined,
+      );
       if (!mounted.current || version !== revision.current) return;
       check(playback);
       if (
@@ -239,7 +243,10 @@ export const useAudioController = ({
             pendingPhase.current = null;
             const { service, token, refresh } = await connection(current.platform, true);
             if (current.platform === 'spotify') {
-              const target = await service.getActiveDevice?.(token, refresh);
+              const target = await service.getActiveDevice?.(token, refresh, {
+                reportErrors: true,
+              });
+              check(target);
               if (target) current.deviceId = target;
             }
             if (version !== revision.current || !mounted.current) return;
@@ -299,9 +306,13 @@ export const useAudioController = ({
               throw new Error(
                 `Connect ${platform === 'spotify' ? 'Spotify' : platform === 'appleMusic' ? 'Apple Music' : 'your music source'} in Profile to play this round.`,
               );
-            let deviceId =
-              (await service.getActiveDevice?.(token, refresh)) ||
-              (platform === 'device' ? 'device' : null);
+            const selectedDevice = await service.getActiveDevice?.(
+              token,
+              refresh,
+              platform === 'spotify' ? { reportErrors: true } : undefined,
+            );
+            check(selectedDevice);
+            let deviceId = selectedDevice || (platform === 'device' ? 'device' : null);
             if (!deviceId)
               throw new Error('Open Spotify on a playback device, then resume the workout.');
             if (version !== revision.current) return;
@@ -415,8 +426,9 @@ export const useAudioController = ({
       };
       const target =
         current.platform === 'spotify'
-          ? await service.getActiveDevice(token, refresh)
+          ? await service.getActiveDevice(token, refresh, { reportErrors: true })
           : current.deviceId;
+      check(target);
       if (!target) throw new Error('Open Spotify on the device you want to use, then resume.');
       if (options.isCancelled()) return;
       const result = await service.play(token, target, options);

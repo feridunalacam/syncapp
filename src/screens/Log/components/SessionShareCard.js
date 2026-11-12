@@ -10,7 +10,9 @@ export default function SessionShareCard({ session, transparent = false }) {
       <Text style={styles.brand}>SYNC / MY RHYTHM</Text>
       <Text style={styles.title}>{session.name}</Text>
       <Text style={styles.time}>{formatTime(getLogDuration(session))}</Text>
-      <Text style={styles.subtitle}>{getLogRounds(session)} rounds completed</Text>
+      <Text style={styles.subtitle}>
+        {getLogRounds(session)} round{getLogRounds(session) === 1 ? '' : 's'} completed
+      </Text>
       <View style={styles.line} />
       <Text style={styles.status}>
         {session.status === 'aborted' ? 'Every moment counts.' : 'Time well spent.'}

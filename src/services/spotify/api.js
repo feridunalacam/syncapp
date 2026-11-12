@@ -14,6 +14,24 @@ const NETWORK_RETRY_BASE_DELAY_MS = 400;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const playbackReadError = (status, data) => ({
+  success: false,
+  code: status,
+  error:
+    data?.error?.message || data?.message || `Spotify playback request failed (HTTP ${status}).`,
+});
+const readResponseError = async (response) => {
+  let data;
+  try {
+    data = JSON.parse(await response.text());
+  } catch {
+    // Never display an unstructured upstream response body.
+  }
+  return playbackReadError(response.status, data);
+};
+const isAuthorizationReadError = (result) =>
+  result?.success === false && [401, 403].includes(result.code);
+
 const isTransientNetworkError = (error) => {
   if (!error) {
     return false;
@@ -108,7 +126,14 @@ export const spotifyAPI = {
     }
   },
 
-  async makeRequest(endpoint, method, accessToken, body = null, refreshCallback = null) {
+  async makeRequest(
+    endpoint,
+    method,
+    accessToken,
+    body = null,
+    refreshCallback = null,
+    readOptions = {},
+  ) {
     try {
       const options = {
         method,
@@ -180,11 +205,15 @@ export const spotifyAPI = {
                 }
                 return JSON.parse(text);
               }
+              if (readOptions.reportErrors) return readResponseError(retryResponse);
             }
           } catch (refreshError) {
             console.error('Error refreshing token and retrying:', refreshError);
           }
         }
+
+        if (readOptions.reportErrors && response.status === 401)
+          return playbackReadError(response.status, errorData);
 
         // Handle 403 "Restriction violated" errors gracefully (no active device, no Premium, etc.)
         if (response.status === 403) {
@@ -447,7 +476,12 @@ export const spotifyAPI = {
     }
   },
 
-  async getCurrentPlayback(accessToken, refreshCallback = null, retryAttempt = 0) {
+  async getCurrentPlayback(
+    accessToken,
+    refreshCallback = null,
+    retryAttempt = 0,
+    readOptions = {},
+  ) {
     try {
       const response = await fetch('https://api.spotify.com/v1/me/player', {
         method: 'GET',
@@ -494,11 +528,19 @@ export const spotifyAPI = {
                 }
                 return JSON.parse(text);
               }
+              if (readOptions.reportErrors && [401, 403].includes(retryResponse.status))
+                return readResponseError(retryResponse);
+              // A refreshed request with no playback remains absence, not the
+              // original token error, even when diagnostics are requested.
+              if (readOptions.reportErrors) return null;
             }
           } catch (refreshError) {
             console.error('Error refreshing token and retrying playback:', refreshError);
           }
         }
+
+        if (readOptions.reportErrors && [401, 403].includes(response.status))
+          return playbackReadError(response.status, errorData);
 
         // Don't log 401 errors as they're handled above, or if refresh isn't available
         if (response.status !== 401) {
@@ -518,7 +560,12 @@ export const spotifyAPI = {
         if (retryAttempt < NETWORK_RETRY_ATTEMPTS) {
           const delay = NETWORK_RETRY_BASE_DELAY_MS * (retryAttempt + 1);
           await wait(delay);
-          return this.getCurrentPlayback(accessToken, refreshCallback, retryAttempt + 1);
+          return this.getCurrentPlayback(
+            accessToken,
+            refreshCallback,
+            retryAttempt + 1,
+            readOptions,
+          );
         }
         console.warn(
           'Spotify playback request failed due to a network issue. Will retry on next poll.',
@@ -531,13 +578,14 @@ export const spotifyAPI = {
     }
   },
 
-  async getDevices(accessToken, refreshCallback = null) {
+  async getDevices(accessToken, refreshCallback = null, readOptions = {}) {
     const result = await this.makeRequest(
       '/me/player/devices',
       'GET',
       accessToken,
       null,
       refreshCallback,
+      readOptions,
     );
     playbackDevices.clear();
     for (const device of result?.devices || [])
@@ -545,7 +593,7 @@ export const spotifyAPI = {
     return result;
   },
 
-  async getActiveDevice(accessToken, refreshCallback = null) {
+  async getActiveDevice(accessToken, refreshCallback = null, readOptions = {}) {
     try {
       const playback = await this.makeRequest(
         '/me/player',
@@ -553,17 +601,29 @@ export const spotifyAPI = {
         accessToken,
         null,
         refreshCallback,
+        readOptions,
       );
+      if (readOptions.reportErrors && isAuthorizationReadError(playback)) return playback;
       if (playback?.device?.id) {
         playbackDevices.set(playback.device.id, playback.device);
         return canControlDevice(playback.device) ? playback.device.id : null;
       }
-      const devicesResult = await this.getDevices(accessToken, refreshCallback);
-      return await resolvePlaybackDevice(devicesResult?.devices, async (deviceId) => {
-        const result = await this.transferPlayback(accessToken, deviceId, false);
+      const devicesResult = await this.getDevices(accessToken, refreshCallback, readOptions);
+      if (readOptions.reportErrors && isAuthorizationReadError(devicesResult)) return devicesResult;
+      let activationError = null;
+      const deviceId = await resolvePlaybackDevice(devicesResult?.devices, async (deviceId) => {
+        const result = await this.transferPlayback(
+          accessToken,
+          deviceId,
+          false,
+          readOptions.reportErrors ? refreshCallback : null,
+          readOptions,
+        );
+        if (readOptions.reportErrors && isAuthorizationReadError(result)) activationError = result;
         if (result?.success) await wait(300);
         return result;
       });
+      return activationError || deviceId;
     } catch (error) {
       console.error('Error getting active device:', error);
       return null;
@@ -590,7 +650,13 @@ export const spotifyAPI = {
     });
   },
 
-  async transferPlayback(accessToken, deviceId, play = false, refreshCallback = null) {
+  async transferPlayback(
+    accessToken,
+    deviceId,
+    play = false,
+    refreshCallback = null,
+    readOptions = {},
+  ) {
     return this.makeRequest(
       '/me/player',
       'PUT',
@@ -600,6 +666,7 @@ export const spotifyAPI = {
         play,
       },
       refreshCallback,
+      readOptions,
     );
   },
 

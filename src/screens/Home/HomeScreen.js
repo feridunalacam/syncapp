@@ -254,7 +254,7 @@ export default function HomeScreen({ navigation, route }) {
             </Text>
             <Text style={{ color: theme.textSecondary, marginTop: 7, lineHeight: 20 }}>
               {finished.name} · {formatTime(finished.actualDurationSec)} ·{' '}
-              {finished.roundsCompleted} rounds completed
+              {finished.roundsCompleted} round{finished.roundsCompleted === 1 ? '' : 's'} completed
             </Text>
             <Pressable
               accessibilityRole="button"
@@ -353,7 +353,7 @@ export default function HomeScreen({ navigation, route }) {
             <View style={styles.sectionRow}>
               <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>Intervals</Text>
               <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
-                {timeline.length} intervals
+                {timeline.length} interval{timeline.length === 1 ? '' : 's'}
               </Text>
             </View>
             {upcoming.map((item, n) => (

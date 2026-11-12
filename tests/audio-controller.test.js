@@ -14,6 +14,11 @@ const deferred = () => {
   return { promise, resolve };
 };
 
+const spotifyRoutine = {
+  rounds: 1,
+  roundsData: [{ workSong: { uri: 'spotify:track:synthetic', platform: 'spotify' } }],
+};
+
 async function mountAudio(t, overrides = {}, configuration = {}) {
   const calls = [];
   const service = {
@@ -84,6 +89,82 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
     calls,
   };
 }
+
+for (const boundary of ['start', 'preparation-to-work', 'resume']) {
+  test(`Spotify ${boundary} reports a diagnostic read failure before it can become a device ID`, async (t) => {
+    let denied = boundary === 'start';
+    let starts = 0;
+    const h = await mountAudio(
+      t,
+      {
+        getActiveDevice: async (_token, _refresh, options) => {
+          assert.equal(options?.reportErrors, true);
+          return denied
+            ? { success: false, code: 403, error: 'Playback permission was removed' }
+            : 'synthetic-device';
+        },
+        playTrack: async (_token, _uri, deviceId) => {
+          assert.equal(deviceId, 'synthetic-device');
+          starts++;
+          return success;
+        },
+      },
+      { routine: spotifyRoutine },
+    );
+    let result;
+    if (boundary === 'start') {
+      await act(async () => {
+        result = await h.audio.handlePhaseChange('work', 1);
+      });
+    } else if (boundary === 'preparation-to-work') {
+      await act(async () => h.audio.handlePhaseChange('beforeStart', 1));
+      denied = true;
+      await act(async () => {
+        result = await h.audio.handlePhaseChange('work', 1);
+      });
+    } else {
+      await act(async () => h.audio.handlePhaseChange('work', 1));
+      await act(async () => h.audio.pauseMusic());
+      denied = true;
+      await act(async () => {
+        result = await h.audio.resumeMusic();
+      });
+    }
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'Playback permission was removed');
+    assert.equal(h.audio.audioError, 'Playback permission was removed');
+    assert.equal(starts, boundary === 'start' ? 0 : 1);
+    assert.equal(
+      h.calls.some((call) => call[0] === 'resume'),
+      false,
+    );
+  });
+}
+
+test('Spotify playback polling requests diagnostic errors and reports the actual restriction immediately', async (t) => {
+  let denied = false;
+  const notices = [];
+  const h = await mountAudio(
+    t,
+    {
+      getCurrentPlayback: async (_token, _refresh, options) => {
+        assert.equal(options?.reportErrors, true);
+        return denied
+          ? { success: false, code: 403, error: 'Playback scope is missing' }
+          : { item: { uri: 'spotify:track:synthetic' }, is_playing: true };
+      },
+    },
+    {
+      routine: spotifyRoutine,
+      onPlaybackInterrupted: (reason) => notices.push(reason),
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  denied = true;
+  await act(async () => h.audio.fetchPlayback());
+  assert.deepEqual(notices, ['Playback scope is missing']);
+  assert.equal(h.audio.audioError, 'Playback scope is missing');
+});
 
 test('a phase selected while paused waits for resume before starting audio', async (t) => {
   const h = await mountAudio(t);

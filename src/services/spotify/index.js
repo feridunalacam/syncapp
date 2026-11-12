@@ -32,11 +32,11 @@ const spotifyService = {
     spotifyAPI.playPlaylist(accessToken, playlistId, deviceId, shuffle, options),
 
   // Player State
-  getCurrentPlayback: (accessToken, refreshCallback) =>
-    spotifyAPI.getCurrentPlayback(accessToken, refreshCallback),
+  getCurrentPlayback: (accessToken, refreshCallback, readOptions) =>
+    spotifyAPI.getCurrentPlayback(accessToken, refreshCallback, 0, readOptions),
   getDevices: (accessToken, refreshCallback) => spotifyAPI.getDevices(accessToken, refreshCallback),
-  getActiveDevice: (accessToken, refreshCallback) =>
-    spotifyAPI.getActiveDevice(accessToken, refreshCallback),
+  getActiveDevice: (accessToken, refreshCallback, readOptions) =>
+    spotifyAPI.getActiveDevice(accessToken, refreshCallback, readOptions),
   transferPlayback: (accessToken, deviceId, play) =>
     spotifyAPI.transferPlayback(accessToken, deviceId, play),
 
