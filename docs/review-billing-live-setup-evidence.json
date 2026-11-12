@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "recordedOn": "2026-11-12",
-  "snapshotBoundary": "Store6 source18c41c151/0734 FINISHED30IPAchecks/rootreview/single official Apple upload/VALID/betaReady/existing-group IN_BETA_TESTING verified19:34:26Z;1tester4builds,8groupchecks preserving prior settings/membership/builds. Store5 prices remain owner-reported history. Physical6Breset/freshreviewcreds/purchase unverified.",
-  "status": "Approved live setup partially complete; no purchase-to-Pro proof",
+  "snapshotBoundary": "Store6 first monthly Sandbox purchase owner-confirmed; hosted B canonical Pro, real review webhook and backup row verified19:47:23Z. Owner-reported cold restart/same-account Restore plus hosted revalidation19:50:38Z passed. A remains Free and production2 fingerprint unchanged; full lifecycle, transfer, yearly checkout, content restoration and secure reviewer credentials remain open.",
+  "status": "Initial monthly Sandbox purchase to server Pro verified; owner-reported same-account cold restart/Restore with hosted revalidation passed; full lifecycle and secure reviewer credentials incomplete",
   "evidenceSources": [
     "Root-relayed supported CUA/service observations and EAS peer readback",
     "Core sanitized hosted migration/function/enrollment receipts; no credential, address or Auth UUID copied"
@@ -276,18 +276,19 @@
     }
   },
   "incompleteAtSnapshot": [
-    "Resolve B same-iPhone recovery failure, validate the new recovery client/build6 on the same phone and complete owner password/cold-restart identity handoff before Apple credential entry",
+    "Complete secure owner password handoff/Apple reviewer credential entry; owner-reported phone recovery is not credential-field readiness",
     "Verify actual Apple sandbox notification delivery; saved URL/readback is not a delivered event",
     "Verify dedicated reviewer login on the selected distribution client and enter approved credentials in Apple review fields",
-    "Complete canonical App Store sandbox purchase/restore-to-Pro and lifecycle/isolation tests",
-    "Verify actual restore/transfer behavior despite the saved Transfer policy",
+    "Complete yearly checkout, cross-account transfer, renewal/cancellation/refund and actual backup-content restore/isolation tests; initial monthly purchase and owner-reported same-B restore with hosted revalidation passed",
+    "Verify cross-account transfer despite the saved Transfer policy; same-account restore is owner-reported passed with hosted revalidation",
     "Complete App Privacy and selected-binary listing checks; age/category/subtitle and product review assets are saved, while final Ads ON alignment remains"
   ],
   "verificationLimits": [
-    "Webhook TEST200 and saved Apple sandbox URL/readback do not prove Apple purchase or lifecycle delivery",
-    "A/B local login/prices/Refresh and review-only inactive Free-state consistency do not establish a paid Pro lease, backup or independently inspected raw upstream response",
-    "No paid purchase is established by this receipt",
-    "Direct Apple upload, VALID and existing-group Testing are verified; physical build5 pricing is owner-reported only; they do not establish purchase-to-Pro, restore/lifecycle, external beta review, App Review or public release"
+    "Webhook TEST200 and saved Apple sandbox URL/readback alone do not prove Apple lifecycle delivery; one real review purchase webhook is now verified separately.",
+    "Earlier A/B inactive Free snapshots and delivery receipts are historical and do not themselves prove a purchase; monthlySandboxPurchaseMilestone separately records the first verified paid slice.",
+    "Same-account Restore passed by owner report with subsequent hosted active-state revalidation; automatic lease renewal can also advance generation, so no distinct restore-event attribution is claimed.",
+    "No independent physical capture or raw upstream receipt inspection; yearly checkout, cross-account transfer, renewal/cancellation/refund, content restoration and secure Apple reviewer credential entry remain open.",
+    "No external beta review, App Review or public release occurred; Store6 ads remain OFF with no ATT purpose claim."
   ],
   "sanitizedInputReceipts": [
     {
@@ -750,21 +751,17 @@
     "source": "Owner physical iPhone response, not independent capture",
     "buildNumber": "5",
     "monthlyAndYearlyPricesReportedCorrect": true,
-    "ownerResponse": "evet doğru duruyor",
+    "ownerResponse": "evet do\u011fru duruyor",
     "exactPhoneAmountsOrCurrencyCaptured": false,
     "independentPhysicalScreenshotOrTelemetry": false,
     "purchaseOrProUnlockVerified": false
   },
   "reviewCredentialRecoveryBlocker": {
-    "status": "CURRENT VALIDATION GATE: Store6 available in existing group; same-phone B reset/new password/cold restart and fresh reviewer credentials not yet verified",
+    "status": "OWNER-REPORTED Store6 physical B recovery/new-password/cold-restart/account-check PASS; independent capture and Apple reviewer credential handoff remain open",
     "reportedPhysicalError": "This sign-in link couldn't be used. Request a new link",
     "sameIPhoneRequestAndOpenReported": true,
     "reportedOpenPath": "Chrome to Sync",
     "latestNativeResetRequestAcceptedConditionalAcknowledgement": true,
-    "emailDeliveryConfirmed": false,
-    "usableRecoveryLinkConfirmed": false,
-    "newPasswordSetConfirmed": false,
-    "coldRestartBAccountConfirmed": false,
     "rootReadOnlyHostedChecks": {
       "resetTemplateUsesConfirmationURL": true,
       "exactPKCEFlowIdRedirectAllowlistCorrect": true,
@@ -796,18 +793,31 @@
       "secretFilesWritten": false,
       "reviewerCredentialsReadyForAppleFields": false,
       "ownerChoosesFreshPasswordWithoutSharingItInChat": true,
-      "phoneResetAndIdentityHandoffPending": true,
-      "supabaseAndEASServerSecretStorageUnaffected": true
+      "phoneResetAndIdentityHandoffPending": false,
+      "supabaseAndEASServerSecretStorageUnaffected": true,
+      "ownerPasswordHandoffForAppleFieldsPending": true
     },
     "sourceFreezeComplete": true,
     "recoveryTestsPassedEstablished": true,
     "build6SuccessEstablished": true,
-    "physicalRecoverySuccessEstablished": false,
     "targetedRecoveryTestsPassedEstablished": true,
     "fullReleaseSuiteAndHermesPassedEstablished": true,
-    "store6PhysicalRecoverySuccessEstablished": false,
     "reportedFailureClientBuild": "5",
-    "store6PhysicalRetestPending": true
+    "store6PhysicalRetestPending": false,
+    "historicalStore5Failure": {
+      "reportedPhysicalError": "This sign-in link couldn't be used. Request a new link",
+      "sameIPhoneRequestAndOpenReported": true,
+      "reportedOpenPath": "Chrome to Sync",
+      "latestNativeResetRequestAcceptedConditionalAcknowledgement": true,
+      "emailDeliveryConfirmed": false,
+      "usableRecoveryLinkConfirmed": false,
+      "newPasswordSetConfirmed": false,
+      "coldRestartBAccountConfirmed": false,
+      "reportedFailureClientBuild": "5"
+    },
+    "ownerReportedStore6RecoveryPassed": true,
+    "ownerReportedColdRestartBAccountPassed": true,
+    "physicalRecoveryIndependentlyCaptured": false
   },
   "savedCategoryAndSubtitleReceipt": {
     "approvedByOwner": true,
@@ -829,7 +839,7 @@
     "operationsFile": "artifacts/app-store/store-metadata-2026-11-12/approved-category-subtitle-operations.json"
   },
   "authRecoveryV2SourceEvidence": {
-    "status": "SOURCE151/0734 targeted119/full721/Hermes/archive PASS; Store6 FINISHED30checks/single Apple upload/VALID/existing-group Testing PASS; physical B recovery and fresh credentials pending",
+    "status": "SOURCE151/0734 targeted119/full721/Hermes/archive PASS; Store6 internal delivery PASS; physical B reset/cold restart owner-reported PASS, not independent capture; reviewer credential handoff/purchase pending",
     "sourceFreezeFile": "/private/tmp/syncapp-auth-recovery-fix-vpagjaot/auth-recovery-source-freeze-v2.json",
     "sourceFreezeSHA256": "35a5d6da8b9f20da2dda41bccaa1b4aa5cea43464fc41f561f5256c4e5c30a19",
     "runtimeFiles": 151,
@@ -851,7 +861,6 @@
     "fullSuiteAndHermesFinalResultEstablished": true,
     "fullSuiteAndHermesRunDirectory": "/private/tmp/syncapp-recovery-final-6a73bbj1",
     "newBinaryBuiltOrUploaded": true,
-    "physicalSameDeviceRecoverySuccess": false,
     "fullTestsPassed": 721,
     "fullTestsFailed": 0,
     "fullTestsSkipped": 0,
@@ -886,7 +895,9 @@
     },
     "finalHandoffFile": "/private/tmp/syncapp-recovery-final-6a73bbj1/final-handoff-evidence.json",
     "finalHandoffSHA256": "3d0bd6a2dcdda607d7af2be17a573540efe41582c99485d3973ea65d66133a68",
-    "sourceCommit": "18c41c0116dba0d8d3e13c0a7a97b3de8e43b17c"
+    "sourceCommit": "18c41c0116dba0d8d3e13c0a7a97b3de8e43b17c",
+    "ownerReportedPhysicalSameDeviceRecoverySuccess": true,
+    "independentPhysicalRecoveryCaptureAvailable": false
   },
   "store6BuildAndUpload": {
     "version": "1.0.0",
@@ -922,7 +933,6 @@
     "internalBetaReadyVerified": true,
     "existingGroupTestingVerified": true,
     "downloadableToOwnerEstablished": true,
-    "physicalRecoveryFixedClaim": false,
     "freshReviewerCredentialsReady": false,
     "purchaseOrProLifecycleVerified": false,
     "externalBetaOrAppReviewOrPublicRelease": false,
@@ -944,6 +954,151 @@
     "groupProofFile": "artifacts/app-store/testflight-1.0.0-6/group-delivery-proof.json",
     "groupProofSHA256": "52953f14716a7b49d40ad21f453fb7efcfbbffbc02a65fb6284a7b5bb46577e6",
     "ownerInstalledStore6Confirmed": false,
-    "freshSamePhoneBResetAndColdRestartPending": true
+    "freshSamePhoneBResetAndColdRestartPending": false,
+    "ownerReportedStore6UpdateAndRecoveryCompleted": true,
+    "ownerReportedColdRestartBAccountPassed": true,
+    "independentPhysicalRecoveryCaptureAvailable": false,
+    "physicalRecoveryCauseOrFixIndependentlyProven": false,
+    "initialMonthlySandboxPurchaseToServerProVerified": true,
+    "firstRealReviewWebhookAndBackupRowVerified": true,
+    "fullPaidLifecycleVerified": false,
+    "sameAccountRestoreOwnerReportedAndHostedRevalidated": true
+  },
+  "ownerReportedStore6Recovery": {
+    "reportedOn": "2026-11-12",
+    "buildNumber": "6",
+    "accountLabel": "B",
+    "evidenceType": "OWNER_REPORTED",
+    "ownerResponse": "test hesab\u0131na girdi\u015fm",
+    "rootQuestionSequence": "Update6 \u2192 request/open a fresh B reset on the same iPhone \u2192 choose new password \u2192 cold close/reopen \u2192 Your account check",
+    "physicalSameDeviceRecoveryReportedPassed": true,
+    "newPasswordAndColdRestartBAccountReportedPassed": true,
+    "independentDeviceCaptureOrTelemetry": false,
+    "appleReviewerCredentialsReady": false,
+    "purchaseOrProSuccessVerified": false
+  },
+  "hostedPrePurchaseBillingBaseline": {
+    "status": "VERIFIED_READ_ONLY_PREPURCHASE",
+    "evidenceFile": "artifacts/app-store/billing-validation-2026-11-12/prepurchase-baseline.json",
+    "evidenceSHA256": "4a915de646e4b4a5d4d9874ff40ad1c714c87e321ca9588504bf5bc34fa09f49",
+    "recordedAtUTC": "2026-11-12T19:43:48Z",
+    "BLastSignInUTC": "2026-11-12T19:39:12.034583Z",
+    "ABConfirmedImmutableReviewScopeEpoch1AndNamespaceValid": true,
+    "ABInactiveFree1970LeaseAndCanonicalExpiry": true,
+    "store": "app_store",
+    "environment": "SANDBOX",
+    "productAbsent": true,
+    "reviewWebhookEvents": 0,
+    "reviewBackups": 0,
+    "ABProductionRows": 0,
+    "AGeneration": 2,
+    "AGenerationUnchanged": true,
+    "BGeneration": 4,
+    "BLastStartedAtUTC": "2026-11-12T19:09:29.033892Z",
+    "BGenerationIsHistoricalNotProofOfFreshPhoneSync": true,
+    "productionRows": 2,
+    "allProductionEnvironment": "PRODUCTION",
+    "productionFingerprint": "127372f998045ce4eee14d16474f37c6",
+    "sqlReadOnlyNoGrantsOrMutation": true,
+    "ownerAskedRefreshThenOneMonthlySandboxTestPurchase": true,
+    "ownerPurchaseResultReceived": true,
+    "purchaseOrProSuccessEstablished": false,
+    "resultScope": "This earlier baseline remains pre-purchase; the later paid result is separately recorded in monthlySandboxPurchaseMilestone"
+  },
+  "monthlySandboxPurchaseMilestone": {
+    "status": "FIRST_MONTHLY_SANDBOX_PURCHASE_TO_SERVER_PRO_VERIFIED",
+    "sourceBuild": "1.0.0 (6)",
+    "observedAtUTC": "2026-11-12T19:47:23.131123Z",
+    "evidenceFile": "artifacts/app-store/billing-validation-2026-11-12/monthly-purchase-canonical-proof.json",
+    "evidenceSHA256": "733cee12ef526d160682c68b0dc230056b984cdbc721036012b0039ef51dbc82",
+    "ownerExplicitlyConfirmedMonthlySandboxPurchaseAndPro": true,
+    "ownerEarlierAnswerWasPricesOnlyNotPurchase": true,
+    "independentPhysicalScreenCapture": false,
+    "B": {
+      "activeReviewScopeEpoch": 1,
+      "namespaceValid": true,
+      "canonicalActive": true,
+      "store": "app_store",
+      "environment": "SANDBOX",
+      "productId": "com.feridun.syncapp.pro.monthly",
+      "canonicalExpiryUTC": "2026-11-13T19:46:47Z",
+      "serverLeaseExpiresUTC": "2026-11-12T19:51:54.265Z",
+      "generation": 12,
+      "lastStartedAtUTC": "2026-11-12T19:46:54.128247Z",
+      "realReviewWebhookEvents": 1,
+      "firstReviewWebhookAtUTC": "2026-11-12T19:46:53.405895Z",
+      "reviewBackupRows": 1,
+      "productionRows": 0
+    },
+    "A": {
+      "generation": 2,
+      "stillFree": true,
+      "reviewBackups": 0,
+      "reviewWebhookEvents": 0,
+      "productionRows": 0
+    },
+    "productionRows": 2,
+    "allProductionEnvironment": "PRODUCTION",
+    "productionFingerprintUnchanged": "127372f998045ce4eee14d16474f37c6",
+    "noManualGrantOrVerificationTimeServerMutation": true,
+    "rawUpstreamReceiptInspected": false,
+    "attribution": "Hosted active canonical review state is consistent with the deployed canonical validation path; no raw upstream response was inspected.",
+    "backupContentRestoreVerified": false,
+    "sameBRestoreVerified": true,
+    "transferRenewalCancellationRefundVerified": false,
+    "ownerAskedColdRestartThenSameBRestore": true,
+    "sameBRestoreAnswerReceived": true,
+    "sameBRestoreEvidenceScope": "Owner-reported cold restart/same-account Restore plus subsequent hosted revalidation; see sameAccountRestoreMilestone, not a distinct restore-event proof."
+  },
+  "postRefreshFreeBaselineHistory": {
+    "scope": "Post-Refresh pre-purchase historical Free snapshot; owner confirmed prices only, not purchase",
+    "evidenceFile": "artifacts/app-store/billing-validation-2026-11-12/post-refresh-free-baseline.json",
+    "observedAtUTC": "2026-11-12T19:45:12.022778Z",
+    "BGeneration": 8,
+    "BInactive1970Free": true,
+    "noProductEventBackupOrPro": true,
+    "distinctFromLaterPaidGeneration12": true
+  },
+  "sameAccountRestoreMilestone": {
+    "status": "OWNER_REPORTED_SAME_ACCOUNT_RESTORE_WITH_HOSTED_REVALIDATION_PASSED",
+    "sourceBuild": "1.0.0 (6)",
+    "observedAtUTC": "2026-11-12T19:50:38.124897Z",
+    "evidenceFile": "artifacts/app-store/billing-validation-2026-11-12/same-account-restore-proof.json",
+    "evidenceSHA256": "9d74b4cd210885e87e0470d49e43ca72c0c2787817f1d8bbe720a3c1b03d7b69",
+    "ownerReportedColdRestartAndSameAccountRestorePassed": true,
+    "independentPhysicalScreenCapture": false,
+    "B": {
+      "canonicalActive": true,
+      "serverLeaseActive": true,
+      "store": "app_store",
+      "environment": "SANDBOX",
+      "productId": "com.feridun.syncapp.pro.monthly",
+      "generation": 16,
+      "lastStartedAtUTC": "2026-11-12T19:49:57.422670Z",
+      "serverLeaseExpiresUTC": "2026-11-12T19:54:57.542Z",
+      "canonicalExpiryUTC": "2026-11-13T19:46:47Z",
+      "realReviewWebhookEvents": 1,
+      "reviewBackupRows": 1,
+      "productionRows": 0
+    },
+    "A": {
+      "generation": 2,
+      "stillFree": true,
+      "reviewWebhookEvents": 0,
+      "reviewBackupRows": 0,
+      "productionRows": 0
+    },
+    "productionRows": 2,
+    "allProductionEnvironment": true,
+    "productionFingerprintUnchanged": "127372f998045ce4eee14d16474f37c6",
+    "distinctRestoreEventProven": false,
+    "generationAttributionLimit": "Automatic lease renewal can also advance generation; hosted revalidation does not uniquely identify a restore request.",
+    "yearlyCheckoutVerified": false,
+    "crossAccountTransferVerified": false,
+    "renewalCancellationRefundVerified": false,
+    "backupContentRestorationVerified": false,
+    "appleReviewerCredentialsReady": false,
+    "noManualGrantOrVerificationTimeServerMutation": true,
+    "rawUpstreamReceiptInspected": false
   }
 }
