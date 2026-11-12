@@ -32,7 +32,9 @@ The first Doctor run passed 17/18 and reported missing direct peer `react-native
 
 A fresh isolated CNG iOS project generated its Podfile, resolved Worklets **0.5.1**, installed pods and passed a normal-signed Release simulator build plus strict codesign verification. Only Worklets differed from the prior native pod versions. The local `/tmp` alias needed a canonical `ENTRY_FILE` build environment value; no generated/source patch was applied. The check used synthetic public runtime configuration and did not copy local dotenv values or modify the original `ios/Pods` project.
 
-Recorded source checks are **496/496 tests** and both Hermes exports. Fresh CNG guest launch/editor/Duration → Apply 5 seconds were observed. Its final short-session/clipboard retests remain pending; final GUI checks must run separately from the concurrent store-capture workflow. Pre-pin Worklets 0.6.1 completion/history, iPad pause/landscape and both-device clipboard passes retain that earlier scope.
+Recorded Store-source checks are **496/496 tests** and both Hermes exports. Fresh CNG Worklets 0.5.1 iPad QA subsequently reopened the saved five-second routine, completed its actual countdown/one round, finished, inspected Activity detail and passed Copy image/Copy transparent sticker. Installed executable/JS hashes matched the preserved CNG reference. Pre-pin Worklets 0.6.1 longer sessions, iPad pause/landscape and both-device clipboard passes retain that earlier scope; current-CNG iPhone and actual TestFlight runtime remain open.
+
+Post-upload Profile source `a6099d3` also passed **496/496** tests and a separate normal-signed CNG simulator Release build/strict-deep codesign. Its iPad native AX check exposed the enabled Dark appearance switch and activated **1 → 0 → 1**. Data survived installation; no full VoiceOver audit or new Store build is claimed. Later concurrent worktree edits are outside this recorded source. Synthetic public runtime configuration still does not validate live services.
 
 ## Store delivery record
 
