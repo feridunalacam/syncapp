@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "recordedAtUTC": "2026-11-12T09:54:55.760111+00:00",
+  "lastUpdatedAtUTC": "2026-11-12T10:50:01Z",
   "sourceCommit": "da7339f3b9b072e9f2859974170b4350c8a3c549",
   "platform": "ios",
   "sourceValidation": {
@@ -43,7 +44,17 @@
     "liveVersion": null,
     "inReviewVersion": null,
     "pendingReleaseVersion": null,
-    "testerAssignmentPerformed": false,
+    "testerAssignmentPerformed": true,
+    "internalTesting": {
+      "groupName": "Sync Internal QA",
+      "automaticDistributionEnabled": false,
+      "buildCount": 1,
+      "testerCount": 1,
+      "testerScope": "existing account holder only",
+      "observedInvitationState": "INVITED",
+      "invitationAcceptanceObserved": false,
+      "deviceInstallationObserved": false
+    },
     "appReviewSubmissionPerformed": false
   },
   "nativeRuntimeEvidence": {
@@ -72,9 +83,26 @@
         "strict signature verification",
         "guest launch",
         "routine editor",
-        "duration apply to 5 seconds"
+        "duration apply to 5 seconds",
+        "iPad saved five-second routine reopened",
+        "iPad genuine five-second one-round completion and Finish",
+        "iPad Activity session detail",
+        "iPad image and transparent sticker clipboard",
+        "installed executable and JavaScript hashes matched the CNG reference"
       ],
-      "shortSessionAndClipboardRetest": "pending"
+      "shortSessionAndClipboardRetest": "passed on iPad; current-CNG iPhone runtime remains unverified"
+    },
+    "postUploadProfileFix": {
+      "sourceCommit": "a6099d3",
+      "worklets": "0.5.1",
+      "configuration": "synthetic public values for simulator core QA",
+      "testsPassed": 496,
+      "normalSignedReleaseAndStrictSignatureVerificationPassed": true,
+      "iPadNativeSwitchActivation": "enabled switch individually exposed; value 1 to 0 to 1",
+      "guestDataRetainedAfterInstall": true,
+      "fullVoiceOverAuditPerformed": false,
+      "includedInUploadedStoreBuild2": false,
+      "laterConcurrentWorktreeEditsIncluded": false
     }
   },
   "privacy": {
@@ -107,9 +135,9 @@
     "spotifyEnabled": false
   },
   "openReleaseGates": [
-    "owner TestFlight access and actual device runtime",
-    "current CNG session/clipboard retest",
-    "Apple merchant requirements deferred by owner",
+    "owner invitation acceptance and actual TestFlight device runtime",
+    "current CNG iPhone runtime and delivery of the later Profile fix",
+    "Apple merchant requirements being completed separately by owner",
     "authorized review/sandbox configuration and real paid/Pro lifecycle",
     "final store screenshots and privacy/age-rating decisions"
   ]
