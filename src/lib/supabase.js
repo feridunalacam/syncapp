@@ -14,10 +14,12 @@ const authCryptoReady = installNativeAuthCrypto({
   loadNativeCrypto: () => require('expo-crypto'),
 });
 export const isSupabaseConfigured = Boolean(url && key && authCryptoReady);
+export const authStorage =
+  Platform.OS === 'web' ? AsyncStorage : createAuthSessionStorage(SecureStore);
 export const supabase = isSupabaseConfigured
   ? createClient(url, key, {
       auth: {
-        storage: Platform.OS === 'web' ? AsyncStorage : createAuthSessionStorage(SecureStore),
+        storage: authStorage,
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: false,

@@ -4,9 +4,10 @@ import { clearAccountPlatforms } from '../lib/platformStorage';
 import { AppState } from 'react-native';
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
-import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { supabase, isSupabaseConfigured, authStorage } from '../lib/supabase';
 import { AUTH_REDIRECT, RECOVERY_REDIRECT, parseAuthLink } from '../lib/authLinks';
 import { authExchangeDiagnostic, createAuthCodeExchanger } from '../lib/authCodeExchange';
+import { createAuthRecoveryState } from '../lib/authRecoveryState';
 
 const AuthContext = createContext({ user: null, ready: false, configured: false });
 export const useAuth = () => useContext(AuthContext);
@@ -16,7 +17,12 @@ export function AuthProvider({ children }) {
   const [recoveryMode, setRecoveryMode] = useState(false);
   const [error, setError] = useState(null);
   const currentUser = useRef(null);
+  const currentSession = useRef(null);
   currentUser.current = session?.user?.id || null;
+  currentSession.current = session;
+  const recovery = useRef(null);
+  if (!recovery.current)
+    recovery.current = createAuthRecoveryState({ storage: authStorage, onChange: setRecoveryMode });
   const exchangeCode = useRef(null);
   if (!exchangeCode.current && supabase) exchangeCode.current = createAuthCodeExchanger(supabase);
   const requireClient = () => {
@@ -34,35 +40,39 @@ export function AuthProvider({ children }) {
     if (!parsed) return;
     if (parsed.error) throw new Error(parsed.error);
     await exchangeCode.current(parsed);
-    setError(null);
-    if (parsed.recovery) setRecoveryMode(true);
   };
   useEffect(() => {
     if (!supabase) return;
     let alive = true;
     let receivedEvent = false;
+    let sessionVersion = 0;
+    const receiveSession = (next, event) => {
+      const version = ++sessionVersion;
+      currentUser.current = next?.user?.id || null;
+      currentSession.current = next;
+      setSession(next);
+      // Keep the initial account gate closed while unfinished recovery state is
+      // restored. The bounded local read never calls Auth from its event callback.
+      recovery.current.observe(next, event).then(() => {
+        if (alive && version === sessionVersion) setReady(true);
+      });
+    };
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, next) => {
       receivedEvent = true;
       if (!alive) return;
-      currentUser.current = next?.user?.id || null;
-      setSession(next);
-      setReady(true);
-      if (event === 'PASSWORD_RECOVERY') setRecoveryMode(true);
-      if (event === 'SIGNED_OUT') setRecoveryMode(false);
+      receiveSession(next, event);
     });
     supabase.auth
       .getSession()
       .then(({ data, error: failure }) => {
         if (!alive || receivedEvent) return;
-        currentUser.current = data.session?.user?.id || null;
-        setSession(data.session);
+        receiveSession(data.session, 'INITIAL_SESSION');
         if (failure) setError(failure.message);
-        setReady(true);
       })
       .catch((failure) => {
-        if (alive) {
+        if (alive && !receivedEvent) {
           setError(failure.message);
           setReady(true);
         }
@@ -72,6 +82,7 @@ export function AuthProvider({ children }) {
       if (!parsed) return;
       try {
         await exchangeLink(value);
+        if (alive) setError(null);
       } catch (failure) {
         if (__DEV__)
           console.warn('[auth] Account link exchange failed', authExchangeDiagnostic(failure));
@@ -93,6 +104,7 @@ export function AuthProvider({ children }) {
     const appState = AppState.addEventListener('change', refresh);
     return () => {
       alive = false;
+      recovery.current.suspend();
       subscription.unsubscribe();
       links.remove();
       appState.remove();
@@ -116,8 +128,9 @@ export function AuthProvider({ children }) {
       requireClient().auth.resetPasswordForEmail(email.trim(), { redirectTo: RECOVERY_REDIRECT }),
     );
   const updatePassword = async (password) => {
+    const target = currentSession.current;
     await checked(requireClient().auth.updateUser({ password }));
-    setRecoveryMode(false);
+    recovery.current.finish(target);
   };
   const signOut = () => checked(requireClient().auth.signOut({ scope: 'local' }));
   const signInWithOAuth = async (provider) => {
@@ -175,7 +188,7 @@ export function AuthProvider({ children }) {
         signUp,
         sendPasswordReset,
         updatePassword,
-        dismissRecovery: () => setRecoveryMode(false),
+        dismissRecovery: () => recovery.current.finish(currentSession.current),
         clearError: () => setError(null),
         signOut,
         deleteAccount,

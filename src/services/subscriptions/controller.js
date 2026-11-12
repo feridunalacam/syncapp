@@ -102,14 +102,18 @@ export function createSubscriptionController({
   };
   const read = async (version, id, { sync = false, customerInfo } = {}) => {
     try {
+      if (!current(version, id)) return { stale: true };
+      const info = customerInfo || state.customerInfo;
+      const sdkActive = !!info?.entitlements?.active?.[sdkEntitlementId];
+      // A completed store transaction must remain visible while the server is
+      // unavailable. Retain its pending signal without granting cloud access.
+      if (customerInfo) emit({ customerInfo: info, pending: !state.isPro && sdkActive });
       const result = await verify(id, { sync });
       if (!current(version, id)) return { stale: true };
       if (!result || !Object.hasOwn(result, 'entitlement'))
         throw new Error('Could not verify cloud access. Please try again.');
       const entitlement = result.entitlement || null;
       const isPro = isActiveEntitlement(entitlement, now());
-      const info = customerInfo || state.customerInfo;
-      const sdkActive = !!info?.entitlements?.active?.[sdkEntitlementId];
       backendVerified = !result.syncError;
       emit({
         entitlement,
@@ -199,6 +203,8 @@ export function createSubscriptionController({
     requireIdentity(version, id);
     if (!sdk || !apiKey) throw new Error('Purchases are not available in this build yet.');
     if (state.loading) throw new Error('A subscription request is already in progress.');
+    if (kind === 'purchase' && state.pending)
+      throw new Error('Your purchase is awaiting verification. Refresh access in a moment.');
     emit({ loading: true, error: null });
     return enqueue(async () => {
       try {

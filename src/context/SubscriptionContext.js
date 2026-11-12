@@ -3,27 +3,26 @@ import { AppState, Linking, NativeModules, Platform } from 'react-native';
 import { useAuth } from './AuthContext';
 import { supabase } from '../lib/supabase';
 import { createSubscriptionController } from '../services/subscriptions/controller';
+import { createSubscriptionConfig, loadSubscriptionSdk } from '../services/subscriptions/config';
 
 const SubscriptionContext = createContext(null);
-const apiKey =
-  Platform.OS === 'ios'
-    ? process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY
-    : Platform.OS === 'android'
-      ? process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY
-      : null;
+const purchaseConfig = createSubscriptionConfig({
+  platform: Platform.OS,
+  dev: __DEV__,
+  profile: process.env.EXPO_PUBLIC_BUILD_PROFILE,
+  env: {
+    EXPO_PUBLIC_REVENUECAT_IOS_API_KEY: process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY,
+    EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY: process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY,
+  },
+});
+const apiKey = purchaseConfig.apiKey;
 
 // Loading the JS SDK with an older development binary can throw during module
 // evaluation. Check the native bridge first and keep the free app usable.
-function loadSdk() {
-  if (!apiKey || !['ios', 'android'].includes(Platform.OS)) return null;
-  if (!NativeModules.RNPurchases) return null;
-  try {
-    return require('react-native-purchases').default;
-  } catch {
-    return null;
-  }
-}
-const sdk = loadSdk();
+const sdk = loadSubscriptionSdk(purchaseConfig, {
+  hasNativeModule: !!NativeModules.RNPurchases,
+  load: () => require('react-native-purchases').default,
+});
 
 async function verifyEntitlement(userId, { sync = false } = {}) {
   if (!supabase) throw new Error('Account services are not available in this build.');

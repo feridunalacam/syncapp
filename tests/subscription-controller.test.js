@@ -156,6 +156,51 @@ test('successful purchase remains pending when backend configuration is incomple
   assert.equal(controller.getState().accessVerified, false);
 });
 
+for (const kind of ['purchase', 'restore']) {
+  test(`received ${kind} remains pending after backend rejection and recovers on refresh`, async () => {
+    let received = false;
+    let backendOffline = false;
+    let backendConfirmed = false;
+    let purchases = 0;
+    const { controller } = setup({
+      sdk: {
+        getCustomerInfo: async () => (received ? activeInfo : emptyInfo),
+        purchasePackage: async () => {
+          purchases++;
+          received = true;
+          return { customerInfo: activeInfo };
+        },
+        restorePurchases: async () => {
+          received = true;
+          return activeInfo;
+        },
+      },
+      verify: async () => {
+        if (backendOffline) throw new Error('Backend offline');
+        return { entitlement: backendConfirmed ? pro : null };
+      },
+    });
+    await controller.identify('user-a');
+    backendOffline = true;
+    const transaction = kind === 'purchase' ? controller.purchase(monthly) : controller.restore();
+    await assert.rejects(transaction, /Backend offline/);
+    assert.equal(controller.getState().customerInfo, activeInfo);
+    assert.equal(controller.getState().pending, true);
+    assert.equal(controller.getState().isPro, false);
+    assert.equal(controller.getState().accessVerified, false);
+    assert.equal(controller.getState().loading, false);
+    assert.throws(() => controller.purchase(monthly), /awaiting verification/);
+    assert.equal(purchases, kind === 'purchase' ? 1 : 0);
+    backendOffline = false;
+    backendConfirmed = true;
+    await controller.refresh({ sync: true });
+    assert.equal(controller.getState().pending, false);
+    assert.equal(controller.getState().isPro, true);
+    assert.equal(controller.getState().accessVerified, true);
+    assert.equal(controller.getState().error, null);
+  });
+}
+
 test('account change during purchase clears access immediately and serializes SDK login', async () => {
   const waiting = deferred();
   const { controller, calls } = setup({

@@ -8,6 +8,7 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "node --test tests/*.test.js",
+    "check:release": "node --env-file-if-exists=.env.local scripts/check-release-config.mjs",
     "format": "prettier --write App.js src tests"
   },
   "dependencies": {

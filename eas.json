@@ -12,6 +12,7 @@
       }
     },
     "development": {
+      "environment": "development",
       "developmentClient": true,
       "distribution": "internal",
       "ios": {
@@ -19,16 +20,25 @@
       },
       "extends": "base",
       "env": {
+        "EXPO_PUBLIC_BUILD_PROFILE": "development",
         "EXPO_PUBLIC_ADS_ENABLED": "true"
       }
     },
     "preview": {
+      "environment": "preview",
       "distribution": "internal",
-      "extends": "base"
+      "extends": "base",
+      "env": {
+        "EXPO_PUBLIC_BUILD_PROFILE": "preview"
+      }
     },
     "production": {
+      "environment": "production",
       "autoIncrement": true,
-      "extends": "base"
+      "extends": "base",
+      "env": {
+        "EXPO_PUBLIC_BUILD_PROFILE": "production"
+      }
     }
   }
 }
