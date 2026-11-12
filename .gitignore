@@ -5,6 +5,7 @@ npm-debug.*
 *.jks
 *.p8
 *.p12
+*.pem
 *.key
 *.mobileprovision
 /credentials.json
