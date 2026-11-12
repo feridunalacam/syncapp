@@ -8,6 +8,8 @@ The hook checks the actual build process environment, without loading local dote
 
 Passing verifies configuration format only. It does not verify signing, service availability, real purchases, store approval or a completed cloud build. No environment values are printed.
 
+App Store Connect API access is approved. The Apple dashboard showed the active Sync EAS Submit App Manager key, and EAS confirmed vault storage and assignment to this app for Submit. Apple-side CLI key validation was not performed; the Apple Distribution certificate and app-specific App Store profile have been created, but profile download and EAS build-credential assignment remain pending, and real Apple subscription lifecycle/Pro validation remains unverified. Final Release native Copy image and transparent clipboard checks pass; final iPad visual QA remains pending.
+
 ## Pinned build tools
 
 The shared EAS base profile selects Node **22.23.4** and the iOS image **macos-tahoe-26.5-xcode-26.6**, matching the locally validated Node/Xcode release toolchain. All three iOS profiles were resolved and validated with the installed EAS 27.7.2 schema/resolver, including the development simulator override. This is configuration validation; a cloud build has not yet run.

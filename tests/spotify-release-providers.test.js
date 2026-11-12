@@ -8,8 +8,12 @@ import { create } from 'react-test-renderer';
 import { createAccountStore } from '../src/lib/accountStore.js';
 import { createMusicConnections } from '../src/lib/musicConnections.js';
 import { computeAccessTokenExpiresAt } from '../src/services/spotify/auth.js';
-import { SPOTIFY_UNAVAILABLE_MESSAGE } from '../src/services/spotify/availability.js';
+import {
+  spotifyAvailable,
+  SPOTIFY_UNAVAILABLE_MESSAGE,
+} from '../src/services/spotify/availability.js';
 import { useMusicSearch } from '../src/hooks/useMusicSearch.js';
+import { normalizeAlertConfig, createAlertPreset } from '../src/domain/alerts.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -388,4 +392,45 @@ test('release Profile hides Spotify connection and device controls while keeping
   assert.equal(h.root.root.findAllByType('SpotifyLogo').length, 0);
   assert.equal(h.spotifyCalls, 0);
   assert.equal(h.oauthStarts, 0);
+});
+
+test('audio alert helper follows Spotify release availability and retains the development explanation', async () => {
+  for (const profile of ['production', 'preview', 'development']) {
+    const available = spotifyAvailable({ dev: true, profile, enabled: 'true' });
+    const { AdvancedSettings } = load(
+      'screens/Routine/components/AdvancedSettings.js',
+      ['AdvancedSettings'],
+      {
+        SPOTIFY_AVAILABLE: available,
+        normalizeAlertConfig,
+        createAlertPreset,
+        Surface: 'Surface',
+        Slider: 'Slider',
+        DurationField: 'DurationField',
+        AlertSoundPicker: () => null,
+      },
+    );
+    let root;
+    await act(async () => {
+      root = create(
+        React.createElement(AdvancedSettings, {
+          isExpanded: true,
+          onToggle: noop,
+          audioAlerts: createAlertPreset('silent'),
+          countdownBeforeStartSec: 0,
+          restVolume: 50,
+        }),
+      );
+    });
+    try {
+      const textOf = (node) =>
+        typeof node === 'string' ? node : (node?.children || []).map(textOf).join('');
+      const output = textOf(root.toJSON());
+      assert.match(output, /Voice cues and alert sounds play with Device or Browser audio\./);
+      assert.equal(output.includes('Spotify intervals use the visual timer.'), available, profile);
+      if (!available) assert.doesNotMatch(output, /Spotify/, profile);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  }
 });

@@ -5,6 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Surface from '../../../components/common/Surface';
 import { useTheme } from '../../../context/ThemeContext';
 import { normalizeAlertConfig, createAlertPreset } from '../../../domain/alerts';
+import { SPOTIFY_AVAILABLE } from '../../../services/spotify/config';
 import DurationField from './DurationField';
 import AlertSoundPicker from './AlertSoundPicker';
 
@@ -198,8 +199,8 @@ export const AdvancedSettings = ({
             {volume('Work music volume', workVolume, onWorkVolumeChange)}
             {volume('Rest music volume', restVolume, onRestVolumeChange)}
             <Text style={[styles.note, { color: theme.textSecondary }]}>
-              Voice cues and alert sounds play with Device or Browser audio. Spotify intervals use
-              the visual timer.
+              Voice cues and alert sounds play with Device or Browser audio.
+              {SPOTIFY_AVAILABLE && ' Spotify intervals use the visual timer.'}
             </Text>
             <View style={[styles.section, { borderColor: theme.border }]}>
               {title('Workout cues')}
