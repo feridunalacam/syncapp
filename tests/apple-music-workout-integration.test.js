@@ -66,6 +66,7 @@ async function mount(t, options = {}) {
   };
   const scene = { companionActive: options.active ?? true, workout: null, beforePlay: null };
   const audio = {
+    cancelCueResume: () => events.push('cancel-timed-cue-resume'),
     localCuesAllowed: true,
     isMusicPlaying: false,
     audioError: null,
@@ -94,6 +95,7 @@ async function mount(t, options = {}) {
     },
   };
   const player = {
+    cancelCueResume: () => events.push('cancel-companion-cue-resume'),
     isActive: () => scene.companionActive,
     registerBeforePlay(callback) {
       scene.beforePlay = callback;
@@ -159,6 +161,8 @@ async function mount(t, options = {}) {
       events.push('stop-preview');
     },
     prepareWorkoutCues: async () => {},
+    playWorkoutCue: async () => {},
+    registerCueMusicSource: () => () => {},
   };
   new Script(timerCode).runInNewContext(context);
   context.useTimerLogic = context.timerHook;
@@ -206,7 +210,7 @@ test('companion songs survive preparation, work/rest, pause, resume, skip, backg
   await h.action('toggle');
   assert.equal(h.scene.workout.currentPhase, 'beforeStart');
   assert.equal(h.scene.workout.isAudioSyncing, false);
-  assert.equal(h.scene.cuesAllowed, false);
+  assert.equal(h.scene.cuesAllowed, true, 'chosen cues use the exclusive music handover');
   await h.tick(2000);
   assert.equal(h.scene.workout.currentPhase, 'work');
   await h.action('toggle');
@@ -244,8 +248,19 @@ test('completing a companion workout records the full session without controllin
   assert.equal(h.events.filter((event) => Array.isArray(event) && event[0] === 'log').length, 1);
   assert.equal(h.events.includes('stop-timed'), false);
   assert.equal(
+    h.events.includes('cancel-companion-cue-resume'),
+    false,
+    'natural completion keeps the independent music intent for the selected finish cue',
+  );
+  assert.equal(
     h.events.some((event) => Array.isArray(event) && event[0] === 'phase'),
     false,
+  );
+  await h.action('stop');
+  assert.equal(
+    h.events.includes('cancel-companion-cue-resume'),
+    true,
+    'explicit Stop cancels a late resume even when the timer was already completed',
   );
 });
 

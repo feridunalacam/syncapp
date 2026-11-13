@@ -1,6 +1,7 @@
 import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 import { CUE_ASSETS, LEGACY_CUE_ASSETS } from './assets';
 import { createCueController } from './controller';
+import { createCueHandoff } from './cueHandoff';
 import { buildCuePreview, resolveAlertSound } from '../../domain/alerts';
 
 // Kept for callers that prepare cues when selecting a routine. Effects need no voice engine.
@@ -16,7 +17,9 @@ const unloadSound = (sound) => {
   if (unloadingSounds.has(sound)) return unloadingSounds.get(sound);
   retiringSounds.add(sound);
   const pending = (async () => {
-    await sound.unloadAsync();
+    const status = await sound.unloadAsync();
+    if (status === false || status?.success === false || status?.isLoaded === true)
+      throw new Error('Alert audio did not stop. Try again.');
     retiringSounds.delete(sound);
   })().finally(() => unloadingSounds.delete(sound));
   unloadingSounds.set(sound, pending);
@@ -106,11 +109,16 @@ const stopOwner = (owner) => {
   return Promise.all([stopped, waitForNativeStops()]).then(() => undefined);
 };
 const musicOwners = new Set();
+const handoff = createCueHandoff({
+  stopOutput: stopOwner,
+  needsMusicHandoff: () => musicOwners.size > 0,
+});
+export const registerCueMusicSource = (source) => handoff.register(source);
 export function acquireMusicCueSilence() {
   const owner = {};
   musicOwners.add(owner);
-  stopOwner('workout').catch(() => {});
-  stopOwner('preview').catch(() => {});
+  handoff.stop('workout').catch(() => {});
+  handoff.stop('preview').catch(() => {});
   let released = false;
   return () => {
     if (released) return;
@@ -118,11 +126,19 @@ export function acquireMusicCueSilence() {
     musicOwners.delete(owner);
   };
 }
-export const playWorkoutCue = (event) =>
-  musicOwners.size ? Promise.resolve({ cancelled: true }) : controller.play(event);
-export const stopWorkoutCues = () => stopOwner('workout');
-export const previewWorkoutCue = (key, config) =>
-  musicOwners.size
+const audibleCue = (event) => !!resolveAlertSound(event?.sound)?.uri && event?.volume !== 0;
+export const playWorkoutCue = (event) => {
+  if (!audibleCue(event)) return Promise.resolve({ completed: true });
+  return musicOwners.size && !handoff.hasSources()
     ? Promise.resolve({ cancelled: true })
-    : controller.preview(buildCuePreview(config, key));
-export const stopCuePreview = () => stopOwner('preview');
+    : handoff.run('workout', event, (cancelled) => controller.play(event, 'workout', cancelled));
+};
+export const stopWorkoutCues = () => handoff.stop('workout');
+export const previewWorkoutCue = (key, config) => {
+  const events = buildCuePreview(config, key).filter(audibleCue);
+  if (!events.length) return Promise.resolve({ completed: true });
+  return musicOwners.size && !handoff.hasSources()
+    ? Promise.resolve({ cancelled: true })
+    : handoff.run('preview', {}, (cancelled) => controller.preview(events, cancelled));
+};
+export const stopCuePreview = () => handoff.stop('preview');

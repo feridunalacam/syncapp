@@ -74,7 +74,7 @@ export default function MusicServicesPanel() {
         MUSIC_PROVIDERS.appleMusic,
         apple.companionAvailable
           ? apple.connected
-            ? 'Choose songs and playlists. Music plays independently of your timer.'
+            ? 'Choose songs and playlists. Your selected alerts briefly pause music.'
             : 'Open the player to connect. Apple Music subscription required.'
           : busy
             ? 'Finish your session before changing music connections.'

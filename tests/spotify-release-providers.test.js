@@ -227,6 +227,7 @@ async function mount(
       appleMusicCompanionService: companionService,
       createAppleMusicCompanionController,
       acquireMusicCueSilence: () => noop,
+      registerCueMusicSource: () => noop,
       useAds: () => ({
         acquirePresentationBlocker: () => noop,
         waitForAdPresenters: async () => {},

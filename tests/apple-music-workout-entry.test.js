@@ -306,7 +306,7 @@ for (const screen of Object.keys(paths)) {
     });
     assert.deepEqual(ui.events, [], 'the entry has no mount-time work');
     assert.match(ui.text(), /Choose songs and playlists/);
-    assert.match(ui.text(), /Plays independently of the timer/);
+    assert.match(ui.text(), /selected alerts briefly pause music/);
     assert.equal(ui.button('Choose Apple Music songs and playlists').props.disabled, false);
     if (screen === 'CreateRoutine') await ui.fillName('Unsaved routine edit');
     const formBefore = ui.formState();

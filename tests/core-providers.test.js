@@ -198,6 +198,8 @@ async function mountWorkout(t, start) {
     stopWorkoutCues: silent,
     stopCuePreview: silent,
     prepareWorkoutCues: silent,
+    playWorkoutCue: silent,
+    registerCueMusicSource: () => () => {},
     setTimeout() {},
     clearTimeout() {},
   });

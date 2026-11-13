@@ -278,7 +278,8 @@ export default function HomeScreen({ navigation, route }) {
         <AppleMusicWorkoutControl style={styles.appleMusic} />
         {appleMusic.player?.isActive?.() && (
           <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
-            Apple Music plays independently. Clear its queue to use routine audio and cues again.
+            Apple Music plays independently. Your chosen alerts pause music and play before it
+            continues. Clear the queue to use round music assignments.
           </Text>
         )}
         {!appleMusic.player?.isActive?.() && (

@@ -159,6 +159,23 @@ test('a retired sound cannot publish playback status for the current track', asy
   assert.equal(updates[0].item.uri, 'file:///new.mp3');
 });
 
+test('a failed prepared sound retirement remains owned and blocks another preload until acknowledged', async () => {
+  const h = harness();
+  await h.player.prepareTrack('file:///old.mp3');
+  let fails = true;
+  h.sounds[0].unloadAsync = async () => ({ isLoaded: fails, isPlaying: false });
+  assert.equal((await h.player.clearPrepared()).success, false);
+  assert.equal(h.player.prepared, null);
+  assert.equal(h.player.isLoaded(), true, 'failed detached sounds are still tracked');
+  assert.equal((await h.player.prepareTrack('file:///next.mp3')).success, false);
+  assert.equal(h.sounds.length, 1);
+  fails = false;
+  assert.equal((await h.player.prepareTrack('file:///next.mp3')).success, true);
+  assert.equal(h.sounds.length, 2);
+  assert.equal((await h.player.cleanup()).success, true);
+  assert.equal(h.player.isLoaded(), false);
+});
+
 test('look-ahead follows zero-rest, preparation and final-round timeline rules', () => {
   const routine = {
     rounds: 2,

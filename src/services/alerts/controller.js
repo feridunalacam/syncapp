@@ -25,11 +25,11 @@ export function createCueController({
     owner = null;
     await output.stop();
   };
-  const play = async (cue, nextOwner = 'workout') => {
+  const play = async (cue, nextOwner = 'workout', externallyCancelled = () => false) => {
     if (nextOwner === 'workout') clearPreview();
     const version = ++revision;
     owner = nextOwner;
-    const cancelled = () => version !== revision;
+    const cancelled = () => version !== revision || externallyCancelled();
     await output.stop();
     if (cancelled() || (cue.expiresAt != null && now() > cue.expiresAt)) return { cancelled: true };
     try {
@@ -42,12 +42,12 @@ export function createCueController({
       return { cancelled: true };
     }
   };
-  const preview = async (events) => {
+  const preview = async (events, externallyCancelled = () => false) => {
     clearPreview();
     const sequence = previewRevision;
     await stop('preview');
     // stop invalidates previews; this invocation owns the newest generation below.
-    if (previewRevision !== sequence + 1) return { cancelled: true };
+    if (previewRevision !== sequence + 1 || externallyCancelled()) return { cancelled: true };
     const token = previewRevision;
     if (!events.length) return { completed: true };
     owner = 'preview';
@@ -69,7 +69,7 @@ export function createCueController({
         const timer = schedule(
           async () => {
             timers.delete(timer);
-            if (token !== previewRevision) return;
+            if (token !== previewRevision || externallyCancelled()) return;
             // A backgrounded preview must not play a backlog of stale numbers.
             if (now() - startedAt - event.atMs > 400) {
               if (index === events.length - 1) finish({ cancelled: true });
@@ -81,6 +81,7 @@ export function createCueController({
               const result = await play(
                 { ...event, expiresAt: startedAt + event.atMs + 400 },
                 'preview',
+                externallyCancelled,
               );
               if (index === events.length - 1) finish(result || { completed: true });
             } catch (error) {

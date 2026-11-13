@@ -78,6 +78,8 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
       onPlaybackInterrupted: configuration.onPlaybackInterrupted,
       getValidAccessToken: configuration.getValidAccessToken,
       isExternalMusicActive: configuration.isExternalMusicActive,
+      registerCueSource: configuration.registerCueSource,
+      playCue: configuration.playCue,
     });
     return null;
   }
@@ -357,7 +359,7 @@ test('Apple Music work/rest transitions, pause/resume and local-cue ownership us
   await act(async () => h.audio.handlePhaseChange('rest', 1));
   assert.equal(h.audio.localCuesAllowed, true);
   assert.ok(h.calls.some((call) => call[0] === 'play' && call[1] === 'file:///rest.mp3'));
-  assert.deepEqual(cues, ['stop']);
+  assert.deepEqual(cues, ['stop', 'stop', 'stop'], 'starts and resume drain the cue lane');
   await act(async () => h.audio.stopMusic());
   assert.equal(h.audio.isMusicPlaying, false);
 });

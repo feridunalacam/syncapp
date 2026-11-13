@@ -38,7 +38,7 @@ export default function AppleMusicWorkoutControl({ style }) {
                 Choose songs and playlists
               </Text>
               <Text style={[styles.detail, { color: theme.textSecondary }]}>
-                Plays independently of the timer. Tap Play in the player to start.
+                Tap Play in the player to start. Your selected alerts briefly pause music.
               </Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />

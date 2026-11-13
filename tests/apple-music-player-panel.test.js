@@ -232,8 +232,8 @@ async function mount(t, { connection = {}, player: playerOverrides = {}, mini = 
 test('guest companion searches both catalog kinds and only explicit Play starts a selected full track', async (t) => {
   const ui = await mount(t);
   assert.match(ui.text(), /Available without a Sync account/);
-  assert.match(ui.text(), /timer does not change or pause it/);
-  assert.match(ui.text(), /timer round music and sound cues are not used/);
+  assert.match(ui.text(), /independently of round assignments/);
+  assert.match(ui.text(), /chosen alerts pause music/);
   await ui.fill('First');
   assert.equal(ui.requests.length, 0);
   assert.match(ui.text(), /Searching Apple Music/);

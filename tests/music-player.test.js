@@ -43,8 +43,19 @@ function harness(load, playbackStatuses = [], overrides = {}) {
     ...overrides,
   };
   script.runInNewContext(context);
-  return { player: new context.Player(), events };
+  return { player: new context.Player(), events, sound, context };
 }
+
+const deferred = () => {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => {
+    resolve = yes;
+    reject = no;
+  });
+  return { promise, resolve, reject };
+};
+const flush = () => new Promise(setImmediate);
 
 test('local preparation music loads at half volume before it can play', async () => {
   const { player, events } = harness();
@@ -199,10 +210,12 @@ test('a late native resume is paused again when the user has already paused', as
     });
   const pending = player.play();
   await new Promise(setImmediate);
-  await player.pause();
+  const paused = player.pause();
+  await flush();
   const pauses = events.filter((event) => event === 'pause').length;
   finish({ isLoaded: true, isPlaying: true, isBuffering: false });
   assert.equal((await pending).cancelled, true);
+  assert.equal((await paused).success, true);
   assert.equal(events.filter((event) => event === 'pause').length, pauses + 1);
   assert.equal(player.isCurrentlyPlaying(), false);
 });
@@ -226,4 +239,181 @@ test('an obsolete resume cannot pause a newer successful resume on the same soun
   assert.equal((await old).cancelled, true);
   assert.equal(events.filter((event) => event === 'pause').length, pauses);
   assert.equal(player.isCurrentlyPlaying(), true);
+});
+
+test('failed unloads retain native ownership and metadata until explicit acknowledged recovery', async () => {
+  const { player, sound, events } = harness();
+  await player.loadAndPlay('file:///old.mp3', { name: 'Old track' });
+  const callback = () => {};
+  player.setOnStatusUpdate(callback);
+  let fails = true;
+  let stops = 0;
+  sound.unloadAsync = async () => {
+    stops++;
+    if (fails) throw new Error('Native unload failed');
+    return { isLoaded: false };
+  };
+  assert.equal((await player.cleanup()).success, false);
+  assert.equal(player.sound, sound);
+  assert.equal(player.getCurrentTrack().name, 'Old track');
+  assert.equal(player.onStatusUpdate, callback);
+  assert.equal(player.isLoaded(), true);
+  assert.equal(
+    (await player.unload()).success,
+    false,
+    'a second stop cannot report an empty player',
+  );
+  assert.equal((await player.loadAndPlay('file:///new.mp3')).success, false);
+  assert.equal(
+    events.filter((event) => event?.uri).length,
+    1,
+    'no replacement is loaded over uncertain audio',
+  );
+  assert.equal(stops, 3);
+  fails = false;
+  assert.equal((await player.cleanup()).success, true);
+  assert.equal(player.sound, null);
+  assert.equal(player.getCurrentTrack(), null);
+  assert.equal(player.onStatusUpdate, null);
+  assert.equal((await player.loadAndPlay('file:///new.mp3')).success, true);
+});
+
+test('a replacement waits for a delayed native unload acknowledgement without duplicate stops', async () => {
+  const { player, sound, events } = harness();
+  await player.loadAndPlay('file:///old.mp3');
+  const stopped = deferred();
+  let stops = 0;
+  sound.unloadAsync = () => {
+    stops++;
+    return stopped.promise;
+  };
+  const clearing = player.unload();
+  await flush();
+  let started = false;
+  const replacement = player.loadAndPlay('file:///new.mp3').then((result) => {
+    started = true;
+    return result;
+  });
+  await flush();
+  assert.equal(started, false);
+  assert.equal(player.sound, sound);
+  assert.equal(events.filter((event) => event?.uri).length, 1);
+  stopped.resolve({ isLoaded: false });
+  assert.equal((await clearing).success, true);
+  assert.equal((await replacement).success, true);
+  assert.equal(stops, 1);
+  assert.equal(player.getCurrentTrack().uri, 'file:///new.mp3');
+});
+
+test('a cancelled slow load retains a sound whose cleanup failed and refuses new audio until recovery', async () => {
+  const loaded = deferred();
+  const { player, sound, events } = harness(() => loaded.promise);
+  let cancelled = false;
+  let fails = true;
+  sound.unloadAsync = async () => {
+    if (fails) return { success: false, error: 'Cancelled sound did not stop' };
+    return { isLoaded: false };
+  };
+  const pending = player.loadAndPlay('file:///cancelled.mp3', { isCancelled: () => cancelled });
+  await flush();
+  cancelled = true;
+  loaded.resolve();
+  assert.equal((await pending).success, false);
+  assert.equal(
+    player.isLoaded(),
+    true,
+    'the unacknowledged handle remains owned even before installation',
+  );
+  assert.equal((await player.unload()).success, false);
+  assert.equal((await player.loadAndPlay('file:///replacement.mp3')).success, false);
+  assert.equal(events.filter((event) => event?.uri).length, 1);
+  assert.equal(events.includes('play'), false);
+  fails = false;
+  assert.equal((await player.unload()).success, true);
+  assert.equal(player.isLoaded(), false);
+});
+
+test('pause drains a cancelled native load and its delayed cleanup before acknowledging silence', async () => {
+  const loaded = deferred();
+  const retired = deferred();
+  const { player, sound, events } = harness(() => loaded.promise);
+  sound.unloadAsync = () => retired.promise;
+  const loading = player.loadAndPlay('file:///slow.mp3');
+  await flush();
+  let quiet = false;
+  const pausing = player.pause().then((result) => {
+    quiet = true;
+    return result;
+  });
+  await flush();
+  assert.equal(quiet, false);
+  loaded.resolve();
+  await flush();
+  assert.equal(quiet, false, 'loading silently is not an acknowledged retirement');
+  assert.equal(events.includes('play'), false);
+  retired.resolve({ isLoaded: false });
+  assert.equal((await loading).cancelled, true);
+  assert.equal((await pausing).success, true);
+  assert.equal(player.isLoaded(), false);
+});
+
+test('failed or falsely acknowledged native pause retains playback ownership and remains retryable', async () => {
+  const { player, sound } = harness();
+  await player.loadAndPlay('file:///playing.mp3');
+  sound.pauseAsync = async () => {
+    throw new Error('Native pause failed');
+  };
+  assert.equal((await player.pause()).success, false);
+  assert.equal(player.isCurrentlyPlaying(), true);
+  assert.equal(player.sound, sound);
+  sound.pauseAsync = async () => ({ isLoaded: true, isPlaying: true });
+  assert.equal((await player.pause()).success, false);
+  sound.pauseAsync = async () => ({ isLoaded: true, isPlaying: false });
+  assert.equal((await player.pause()).success, true);
+  assert.equal(player.isCurrentlyPlaying(), false);
+});
+
+test('stop cannot settle before a late native resume and cannot forget its failed pause', async () => {
+  const { player, sound } = harness();
+  await player.loadAndPlay('file:///playing.mp3');
+  await player.pause();
+  const resumed = deferred();
+  sound.playAsync = () => resumed.promise;
+  const resuming = player.play();
+  await flush();
+  let quiet = false;
+  const pausing = player.pause().then((result) => {
+    quiet = true;
+    return result;
+  });
+  await flush();
+  assert.equal(quiet, false);
+  sound.pauseAsync = async () => {
+    throw new Error('Late native pause failed');
+  };
+  resumed.resolve({ isLoaded: true, isPlaying: true });
+  assert.equal((await resuming).success, false);
+  assert.equal((await pausing).success, false);
+  assert.equal(player.sound, sound);
+  assert.equal((await player.pause()).success, false);
+});
+
+test('the device service propagates cleanup failure instead of dropping the player acknowledgement', async () => {
+  const { sound, context } = harness();
+  context.ExpoAVPlayer = context.Player;
+  const serviceSource = readFileSync(
+    new URL('../src/services/deviceMusicService.js', import.meta.url),
+    'utf8',
+  )
+    .replace(/^import .*;\n/gm, '')
+    .replace('export default deviceMusicService;', 'globalThis.service = deviceMusicService;');
+  new Script(serviceSource).runInNewContext(context);
+  await context.service.playTrack('device', 'file:///device.mp3');
+  sound.unloadAsync = async () => {
+    throw new Error('Device sound is still owned');
+  };
+  assert.equal((await context.service.cleanup()).success, false);
+  assert.equal((await context.service.releaseCurrent()).success, false);
+  sound.unloadAsync = async () => ({ isLoaded: false });
+  assert.equal((await context.service.cleanup()).success, true);
 });

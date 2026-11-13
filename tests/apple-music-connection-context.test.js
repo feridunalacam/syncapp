@@ -6,6 +6,7 @@ import { createRequire } from 'node:module';
 import React, { act } from 'react';
 import { create } from 'react-test-renderer';
 import { createAppleMusicCompanionController } from '../src/services/appleMusic/companion.js';
+import { createCueHandoff } from '../src/services/alerts/cueHandoff.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -42,6 +43,7 @@ const deferred = () => {
 const flush = () => new Promise((done) => setImmediate(done));
 function world({ connected = true } = {}) {
   const events = [];
+  const cueHandoff = createCueHandoff({ stopOutput: async () => {} });
   const counts = { ads: 0, cues: 0, auth: 0, play: 0, stop: 0, save: 0, disconnect: 0, library: 0 };
   const controls = {
     stopFails: false,
@@ -143,6 +145,7 @@ function world({ connected = true } = {}) {
     appleMusicCompanionService: service,
     createAppleMusicCompanionController,
     acquireMusicCueSilence: () => lease('cues'),
+    registerCueMusicSource: (source) => cueHandoff.register(source),
   };
   new Script(compiled).runInNewContext(scope);
   return {
@@ -152,6 +155,7 @@ function world({ connected = true } = {}) {
     controls,
     marker,
     service,
+    cueHandoff,
     setRender: (callback) => {
       render = callback;
     },

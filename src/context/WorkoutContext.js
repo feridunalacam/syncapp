@@ -17,7 +17,13 @@ import { normalizeRoutine, buildTimeline } from '../domain/routines';
 import { sessionToLog } from '../domain/workout';
 import { resolveRoundAudio } from '../domain/audio';
 import useWorkoutCues from '../hooks/useWorkoutCues';
-import { stopWorkoutCues, stopCuePreview, prepareWorkoutCues } from '../services/alerts/player';
+import {
+  stopWorkoutCues,
+  stopCuePreview,
+  prepareWorkoutCues,
+  playWorkoutCue,
+  registerCueMusicSource,
+} from '../services/alerts/player';
 import { useAppleMusicConnection } from './AppleMusicConnectionContext';
 
 const WorkoutContext = createContext(null);
@@ -57,6 +63,8 @@ export const WorkoutProvider = ({ children }) => {
     countdownSoundPlayer,
     stopLocalCues: () => Promise.all([stopWorkoutCues(), stopCuePreview()]),
     isExternalMusicActive: companionActive,
+    registerCueSource: registerCueMusicSource,
+    playCue: playWorkoutCue,
     onPlaybackInterrupted: (reason) => {
       if (companionActive()) return;
       if (timerRef.current?.session?.status !== 'running') return;
@@ -114,6 +122,10 @@ export const WorkoutProvider = ({ children }) => {
         return audioRef.current.resumeMusic();
       }),
     onStateChange: (next, previous) => {
+      if (!next || next.status === 'paused' || next.status === 'aborted') {
+        audioRef.current.cancelCueResume?.();
+        companion.current?.cancelCueResume?.();
+      }
       if (next?.status === 'paused') {
         stopWorkoutCues().catch(() => {});
         if (!companionActive()) audioRef.current.pauseMusic();
@@ -126,10 +138,7 @@ export const WorkoutProvider = ({ children }) => {
     },
   });
   timerRef.current = timer;
-  const { alertError } = useWorkoutCues(
-    timer.session,
-    audio.localCuesAllowed && !companionActive(),
-  );
+  const { alertError } = useWorkoutCues(timer.session, true);
   const running = timer.session?.status === 'running';
   const paused = timer.session?.status === 'paused';
   const active = running || paused;
@@ -159,15 +168,7 @@ export const WorkoutProvider = ({ children }) => {
   const alertKey = useRef(null);
   useEffect(() => {
     const s = timer.session;
-    if (
-      !running ||
-      companionActive() ||
-      !s ||
-      s.audioPending ||
-      s.routine.audioAlerts != null ||
-      !audio.localCuesAllowed
-    )
-      return;
+    if (!running || !s || s.audioPending || s.routine.audioAlerts != null) return;
     const phase = s.timeline[s.index];
     const key =
       phase.phase === 'beforeStart'
@@ -188,10 +189,12 @@ export const WorkoutProvider = ({ children }) => {
       alertKey.current !== unique
     ) {
       alertKey.current = unique;
-      audio.playCountdownSound(key);
+      Promise.resolve(audio.playCountdownSound(key)).catch(() => {});
     }
   }, [timer.session, running, audio.playCountdownSound, audio.localCuesAllowed]);
   const stop = useCallback(() => {
+    audioRef.current.cancelCueResume?.();
+    companion.current?.cancelCueResume?.();
     stopWorkoutCues().catch(() => {});
     const next = timer.stop();
     if (next?.status === 'aborted') finish(next);

@@ -85,3 +85,89 @@ test('mixed-source cue playback resumes only when local playback is allowed agai
     false,
   );
 });
+
+test('Advanced ten-second countdown and selected transition sound remain per routine', async (t) => {
+  const start = Date.now();
+  const session = createSession(
+    {
+      id: 'custom-alerts',
+      rounds: 2,
+      workSec: 12,
+      restSec: 4,
+      audioAlerts: {
+        enabled: true,
+        volume: 35,
+        countdown: { mode: 'beep', seconds: 10, preparation: false, work: true, rest: false },
+        signals: {
+          start: null,
+          rest: { uri: 'file:///chosen-rest.wav', duration: 1.4 },
+          work: null,
+          finish: null,
+        },
+      },
+    },
+    start,
+  );
+  const h = await mount(t, session, true);
+  for (let elapsed = 2000; elapsed <= 12000; elapsed += 1000)
+    await h.update(advanceSession(session, start + elapsed), true);
+  assert.deepEqual(
+    h.events.filter((event) => event.kind === 'count').map((event) => event.number),
+    [10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+  );
+  const transition = h.events.filter((event) => event.kind === 'signal');
+  assert.equal(transition.length, 1);
+  assert.equal(transition[0].sound.uri, 'file:///chosen-rest.wav');
+  assert.equal(transition[0].volume, 35);
+  await h.update(advanceSession(session, start + 13000), true);
+  assert.equal(h.events.length, 11, 'disabled Rest countdown emits nothing');
+});
+
+test('None signals and disabled countdown produce no cue request', async (t) => {
+  const start = Date.now();
+  const session = createSession(
+    {
+      id: 'no-alerts',
+      rounds: 1,
+      workSec: 5,
+      audioAlerts: {
+        enabled: true,
+        countdown: { mode: 'off' },
+        signals: { start: null, rest: null, work: null, finish: null },
+      },
+    },
+    start,
+  );
+  const h = await mount(t, session, true);
+  for (const elapsed of [1000, 2000, 3000, 4000, 5000])
+    await h.update(advanceSession(session, start + elapsed), true);
+  assert.equal(h.events.length, 0);
+});
+
+test('a selected natural finish cue permits independent music to continue afterward', async (t) => {
+  const start = Date.now();
+  const session = createSession(
+    {
+      id: 'finish-alert',
+      rounds: 1,
+      workSec: 3,
+      audioAlerts: {
+        enabled: true,
+        countdown: { mode: 'off' },
+        signals: {
+          start: null,
+          rest: null,
+          work: null,
+          finish: { uri: 'file:///selected-finish.wav', duration: 0.8 },
+        },
+      },
+    },
+    start,
+  );
+  const h = await mount(t, session, true);
+  await h.update(advanceSession(session, start + 3000), true);
+  assert.equal(h.events.length, 1);
+  assert.equal(h.events[0].signalKey, 'finish');
+  assert.equal(h.events[0].sound.uri, 'file:///selected-finish.wav');
+  assert.equal(h.events[0].resumeMusic, true);
+});

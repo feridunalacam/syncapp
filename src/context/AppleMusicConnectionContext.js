@@ -4,7 +4,7 @@ import { usePlatformContext } from './PlatformContext';
 import { useAds } from './AdsContext';
 import appleMusicService, { appleMusicCompanionService } from '../services/appleMusic';
 import { createAppleMusicCompanionController } from '../services/appleMusic/companion';
-import { acquireMusicCueSilence } from '../services/alerts/player';
+import { acquireMusicCueSilence, registerCueMusicSource } from '../services/alerts/player';
 
 const noop = () => {};
 const Context = createContext({
@@ -70,6 +70,15 @@ export function AppleMusicConnectionProvider({ children }) {
       controller.current.dispose().catch(() => {});
     };
   }, []);
+  useEffect(
+    () =>
+      companionAvailable
+        ? registerCueMusicSource({
+            suspendForCue: (options) => controller.current.suspendForCue(options),
+          })
+        : undefined,
+    [companionAvailable],
+  );
   const connect = useCallback(async () => {
     if (!latest.current.ready || pending.current || !(companionAvailable || timedAvailable))
       return { success: false, error: 'Apple Music is not ready yet.' };
@@ -167,6 +176,7 @@ export function AppleMusicConnectionProvider({ children }) {
     setShuffle: (value) => controller.current.setShuffle(value),
     setRepeat: (value) => controller.current.setRepeat(value),
     clear: () => controller.current.clear(),
+    cancelCueResume: () => controller.current.cancelCueResume(),
     isActive: () => controller.current.isActive(),
     registerBeforePlay(callback) {
       beforePlay.current = callback;

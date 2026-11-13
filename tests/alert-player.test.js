@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { Script } from 'node:vm';
 import { createCueController } from '../src/services/alerts/controller.js';
+import { createCueHandoff } from '../src/services/alerts/cueHandoff.js';
 import { buildCuePreview, resolveAlertSound } from '../src/domain/alerts.js';
 
 const settle = () => new Promise(setImmediate);
@@ -28,7 +29,7 @@ const assetSource = readFileSync(
   'utf8',
 ).replace(/^export /gm, '');
 const adapterScript = new Script(
-  `${assetSource}\n${adapterSource}\nglobalThis.api = { prepareWorkoutCues, playWorkoutCue, stopWorkoutCues, previewWorkoutCue, stopCuePreview, acquireMusicCueSilence };`,
+  `${assetSource}\n${adapterSource}\nglobalThis.api = { prepareWorkoutCues, playWorkoutCue, stopWorkoutCues, previewWorkoutCue, stopCuePreview, acquireMusicCueSilence, registerCueMusicSource };`,
   { filename: 'native-alert-player.js' },
 );
 
@@ -88,7 +89,7 @@ function harness(options = {}) {
           },
           async unloadAsync() {
             this.unloads++;
-            await options.unload?.(source);
+            return await options.unload?.(source);
           },
         };
         sounds.push(sound);
@@ -103,6 +104,7 @@ function harness(options = {}) {
     buildCuePreview,
     resolveAlertSound,
     createCueController: (parameters) => createCueController({ ...parameters, ...time }),
+    createCueHandoff: (parameters) => createCueHandoff({ ...parameters, ...time }),
     setTimeout: time.schedule,
     clearTimeout: time.cancel,
     require: (asset) => {
@@ -172,6 +174,7 @@ test('stopping while a saved spoken fallback loads prevents late playback', asyn
   await h.api.stopWorkoutCues();
   load.resolve();
   assert.equal((await playing).cancelled, true);
+  await settle(); // Cancellation is prompt; the late silent load still retires separately.
   assert.equal(h.sounds[0].plays, 0);
   assert.equal(h.sounds[0].unloads, 1);
   assert.equal(h.time.jobs.size, 0);
@@ -191,6 +194,7 @@ test('a superseded custom file load cannot disturb the newer original fallback',
   assert.equal(current.plays, 1);
   loading.resolve();
   assert.equal((await old).cancelled, true);
+  await settle();
   assert.equal(h.sounds[1].plays, 0);
   assert.equal(h.sounds[1].unloads, 1);
   assert.equal(current.unloads, 0);
@@ -359,4 +363,104 @@ test('stopping preview still cannot stop an active workout cue', async () => {
   assert.equal(h.sounds[0].unloads, 0);
   h.sounds[0].callback({ didJustFinish: true });
   assert.equal((await playing).completed, true);
+});
+
+test('a configured custom cue waits for music pause and native cue unload before music resumes', async () => {
+  const paused = deferred();
+  const unloaded = deferred();
+  const events = [];
+  const h = harness({
+    play: () => events.push('cue-play'),
+    unload: async () => {
+      await unloaded.promise;
+      events.push('cue-unloaded');
+    },
+  });
+  const unregister = h.api.registerCueMusicSource({
+    suspendForCue: async () => {
+      events.push('pause-request');
+      await paused.promise;
+      events.push('music-paused');
+      return { resume: async () => events.push('music-resumed') };
+    },
+  });
+  const release = h.api.acquireMusicCueSilence();
+  const playing = h.api.previewWorkoutCue('start', {
+    enabled: true,
+    volume: 35,
+    countdown: { mode: 'off' },
+    signals: { start: { uri: 'file:///selected-custom.wav', duration: 2.5 } },
+  });
+  await settle();
+  assert.equal(h.sounds.length, 0);
+  paused.resolve();
+  await settle();
+  await h.time.advance(0);
+  assert.equal(h.sounds[0].source.uri, 'file:///selected-custom.wav');
+  assert.equal(h.sounds[0].configuration.volume, 0.35);
+  assert.equal(h.sounds[0].plays, 1);
+  h.sounds[0].callback({ didJustFinish: true });
+  await settle();
+  assert.equal(events.includes('music-resumed'), false);
+  unloaded.resolve();
+  assert.equal((await playing).completed, true);
+  await settle();
+  assert.deepEqual(events, [
+    'pause-request',
+    'music-paused',
+    'cue-play',
+    'cue-unloaded',
+    'music-resumed',
+  ]);
+  release();
+  unregister();
+});
+
+test('disabled, None and zero-volume alerts never pause music', async () => {
+  const h = harness();
+  let pauses = 0;
+  const unregister = h.api.registerCueMusicSource({
+    suspendForCue: async () => {
+      pauses++;
+      return { resume: async () => {} };
+    },
+  });
+  await h.api.previewWorkoutCue('start', { enabled: false });
+  await h.api.previewWorkoutCue('start', {
+    enabled: true,
+    countdown: { mode: 'off' },
+    signals: { start: null },
+  });
+  await h.api.previewWorkoutCue('rest', { enabled: true, volume: 0 });
+  await h.api.playWorkoutCue(cue('voices://cue_gong', { volume: 0 }));
+  await h.api.playWorkoutCue({ sound: null });
+  assert.equal(pauses, 0);
+  assert.equal(h.sounds.length, 0);
+  assert.equal(h.audioModes, 0);
+  unregister();
+});
+
+test('a still-loaded native stop result cannot release music until a checked retry succeeds', async () => {
+  let status = { isLoaded: true };
+  let resumed = 0;
+  const h = harness({ unload: () => status });
+  const unregister = h.api.registerCueMusicSource({
+    suspendForCue: async () => ({
+      resume: async () => {
+        resumed++;
+      },
+    }),
+  });
+  const playing = h.api.playWorkoutCue(cue());
+  await settle();
+  const rejected = assert.rejects(playing, /did not stop/);
+  h.sounds[0].callback({ didJustFinish: true });
+  await rejected;
+  assert.equal(resumed, 0);
+  status = { isLoaded: false };
+  await h.api.stopWorkoutCues();
+  await settle();
+  assert.equal(resumed, 0, 'a failed stop cancels automatic resume even after recovery');
+  assert.ok(h.sounds[0].unloads >= 2);
+  unregister();
 });

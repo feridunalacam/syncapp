@@ -44,7 +44,11 @@ export default function useWorkoutCues(session, localCuesAllowed = true) {
       // Never begin a sound loaded after its useful timing window.
       const remainingInSecond = session.remainingMs % 1000 || 1000;
       const expiresAt = session.updatedAt + (event.kind === 'count' ? remainingInSecond : 1000);
-      playWorkoutCue({ ...event, expiresAt })
+      playWorkoutCue({
+        ...event,
+        expiresAt,
+        resumeMusic: session.status === 'running' || session.status === 'completed',
+      })
         .then(() => {
           if (version === revision.current) setAlertError(null);
         })

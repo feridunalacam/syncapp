@@ -383,8 +383,8 @@ export default function AppleMusicPlayerPanel() {
         ListHeaderComponent={
           <View style={styles.content}>
             <Text style={[styles.description, { color: theme.textSecondary }]}>
-              Music plays independently. The timer does not change or pause it. While this Apple
-              Music queue is active, timer round music and sound cues are not used.
+              Music plays independently of round assignments. Your chosen alerts pause music, play
+              on their own, then let music continue.
             </Text>
             <Text style={[styles.detail, { color: theme.textSecondary }]}>
               Apple Music subscription and Music access required for catalog playback. Available

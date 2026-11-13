@@ -273,8 +273,8 @@ export const MusicSearchModal = ({
           {isApplePlayer ? (
             <View style={{ paddingTop: 12, paddingBottom: 16, gap: 14 }}>
               <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 20 }}>
-                Choose songs or a playlist in the Apple Music player, then press Play. Music plays
-                independently of your timer.
+                Choose songs or a playlist in the Apple Music player, then press Play. Your selected
+                alerts briefly pause music. This player does not assign songs to rounds.
               </Text>
               <PrimaryAction
                 label="Open Apple Music player"

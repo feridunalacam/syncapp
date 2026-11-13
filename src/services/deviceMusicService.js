@@ -77,7 +77,7 @@ class DeviceMusicPlayer {
 
   // Cleanup
   async cleanup() {
-    await this.player.cleanup();
+    return await this.player.cleanup();
   }
 }
 
