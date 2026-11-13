@@ -37,7 +37,7 @@ test(
       await db.exec(
         await readFile(
           new URL(
-            '../supabase/migrations/20261112215813_private_apple_revocation_tokens.sql',
+            '../supabase/migrations/20261113091118_private_apple_revocation_tokens.sql',
             import.meta.url,
           ),
           'utf8',
