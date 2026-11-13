@@ -65,7 +65,8 @@
       "extends": "base",
       "ios": {
         "env": {
-          "EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED": "true"
+          "EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED": "true",
+          "EXPO_PUBLIC_ADS_ENABLED": "true"
         }
       },
       "env": {
