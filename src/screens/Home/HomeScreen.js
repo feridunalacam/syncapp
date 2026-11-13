@@ -14,6 +14,7 @@ import { useRoutineContext } from '../../context/RoutineContext';
 import { useWorkout } from '../../context/WorkoutContext';
 import { useAppleMusicConnection } from '../../context/AppleMusicConnectionContext';
 import AppleMusicWorkoutControl from '../../components/common/AppleMusicWorkoutControl';
+import RoutineSoundtrackControl from '../../components/common/RoutineSoundtrackControl';
 import { getRoutineDuration, buildTimeline } from '../../domain/routines';
 import { formatTime } from '../../utils/timeFormatters';
 import { navigateToCreateRoutine } from '../../navigation/navigationHelpers';
@@ -275,6 +276,12 @@ export default function HomeScreen({ navigation, route }) {
             <Text style={{ color: theme.textSecondary, fontSize: 12 }}>End session</Text>
           </Pressable>
         )}
+        <RoutineSoundtrackControl
+          key={selectedRoutine?.id || 'no-routine'}
+          soundtrack={selectedRoutine?.soundtrack}
+          routineName={selectedRoutine?.name}
+          style={styles.appleMusic}
+        />
         <AppleMusicWorkoutControl style={styles.appleMusic} />
         {appleMusic.player?.isActive?.() && (
           <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>

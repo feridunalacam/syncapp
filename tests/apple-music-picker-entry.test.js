@@ -21,8 +21,13 @@ const compiled = transformSync(`${source}\nglobalThis.Picker = MusicSearchModal;
   plugins: ['@babel/plugin-transform-react-jsx'],
 }).code;
 
-async function mount(t, { sound = false, ready = true, companion = true } = {}) {
+async function mount(
+  t,
+  { sound = false, ready = true, companion = true, routineSelection = false } = {},
+) {
   const events = [];
+  let routineId = 'routine-a';
+  let selectorRequest;
   let focused = true;
   let apple = {
     companionAvailable: companion,
@@ -31,6 +36,11 @@ async function mount(t, { sound = false, ready = true, companion = true } = {}) 
     connected: false,
     ready,
     player: { open: () => events.push('open-player') },
+    openSoundtrackPicker(options) {
+      selectorRequest = options;
+      events.push('open-routine-selector');
+      return () => events.push('cancel-routine-selector');
+    },
   };
   const music = {
     reset: () => events.push('reset-picker'),
@@ -94,6 +104,20 @@ async function mount(t, { sound = false, ready = true, companion = true } = {}) 
       selectedRoundForSong: 1,
       songType: 'work',
       isForCountdownSound: sound,
+      ...(routineSelection
+        ? {
+            routineId,
+            routineName: 'Saved routine',
+            routineSoundtrack: {
+              platform: 'appleMusic',
+              kind: 'playlist',
+              id: 'p.saved',
+              name: 'Saved list',
+              shuffle: true,
+            },
+            onSelectRoutineSoundtrack: () => events.push('select-routine-music'),
+          }
+        : {}),
     });
   }
   let renderer;
@@ -111,6 +135,13 @@ async function mount(t, { sound = false, ready = true, companion = true } = {}) 
     events,
     renderer,
     unmount,
+    get selectorRequest() {
+      return selectorRequest;
+    },
+    async changeRoutine() {
+      routineId = 'routine-b';
+      await act(async () => renderer.update(React.createElement(Harness)));
+    },
     get apple() {
       return apple;
     },
@@ -130,7 +161,9 @@ async function mount(t, { sound = false, ready = true, companion = true } = {}) 
     openAction() {
       return renderer.root
         .findAllByType('PrimaryAction')
-        .find((node) => node.props.label === 'Open Apple Music player');
+        .find((node) =>
+          ['Open Apple Music player', 'Choose routine music'].includes(node.props.label),
+        );
     },
   };
 }
@@ -204,4 +237,54 @@ test('an unready player cannot dismiss the picker or start a delayed handoff', a
   assert.equal(h.openAction().props.disabled, true);
   await act(async () => h.openAction().props.onPress());
   assert.equal(h.events.includes('close-picker') || h.events.includes('open-player'), false);
+});
+
+test('round Apple tab hands off to the routine library selector after dismissal without attaching round audio', async (t) => {
+  const h = await mount(t, { routineSelection: true });
+  await h.selectApple();
+  assert.equal(h.openAction().props.label, 'Choose routine music');
+  await act(async () => h.openAction().props.onPress());
+  assert.equal(h.events.includes('open-routine-selector'), false);
+  const dismiss = h.renderer.root.findByType('NativeModal').props.onDismiss;
+  await act(async () => {
+    dismiss();
+    dismiss();
+  });
+  assert.equal(h.events.filter((event) => event === 'open-routine-selector').length, 1);
+  assert.equal(h.selectorRequest.routineName, 'Saved routine');
+  assert.equal(h.selectorRequest.selection.shuffle, true);
+  await act(async () =>
+    h.selectorRequest.onSelect({ platform: 'appleMusic', kind: 'playlist', id: 'p.new' }),
+  );
+  assert.equal(h.events.includes('select-routine-music'), true);
+  assert.equal(
+    h.events.includes('attach-song') ||
+      h.events.includes('attach-playlist') ||
+      h.events.includes('open-player'),
+    false,
+  );
+});
+
+test('routine selector handoff retires on routine change, blur and unmount', async (t) => {
+  for (const boundary of ['routine', 'blur', 'unmount']) {
+    const h = await mount(t, { routineSelection: true });
+    await h.selectApple();
+    await act(async () => h.openAction().props.onPress());
+    await act(async () => h.renderer.root.findByType('NativeModal').props.onDismiss());
+    assert.equal(h.events.includes('open-routine-selector'), true);
+    if (boundary === 'routine') await h.changeRoutine();
+    if (boundary === 'blur') await h.setFocused(false);
+    if (boundary === 'unmount') await h.unmount();
+    assert.equal(h.events.filter((event) => event === 'cancel-routine-selector').length, 1);
+  }
+});
+
+test('a routine change before native dismissal cannot open a selector for the old routine', async (t) => {
+  const h = await mount(t, { routineSelection: true });
+  await h.selectApple();
+  await act(async () => h.openAction().props.onPress());
+  const dismiss = h.renderer.root.findByType('NativeModal').props.onDismiss;
+  await h.changeRoutine();
+  await act(async () => dismiss());
+  assert.equal(h.events.includes('open-routine-selector'), false);
 });

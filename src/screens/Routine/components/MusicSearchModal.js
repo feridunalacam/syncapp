@@ -44,6 +44,10 @@ export const MusicSearchModal = ({
   roundWorkPlaylists = {},
   roundRestPlaylists = {},
   isForCountdownSound = false,
+  routineName,
+  routineId,
+  routineSoundtrack,
+  onSelectRoutineSoundtrack,
 }) => {
   const { theme } = useTheme();
   const screenFocused = useIsFocused();
@@ -77,17 +81,36 @@ export const MusicSearchModal = ({
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
   const pendingApplePlayer = useRef(false);
+  const selectorCleanup = useRef(null);
   const mounted = useRef(true);
   const latestPlayer = useRef(null);
-  latestPlayer.current = { apple, isForCountdownSound, screenFocused };
+  latestPlayer.current = {
+    apple,
+    isForCountdownSound,
+    screenFocused,
+    routineName,
+    routineSoundtrack,
+    onSelectRoutineSoundtrack,
+  };
   useEffect(() => {
-    if (!screenFocused) pendingApplePlayer.current = false;
+    if (!screenFocused) {
+      pendingApplePlayer.current = false;
+      selectorCleanup.current?.();
+      selectorCleanup.current = null;
+    }
   }, [screenFocused]);
+  useEffect(() => {
+    pendingApplePlayer.current = false;
+    selectorCleanup.current?.();
+    selectorCleanup.current = null;
+  }, [routineId]);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       pendingApplePlayer.current = false;
+      selectorCleanup.current?.();
+      selectorCleanup.current = null;
     };
   }, []);
   const reset = music.reset;
@@ -98,6 +121,8 @@ export const MusicSearchModal = ({
     setDeviceLoaded(false);
     setCategory('track');
     if (visible) {
+      selectorCleanup.current?.();
+      selectorCleanup.current = null;
       pendingApplePlayer.current = false;
       setSource(isForCountdownSound ? 'voices' : defaultSource);
     }
@@ -160,8 +185,15 @@ export const MusicSearchModal = ({
       !current.isForCountdownSound &&
       current.apple.companionAvailable &&
       current.apple.ready
-    )
-      current.apple.player?.open?.();
+    ) {
+      if (typeof current.onSelectRoutineSoundtrack === 'function') {
+        selectorCleanup.current = current.apple.openSoundtrackPicker?.({
+          routineName: current.routineName,
+          selection: current.routineSoundtrack,
+          onSelect: current.onSelectRoutineSoundtrack,
+        });
+      } else current.apple.player?.open?.();
+    }
   };
   const choose = useCallback(
     (item) => {
@@ -254,7 +286,9 @@ export const MusicSearchModal = ({
               {!isForCountdownSound && (
                 <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 5 }}>
                   {isApplePlayer
-                    ? 'Songs and playlists for your workout'
+                    ? onSelectRoutineSoundtrack
+                      ? 'Routine music · all rounds'
+                      : 'Songs and playlists for your workout'
                     : `Round ${String(selectedRoundForSong || 1).padStart(2, '0')}`}
                 </Text>
               )}
@@ -273,11 +307,14 @@ export const MusicSearchModal = ({
           {isApplePlayer ? (
             <View style={{ paddingTop: 12, paddingBottom: 16, gap: 14 }}>
               <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 20 }}>
-                Choose songs or a playlist in the Apple Music player, then press Play. Your selected
-                alerts briefly pause music. This player does not assign songs to rounds.
+                {onSelectRoutineSoundtrack
+                  ? 'Save a song or playlist for this routine, then press Play to listen. Music plays continuously across rounds; your chosen alerts briefly pause it.'
+                  : 'Choose songs or a playlist in the Apple Music player, then press Play. Your selected alerts briefly pause music. This player does not assign songs to rounds.'}
               </Text>
               <PrimaryAction
-                label="Open Apple Music player"
+                label={
+                  onSelectRoutineSoundtrack ? 'Choose routine music' : 'Open Apple Music player'
+                }
                 icon="logo-apple"
                 disabled={!apple.ready}
                 onPress={openApplePlayer}

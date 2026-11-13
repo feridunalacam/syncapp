@@ -12,6 +12,7 @@ import {
   validateRoutine,
 } from '../src/domain/routines.js';
 import { normalizeAlertConfig } from '../src/domain/alerts.js';
+import { normalizeRoutineSoundtrack } from '../src/domain/routineSoundtrack.js';
 import { sessionToLog } from '../src/domain/workout.js';
 import { formatTime } from '../src/utils/timeFormatters.js';
 import { createRoutineSelectionController } from '../src/navigation/routineSelection.js';
@@ -53,7 +54,7 @@ const appleTrack = {
 async function mount(
   t,
   screen,
-  { connection = {}, player: playerOverrides = {}, platform = 'ios' } = {},
+  { connection = {}, player: playerOverrides = {}, platform = 'ios', routineValues = {} } = {},
 ) {
   const events = [];
   const scene = {};
@@ -63,7 +64,7 @@ async function mount(
       events.push({ name, args });
       return { success: true };
     };
-  const routine = normalizeRoutine({
+  let routine = normalizeRoutine({
     id: 'existing-routine',
     name: 'Existing routine',
     rounds: 1,
@@ -72,6 +73,7 @@ async function mount(
     roundsData: [
       { workSong: { name: 'Saved local music', uri: 'file:///saved.mp3', platform: 'device' } },
     ],
+    ...routineValues,
   });
   const workout = {
     selectedRoutine: routine,
@@ -110,6 +112,7 @@ async function mount(
     close: action('apple.close'),
     playTrack: action('apple.playTrack'),
     playPlaylist: action('apple.playPlaylist'),
+    playSoundtrack: action('apple.playSoundtrack'),
     pause: action('apple.pause'),
     resume: action('apple.resume'),
     clear: action('apple.clear'),
@@ -129,6 +132,11 @@ async function mount(
     search: action('apple.search'),
     getPlaylists: action('apple.library'),
     getPlaylistTracks: action('apple.tracks'),
+    openSoundtrackPicker(options) {
+      events.push({ name: 'apple.openSelector', args: [options] });
+      scene.selector = options;
+      return () => events.push({ name: 'apple.cancelSelector', args: [] });
+    },
     ...connection,
     player,
   };
@@ -187,6 +195,7 @@ async function mount(
     LinearTransition: transition,
     ReduceMotion: { System: 'system' },
     useTheme: () => ({ theme: lightTheme }),
+    useIsFocused: () => true,
     useAppleMusicConnection: () => apple,
     useWorkout: () => workout,
     useRoutineContext: () => ({
@@ -213,6 +222,7 @@ async function mount(
     normalizeRoutine,
     validateRoutine,
     normalizeAlertConfig,
+    normalizeRoutineSoundtrack,
     getRoutineDuration,
     buildTimeline,
     sessionToLog,
@@ -228,6 +238,11 @@ async function mount(
   scope.AppleMusicWorkoutControl = load(
     'components/common/AppleMusicWorkoutControl.js',
     'AppleMusicWorkoutControl',
+    scope,
+  );
+  scope.RoutineSoundtrackControl = load(
+    'components/common/RoutineSoundtrackControl.js',
+    'RoutineSoundtrackControl',
     scope,
   );
   const formHook = load('screens/Routine/hooks/useRoutineForm.js', 'useRoutineForm', scope);
@@ -265,10 +280,13 @@ async function mount(
     events,
     scene,
     workout,
-    routine,
+    get routine() {
+      return routine;
+    },
     apple,
     player,
     Control: scope.AppleMusicWorkoutControl,
+    SoundtrackControl: scope.RoutineSoundtrackControl,
     text: () => textOf(root.toJSON()),
     nodes: (type) => root.root.findAllByType(type),
     button: (label) =>
@@ -290,6 +308,11 @@ async function mount(
       Object.assign(player, playerValues);
       await act(async () => root.update(element()));
     },
+    async replaceRoutine(next) {
+      routine = normalizeRoutine(next);
+      workout.selectedRoutine = routine;
+      await act(async () => root.update(element()));
+    },
     formState: () => JSON.stringify(scene.form),
   };
 }
@@ -301,21 +324,28 @@ for (const screen of Object.keys(paths)) {
         companionAvailable: true,
         timedAvailable: false,
         connected: false,
-        ready: false,
+        ready: screen === 'CreateRoutine',
       },
     });
     assert.deepEqual(ui.events, [], 'the entry has no mount-time work');
-    assert.match(ui.text(), /Choose songs and playlists/);
-    assert.match(ui.text(), /selected alerts briefly pause music/);
-    assert.equal(ui.button('Choose Apple Music songs and playlists').props.disabled, false);
+    const entry =
+      screen === 'CreateRoutine'
+        ? 'Choose routine music'
+        : 'Choose Apple Music songs and playlists';
+    if (screen === 'CreateRoutine') assert.match(ui.text(), /Continuous music/);
+    else {
+      assert.match(ui.text(), /Choose songs and playlists/);
+      assert.match(ui.text(), /selected alerts briefly pause music/);
+    }
+    assert.equal(ui.button(entry).props.disabled, false);
     if (screen === 'CreateRoutine') await ui.fillName('Unsaved routine edit');
     const formBefore = ui.formState();
     const routineBefore = JSON.stringify(ui.routine);
     const workoutBefore = JSON.stringify(ui.workout);
-    await ui.press('Choose Apple Music songs and playlists');
+    await ui.press(entry);
     assert.deepEqual(
       ui.events.map((event) => event.name),
-      ['apple.open'],
+      [screen === 'CreateRoutine' ? 'apple.openSelector' : 'apple.open'],
     );
     assert.equal(JSON.stringify(ui.workout), workoutBefore);
     assert.equal(JSON.stringify(ui.routine), routineBefore);
@@ -355,11 +385,15 @@ for (const screen of Object.keys(paths)) {
     assert.deepEqual(ui.events, []);
     assert.equal(ui.button('Choose Apple Music songs and playlists'), undefined);
     assert.match(ui.text(), /Manual SongManual Artist/);
-    assert.equal(ui.nodes('MusicArtwork').length, 1, 'the existing mini-player is used once');
+    const currentArtwork = ui
+      .nodes('MusicArtwork')
+      .filter((node) => node.props.item?.id === appleTrack.id);
     assert.equal(
-      ui.nodes('MusicArtwork')[0].props.item.album.images[0].url,
-      appleTrack.album.images[0].url,
+      currentArtwork.length,
+      1,
+      'the actual current mini-player is used once, separate from any saved routine choice',
     );
+    assert.equal(currentArtwork[0].props.item.album.images[0].url, appleTrack.album.images[0].url);
     const workoutBefore = JSON.stringify(ui.workout);
     const formBefore = ui.formState();
     await ui.press('Resume Apple Music');
@@ -400,7 +434,9 @@ test('Android and companion-disabled screens add no entry or blank spacing and p
       });
       assert.equal(ui.button('Choose Apple Music songs and playlists'), undefined);
       assert.equal(ui.button('Open Apple Music player'), undefined);
-      const control = ui.root.root.findByType(ui.Control);
+      const control = ui.root.root.findByType(
+        screen === 'CreateRoutine' ? ui.SoundtrackControl : ui.Control,
+      );
       assert.equal(control.children.length, 0, 'disabled controls add no layout wrapper');
       assert.deepEqual(ui.events, []);
       if (screen === 'CreateRoutine') {
@@ -418,3 +454,75 @@ test('an unavailable player opener is visibly disabled and never triggers fallba
   await ui.press('Choose Apple Music songs and playlists');
   assert.deepEqual(ui.events, []);
 });
+
+const savedSoundtrack = normalizeRoutineSoundtrack({
+  platform: 'appleMusic',
+  kind: 'playlist',
+  id: 'p.routine-list',
+  name: 'Routine playlist',
+  shuffle: true,
+});
+
+test('Training editor receives a routine choice and saves it with shuffle while preserving legacy local round audio', async (t) => {
+  const ui = await mount(t, 'CreateRoutine', { connection: { connected: true } });
+  const beforeRound = JSON.parse(JSON.stringify(ui.routine.roundsData[0]));
+  await ui.press('Choose routine music');
+  assert.equal(ui.scene.selector.routineName, 'Existing routine');
+  await act(async () => ui.scene.selector.onSelect(savedSoundtrack, true));
+  assert.equal(ui.scene.form.soundtrack.id, savedSoundtrack.id);
+  assert.equal(ui.scene.form.soundtrack.shuffle, true);
+  assert.equal(
+    ui.events.some((event) => event.name.startsWith('apple.play')),
+    false,
+  );
+  assert.equal(
+    ui.events.some((event) => event.name === 'routine.update'),
+    false,
+  );
+  await ui.press('Update routine');
+  const saved = ui.events.find((event) => event.name === 'routine.update').args[0];
+  assert.equal(saved.soundtrack.id, savedSoundtrack.id);
+  assert.equal(saved.soundtrack.shuffle, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(saved.roundsData[0].workSong)), beforeRound.workSong);
+  assert.equal(saved.roundsData[0].workSec, beforeRound.workSec);
+  assert.equal(saved.roundsData[0].restSec, beforeRound.restSec);
+});
+
+test('an old selector cannot change a different ID-less template with the same routine name', async (t) => {
+  const ui = await mount(t, 'CreateRoutine', {
+    connection: { connected: true },
+    routineValues: { id: undefined, name: 'Same name' },
+  });
+  await ui.press('Choose routine music');
+  const stale = ui.scene.selector.onSelect;
+  await ui.replaceRoutine({ name: 'Same name', rounds: 3, workSec: 20, soundtrack: null });
+  assert.equal(
+    ui.events.some((event) => event.name === 'apple.cancelSelector'),
+    true,
+  );
+  await act(async () => stale(savedSoundtrack, true));
+  assert.equal(ui.scene.form.soundtrack, null);
+  assert.equal(ui.scene.form.roundsOrder.length, 3);
+});
+
+for (const screen of ['Training', 'Home']) {
+  test(`${screen} keeps saved routine choice separate from the current global queue and starts only on explicit Play`, async (t) => {
+    const ui = await mount(t, screen, {
+      connection: { connected: true },
+      routineValues: { soundtrack: savedSoundtrack },
+      player: { ownsQueue: true, playing: true, track: appleTrack },
+    });
+    assert.match(ui.text(), /Routine playlist/);
+    assert.match(ui.text(), /Manual Song/);
+    assert.deepEqual(ui.events, []);
+    const before = JSON.stringify(ui.workout);
+    await ui.press('Play routine music');
+    assert.deepEqual(
+      ui.events.map((event) => event.name),
+      ['apple.playSoundtrack'],
+    );
+    assert.equal(ui.events[0].args[0].id, savedSoundtrack.id);
+    assert.equal(ui.events[0].args[0].shuffle, true);
+    assert.equal(JSON.stringify(ui.workout), before);
+  });
+}

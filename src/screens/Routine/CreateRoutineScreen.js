@@ -15,6 +15,7 @@ import ScreenWrapper from '../../components/common/ScreenWrapper';
 import GlassSurface from '../../components/common/GlassSurface';
 import FormFieldError from '../../components/common/FormFieldError';
 import AppleMusicWorkoutControl from '../../components/common/AppleMusicWorkoutControl';
+import RoutineSoundtrackControl from '../../components/common/RoutineSoundtrackControl';
 import { MusicSearchModal } from './components/MusicSearchModal';
 import { RoundEditor } from './components/RoundEditor';
 import { RoundConfiguration } from './components/RoundConfiguration';
@@ -61,11 +62,18 @@ export default function CreateRoutineScreen({ navigation, route }) {
   const [showSongPicker, setShowSongPicker] = useState(false);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(hasAdvancedSettingsModified);
   const [showSoundPicker, setShowSoundPicker] = useState(null);
-  const editorRoutineId = useRef(templateRoutine?.id);
+  const editorIdentity = templateRoutine?.id || templateRoutine || null;
+  const editorRoutineId = useRef(editorIdentity);
+  const editorGeneration = useRef({ identity: editorIdentity, value: 0 });
+  if (editorGeneration.current.identity !== editorIdentity)
+    editorGeneration.current = {
+      identity: editorIdentity,
+      value: editorGeneration.current.value + 1,
+    };
 
   useEffect(() => {
-    if (editorRoutineId.current === templateRoutine?.id) return;
-    editorRoutineId.current = templateRoutine?.id;
+    if (editorRoutineId.current === editorIdentity) return;
+    editorRoutineId.current = editorIdentity;
     stopPreview();
     setShowSoundPicker(null);
     setShowSongPicker(false);
@@ -79,7 +87,7 @@ export default function CreateRoutineScreen({ navigation, route }) {
         templateRoutine?.endWorkSound != null ||
         templateRoutine?.endRestSound != null,
     );
-  }, [templateRoutine, stopPreview]);
+  }, [templateRoutine, editorIdentity, stopPreview]);
 
   const handleAudioAlertsChange = (config) => {
     stopPreview();
@@ -229,7 +237,15 @@ export default function CreateRoutineScreen({ navigation, route }) {
         showsVerticalScrollIndicator={false}
       >
         <View>
-          <AppleMusicWorkoutControl style={styles.appleMusic} />
+          <RoutineSoundtrackControl
+            key={editorGeneration.current.value}
+            soundtrack={form.soundtrack}
+            routineName={form.name}
+            editable
+            onChange={(item, shuffle) => form.setSoundtrack(item ? { ...item, shuffle } : null)}
+            style={styles.appleMusic}
+          />
+          {apple.player?.isActive?.() && <AppleMusicWorkoutControl style={styles.appleMusic} />}
           {/* Round Configuration */}
           <RoundConfiguration
             totalDurationSec={getRoutineDuration({
@@ -435,6 +451,10 @@ export default function CreateRoutineScreen({ navigation, route }) {
         attachPlaylistToRound={handleAttachPlaylist}
         selectedRoundForSong={selectedRoundForSong}
         songType={songType}
+        routineName={form.name}
+        routineId={editorGeneration.current.value}
+        routineSoundtrack={form.soundtrack}
+        onSelectRoutineSoundtrack={form.setSoundtrack}
         roundWorkSongs={form.roundWorkSongs}
         roundRestSongs={form.roundRestSongs}
         roundWorkPlaylists={form.roundWorkPlaylists}

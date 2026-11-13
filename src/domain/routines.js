@@ -1,3 +1,5 @@
+import { normalizeRoutineSoundtrack } from './routineSoundtrack.js';
+
 const number = (value, fallback = 0) => (Number.isFinite(Number(value)) ? Number(value) : fallback);
 const seconds = (value, fallback, minimum = 0) =>
   Math.max(minimum, Math.round(number(value ?? fallback, fallback)));
@@ -13,6 +15,7 @@ export const normalizeRoutine = (input = {}) => {
     rounds,
     workSec,
     restSec,
+    soundtrack: normalizeRoutineSoundtrack(input.soundtrack),
     countdownBeforeStartDuration: seconds(input.countdownBeforeStartDuration, 0),
     restVolume: Math.min(100, seconds(input.restVolume, 100)),
     preparationVolume: Math.min(100, seconds(input.preparationVolume, 50)),

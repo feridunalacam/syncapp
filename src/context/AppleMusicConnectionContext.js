@@ -5,6 +5,7 @@ import { useAds } from './AdsContext';
 import appleMusicService, { appleMusicCompanionService } from '../services/appleMusic';
 import { createAppleMusicCompanionController } from '../services/appleMusic/companion';
 import { acquireMusicCueSilence, registerCueMusicSource } from '../services/alerts/player';
+import { normalizeRoutineSoundtrack, soundtrackPlaybackItem } from '../domain/routineSoundtrack';
 
 const noop = () => {};
 const Context = createContext({
@@ -28,6 +29,9 @@ export function AppleMusicConnectionProvider({ children }) {
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState(null);
   const [playerState, setPlayerState] = useState(null);
+  const [soundtrackPicker, setSoundtrackPicker] = useState(null);
+  const selector = useRef(null);
+  const selectorSequence = useRef(0);
   const pending = useRef(false);
   const catalogRevision = useRef(0);
   const alive = useRef(true);
@@ -68,6 +72,7 @@ export function AppleMusicConnectionProvider({ children }) {
       alive.current = false;
       listener.remove();
       beforePlay.current = null;
+      selector.current = null;
       controller.current.dispose().catch(() => {});
     };
   }, []);
@@ -80,6 +85,61 @@ export function AppleMusicConnectionProvider({ children }) {
         : undefined,
     [companionAvailable],
   );
+  const cancelSoundtrackPicker = useCallback((id) => {
+    if (id != null && selector.current?.id !== id) return;
+    selector.current = null;
+    if (alive.current) setSoundtrackPicker(null);
+    controller.current.setVisible(false);
+  }, []);
+  const openSoundtrackPicker = useCallback(
+    ({ routineName, selection, onSelect } = {}) => {
+      if (
+        !alive.current ||
+        !companionAvailable ||
+        !latest.current.ready ||
+        typeof onSelect !== 'function'
+      )
+        return noop;
+      const id = ++selectorSequence.current;
+      selector.current = { id, onSelect };
+      setSoundtrackPicker({
+        id,
+        routineName: typeof routineName === 'string' ? routineName.trim().slice(0, 60) : '',
+        selection: normalizeRoutineSoundtrack(selection),
+        initialTab: 'library',
+      });
+      controller.current.setVisible(true);
+      return () => cancelSoundtrackPicker(id);
+    },
+    [companionAvailable, cancelSoundtrackPicker],
+  );
+  const selectSoundtrackItem = useCallback((id, item, shuffle) => {
+    const request = selector.current;
+    if (
+      !alive.current ||
+      !request ||
+      request.id !== id ||
+      !latest.current.connected ||
+      pending.current
+    )
+      return { success: false, error: 'This routine music selection is no longer active.' };
+    const selection = normalizeRoutineSoundtrack({
+      ...item,
+      kind: item?.kind || item?.type,
+      shuffle,
+    });
+    if (!selection) return { success: false, error: 'Choose an Apple Music song or playlist.' };
+    // Retire before calling the editor: repeated/stale presses cannot select twice.
+    selector.current = null;
+    setSoundtrackPicker(null);
+    controller.current.setVisible(false);
+    try {
+      request.onSelect(selection, selection.shuffle);
+      return { success: true };
+    } catch {
+      return { success: false, error: 'The routine music could not be selected. Try again.' };
+    }
+  }, []);
   const connect = useCallback(async () => {
     if (!latest.current.ready || pending.current || !(companionAvailable || timedAvailable))
       return { success: false, error: 'Apple Music is not ready yet.' };
@@ -110,6 +170,7 @@ export function AppleMusicConnectionProvider({ children }) {
       return { success: false, error: 'Please wait for the current connection change.' };
     pending.current = true;
     catalogRevision.current++;
+    if (selector.current) cancelSoundtrackPicker(selector.current.id);
     setConnecting(true);
     setError(null);
     try {
@@ -129,7 +190,7 @@ export function AppleMusicConnectionProvider({ children }) {
       pending.current = false;
       if (alive.current) setConnecting(false);
     }
-  }, [companionAvailable, timedAvailable]);
+  }, [companionAvailable, timedAvailable, cancelSoundtrackPicker]);
   const catalog = useCallback(
     async (operation, { timeoutMs } = {}) => {
       if (!companionAvailable || !latest.current.ready || !latest.current.connected)
@@ -192,10 +253,33 @@ export function AppleMusicConnectionProvider({ children }) {
   const state = playerState || controller.current.getState();
   const player = {
     ...state,
-    open: () => companionAvailable && controller.current.setVisible(true),
-    close: () => controller.current.setVisible(false),
+    open: () => {
+      if (!companionAvailable) return;
+      selector.current = null;
+      setSoundtrackPicker(null);
+      controller.current.setVisible(true);
+    },
+    close: () => cancelSoundtrackPicker(),
     playTrack: (track) => controller.current.playTrack(track),
     playPlaylist: (playlist, shuffle) => controller.current.playPlaylist(playlist, shuffle),
+    playSoundtrack: (value) => {
+      const selection = normalizeRoutineSoundtrack(value);
+      const item = soundtrackPlaybackItem(selection);
+      if (
+        !item ||
+        !alive.current ||
+        !latest.current.ready ||
+        !latest.current.connected ||
+        pending.current
+      )
+        return Promise.resolve({
+          success: false,
+          error: 'Choose routine music and connect Apple Music before pressing Play.',
+        });
+      return selection.kind === 'playlist'
+        ? controller.current.playPlaylist(item, selection.shuffle)
+        : controller.current.playTrack(item);
+    },
     pause: () => controller.current.pause(),
     resume: () => controller.current.resume(),
     next: () => controller.current.next(),
@@ -233,6 +317,10 @@ export function AppleMusicConnectionProvider({ children }) {
         getPlaylists,
         getPlaylistTracks,
         getPlaylistArtwork,
+        soundtrackPicker,
+        openSoundtrackPicker,
+        cancelSoundtrackPicker,
+        selectSoundtrackItem,
       }}
     >
       {children}

@@ -32,6 +32,7 @@ const repeatNext = { off: 'context', context: 'track', track: 'off' };
 const emptyItems = [];
 const musicItemKey = (item, index) => `${item.type}:${item.id || item.uri || 'item'}:${index}`;
 const artworkViewability = { itemVisiblePercentThreshold: 50, minimumViewTime: 100 };
+const savedSelectionItem = (item) => (item ? { ...item, type: item.kind || item.type } : null);
 
 // Each read belongs to one visible browser state. Retiring it never touches playback.
 function useMusicList(enabled, request, dependencies, delay = 0) {
@@ -247,8 +248,13 @@ export default function AppleMusicPlayerPanel() {
   const apple = useAppleMusicConnection();
   const { theme } = useTheme();
   const player = apple.player || {};
-  const visible = !!(apple.companionAvailable && player.visible);
-  const active = visible && apple.connected && apple.ready && !player.previousOwnerPending;
+  const picker = apple.soundtrackPicker || null;
+  const requestId = picker?.id;
+  const pickerRef = useRef(picker);
+  pickerRef.current = picker;
+  const visible = !!(apple.companionAvailable && (player.visible || picker));
+  const active =
+    visible && apple.connected && apple.ready && (!!picker || !player.previousOwnerPending);
   const [tab, setTab] = useState('search');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(null);
@@ -256,9 +262,21 @@ export default function AppleMusicPlayerPanel() {
   const [retry, setRetry] = useState(0);
   const [actionError, setActionError] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
+  const [selectionShuffle, setSelectionShuffle] = useState(false);
   const actionGeneration = useRef(0);
   const actionLock = useRef(false);
   const listRef = useRef(null);
+  useEffect(() => {
+    setTab(picker ? 'library' : 'search');
+    setQuery('');
+    setSelected(savedSelectionItem(picker?.selection));
+    setPlaylist(null);
+    setSelectionShuffle(
+      picker?.selection?.kind === 'playlist' && picker.selection.shuffle === true,
+    );
+    setActionError(null);
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [requestId]);
   const search = useMusicList(
     active && tab === 'search' && !!query.trim() && !playlist,
     async () => {
@@ -269,13 +287,13 @@ export default function AppleMusicPlayerPanel() {
         ...itemsOf(result?.playlists).map((item) => ({ ...item, type: 'playlist' })),
       ];
     },
-    [query, apple.search, retry],
+    [query, apple.search, retry, requestId],
     300,
   );
   const library = useMusicList(
     active && tab === 'library' && !playlist,
     async () => itemsOf(await apple.getPlaylists()).map((item) => ({ ...item, type: 'playlist' })),
-    [apple.getPlaylists, retry],
+    [apple.getPlaylists, retry, requestId],
   );
   const tracks = useMusicList(
     active && !!playlist,
@@ -284,7 +302,7 @@ export default function AppleMusicPlayerPanel() {
         ...item,
         type: 'track',
       })),
-    [playlist?.id, apple.getPlaylistTracks, retry],
+    [playlist?.id, apple.getPlaylistTracks, retry, requestId],
   );
   const artwork = usePlaylistArtwork({
     active,
@@ -307,7 +325,7 @@ export default function AppleMusicPlayerPanel() {
   useEffect(() => {
     if (!active) {
       setQuery('');
-      setSelected(null);
+      if (!picker) setSelected(null);
       setPlaylist(null);
       setActionError(null);
     }
@@ -317,7 +335,7 @@ export default function AppleMusicPlayerPanel() {
     return () => {
       actionGeneration.current++;
     };
-  }, [active]);
+  }, [active, requestId]);
   const runAction = async (action, interrupt = false) => {
     if (!action || (actionLock.current && !interrupt)) return;
     const ticket = ++actionGeneration.current;
@@ -344,12 +362,14 @@ export default function AppleMusicPlayerPanel() {
     invalidateReads();
     artwork.invalidate();
     actionGeneration.current++;
-    player.close?.();
+    if (picker) apple.cancelSoundtrackPicker?.(picker.id);
+    else player.close?.();
   };
   const choose = useCallback(
     (item) => {
       setSelected(item);
       setActionError(null);
+      if (item.type !== 'playlist') setSelectionShuffle(false);
       if (item.type === 'playlist') {
         invalidateReads();
         setPlaylist(item);
@@ -387,14 +407,22 @@ export default function AppleMusicPlayerPanel() {
     player.busy ||
     player.previousOwnerPending ||
     actionBusy;
-  const error = player.previousOwnerPending
-    ? actionError
-      ? 'Could not clear the previous Apple Music queue. Try again.'
-      : apple.error
-    : actionError || player.error || apple.error;
+  const selectionDisabled =
+    !apple.connected ||
+    !apple.ready ||
+    apple.connecting ||
+    actionBusy ||
+    typeof apple.selectSoundtrackItem !== 'function';
+  const error = picker
+    ? actionError || (!apple.connected && apple.error)
+    : player.previousOwnerPending
+      ? actionError
+        ? 'Could not clear the previous Apple Music queue. Try again.'
+        : apple.error
+      : actionError || player.error || apple.error;
   if (!apple.companionAvailable) return null;
   return (
-    <Sheet visible={visible} title="Apple Music" onClose={close}>
+    <Sheet visible={visible} title={picker ? 'Routine music' : 'Apple Music'} onClose={close}>
       <FlatList
         ref={listRef}
         style={styles.list}
@@ -412,8 +440,9 @@ export default function AppleMusicPlayerPanel() {
         ListHeaderComponent={
           <View style={styles.content}>
             <Text style={[styles.description, { color: theme.textSecondary }]}>
-              Music plays independently of round assignments. Your chosen alerts pause music, play
-              on their own, then let music continue.
+              {picker
+                ? `Choose continuous Apple Music for ${picker.routineName || 'this routine'}. Use for routine returns your choice to the editor without starting playback or switching music at each round. Save the routine to remember it.`
+                : 'Music plays independently of round assignments. Your chosen alerts pause music, play on their own, then let music continue.'}
             </Text>
             <Text style={[styles.detail, { color: theme.textSecondary }]}>
               Apple Music subscription and Music access required for catalog playback. Available
@@ -427,7 +456,7 @@ export default function AppleMusicPlayerPanel() {
                 {messageOf(error)}
               </Text>
             )}
-            <NowPlaying player={player} runAction={runAction} disabled={disabled} />
+            {!picker && <NowPlaying player={player} runAction={runAction} disabled={disabled} />}
             {!apple.ready || apple.connecting ? (
               <View style={styles.loading}>
                 <ActivityIndicator color={theme.accent} />
@@ -442,7 +471,7 @@ export default function AppleMusicPlayerPanel() {
                 onPress={() => runAction(apple.connect)}
                 disabled={actionBusy}
               />
-            ) : player.previousOwnerPending ? null : (
+            ) : !picker && player.previousOwnerPending ? null : (
               <>
                 <View style={styles.tabs}>
                   <MusicButton
@@ -498,6 +527,11 @@ export default function AppleMusicPlayerPanel() {
                 ) : null}
                 {selected && (
                   <View style={[styles.card, { backgroundColor: theme.cardSecondary }]}>
+                    {picker && (
+                      <Text style={[styles.caption, { color: theme.textSecondary }]}>
+                        ROUTINE MUSIC SELECTION
+                      </Text>
+                    )}
                     <View style={styles.item}>
                       <MusicArtwork
                         item={artwork.artworkFor(selected) || selected}
@@ -517,17 +551,41 @@ export default function AppleMusicPlayerPanel() {
                         </Text>
                       </View>
                     </View>
+                    {picker && selected.type === 'playlist' && (
+                      <MusicButton
+                        label={`Shuffle routine playlist: ${selectionShuffle ? 'On' : 'Off'}`}
+                        icon="shuffle"
+                        selected={selectionShuffle}
+                        onPress={() => setSelectionShuffle((value) => !value)}
+                      />
+                    )}
                     <MusicButton
-                      label={selected.type === 'playlist' ? 'Play playlist' : 'Play track'}
-                      icon="play"
-                      disabled={disabled}
-                      onPress={() =>
-                        runAction(() =>
-                          selected.type === 'playlist'
-                            ? player.playPlaylist(selected)
-                            : player.playTrack(selected),
-                        )
+                      label={
+                        picker
+                          ? 'Use for routine'
+                          : selected.type === 'playlist'
+                            ? 'Play playlist'
+                            : 'Play track'
                       }
+                      icon={picker ? 'checkmark' : 'play'}
+                      disabled={picker ? selectionDisabled : disabled}
+                      onPress={() => {
+                        if (picker && pickerRef.current?.id !== picker.id) return;
+                        return runAction(() =>
+                          picker
+                            ? apple.selectSoundtrackItem(
+                                picker.id,
+                                {
+                                  ...selected,
+                                  image: artwork.artworkFor(selected)?.image || selected.image,
+                                },
+                                selected.type === 'playlist' && selectionShuffle,
+                              )
+                            : selected.type === 'playlist'
+                              ? player.playPlaylist(selected)
+                              : player.playTrack(selected),
+                        );
+                      }}
                     />
                   </View>
                 )}
@@ -561,7 +619,9 @@ export default function AppleMusicPlayerPanel() {
                         ? 'No playlists found in your Apple Music library.'
                         : query.trim()
                           ? 'No songs or playlists found.'
-                          : 'Search the Apple Music catalog, then select a song or playlist and tap Play.'}
+                          : picker
+                            ? 'Search for a song or playlist, then choose Use for routine.'
+                            : 'Search the Apple Music catalog, then select a song or playlist and tap Play.'}
                   </Text>
                 ) : null}
               </>

@@ -38,7 +38,7 @@ function load(relative, exported, scope) {
   return new Script(code).runInNewContext(scope);
 }
 
-async function mount(t, { finish = true, countdown = false } = {}) {
+async function mount(t, { finish = true, countdown = false, localRound = false } = {}) {
   let now = 100000;
   let nextTimer = 0;
   const intervals = new Map();
@@ -46,11 +46,12 @@ async function mount(t, { finish = true, countdown = false } = {}) {
   const events = [];
   const requests = [];
   const logs = [];
-  const controls = { stopBarrier: null };
+  const controls = { stopBarrier: null, localStopBarrier: null };
   let beforePlay = null;
   let outputOwner = null;
   let outputPlaying = false;
   let musicPlaying = false;
+  let localPlaying = false;
   let workout;
   const song = {
     id: 'independent',
@@ -85,6 +86,7 @@ async function mount(t, { finish = true, countdown = false } = {}) {
   const service = {
     getAccessToken: async () => ({ accessToken: 'native:appleMusic' }),
     async playTrack() {
+      assert.equal(localPlaying, false, 'local round audio must stop before companion starts');
       musicPlaying = true;
       events.push('music.start');
       return ok;
@@ -171,13 +173,52 @@ async function mount(t, { finish = true, countdown = false } = {}) {
       },
     },
   };
+  if (localRound) {
+    routine.rounds = 2;
+    routine.restSec = 2;
+    routine.roundsData = [
+      {
+        workSong: { name: 'Local first', uri: 'file:///local-first.wav', platform: 'device' },
+        restSong: { uri: 'file:///local-rest.wav', platform: 'device' },
+      },
+      { workSong: { name: 'Local second', uri: 'file:///local-second.wav', platform: 'device' } },
+    ];
+  }
   const routines = [routine];
   const setSyncPaused = () => {};
   const addCompletedRoutine = (log) => logs.push(log);
   const platform = {
     selectedPlatform: 'device',
     connectedPlatforms: { device: { connected: true } },
-    services: { device: { pause: async () => ok, cleanup: async () => ok } },
+    services: {
+      device: {
+        playTrack: async (_token, uri) => {
+          assert.equal(
+            musicPlaying,
+            false,
+            'a later timer phase cannot start local audio under companion music',
+          );
+          localPlaying = true;
+          events.push(`local.start:${uri}`);
+          return ok;
+        },
+        pause: async () => {
+          events.push('local.pause.request');
+          if (controls.localStopBarrier) await controls.localStopBarrier;
+          localPlaying = false;
+          events.push('local.pause.ack');
+          return ok;
+        },
+        cleanup: async () => {
+          localPlaying = false;
+          events.push('local.cleanup');
+          return ok;
+        },
+        getCurrentPlayback: async () => ({ is_playing: localPlaying, progress_ms: 0 }),
+        setVolume: async () => ok,
+        setRepeat: async () => ok,
+      },
+    },
   };
   const countdownSoundPlayer = { stop: async () => ok };
   const scope = {
@@ -249,7 +290,7 @@ async function mount(t, { finish = true, countdown = false } = {}) {
     });
     return result;
   };
-  await step(() => companion.playTrack(song));
+  if (!localRound) await step(() => companion.playTrack(song));
   events.length = 0;
   return {
     events,
@@ -257,12 +298,16 @@ async function mount(t, { finish = true, countdown = false } = {}) {
     logs,
     controls,
     companion,
+    routine,
     step,
     get workout() {
       return workout;
     },
     get musicPlaying() {
       return musicPlaying;
+    },
+    get localPlaying() {
+      return localPlaying;
     },
     get outputPlaying() {
       return outputPlaying;
@@ -285,6 +330,69 @@ async function mount(t, { finish = true, countdown = false } = {}) {
     },
   };
 }
+
+test('manual routine music Play drains local round audio and later phases never restart its saved assignments', async (t) => {
+  const h = await mount(t, { localRound: true, finish: false });
+  const saved = JSON.stringify(h.routine.roundsData);
+  await h.start();
+  assert.equal(h.localPlaying, true);
+  assert.equal(h.musicPlaying, false);
+  const stop = deferred();
+  h.controls.localStopBarrier = stop.promise;
+  let starting;
+  await h.step(async () => {
+    starting = h.companion.playTrack({
+      id: 'saved-song',
+      uri: 'apple-music:song:saved-song',
+      name: 'Saved routine track',
+    });
+    await flush();
+  });
+  assert.equal(
+    h.companion.isActive(),
+    true,
+    'reservation takes effect before old native stop settles',
+  );
+  assert.equal(h.musicPlaying, false, 'companion cannot start before checked local pause');
+  await h.tick(4000);
+  assert.equal(h.workout.currentPhase, 'rest');
+  assert.equal(h.events.filter((event) => event.startsWith('local.start:')).length, 1);
+  stop.resolve(ok);
+  await h.step(() => starting);
+  assert.equal(h.localPlaying, false);
+  assert.equal(h.musicPlaying, true);
+  assert.ok(h.events.indexOf('local.cleanup') < h.events.indexOf('music.start'));
+  await h.tick(2000);
+  assert.equal(h.workout.currentPhase, 'work');
+  await h.tick(4000);
+  assert.equal(h.workout.session.status, 'completed');
+  assert.equal(h.events.filter((event) => event.startsWith('local.start:')).length, 1);
+  assert.equal(h.events.filter((event) => event === 'music.start').length, 1);
+  assert.equal(h.musicPlaying, true);
+  assert.equal(JSON.stringify(h.routine.roundsData), saved, 'legacy round data remains intact');
+});
+
+test('background during checked local stop cancels manual soundtrack start without foreground retry', async (t) => {
+  const h = await mount(t, { localRound: true, finish: false });
+  await h.start();
+  const stop = deferred();
+  h.controls.localStopBarrier = stop.promise;
+  let starting;
+  await h.step(async () => {
+    starting = h.companion.playTrack({ id: 'pending-song', uri: 'apple-music:song:pending-song' });
+    await flush();
+  });
+  assert.equal(h.musicPlaying, false);
+  h.companion.setAppActive(false);
+  h.companion.setAppActive(true);
+  stop.resolve(ok);
+  const result = await h.step(() => starting);
+  assert.equal(result.cancelled, true);
+  assert.equal(h.localPlaying, false);
+  assert.equal(h.musicPlaying, false);
+  assert.equal(h.events.includes('music.start'), false);
+  assert.equal(h.companion.isActive(), false);
+});
 
 test('natural completion plays the selected finish cue alone and resumes Apple Music after cue stop ACK', async (t) => {
   const h = await mount(t);

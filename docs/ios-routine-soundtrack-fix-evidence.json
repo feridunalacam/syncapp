@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "status": "source-verified-awaiting-native-host-JS-overlay-QA",
+  "testFlight10ContainsTheseChanges": false,
+  "behavior": [
+    "Training editor opens the routine music selector in My playlists with the current routine selection and remembered playlist shuffle.",
+    "Use for routine updates the editor draft only. Save routine stores the optional soundtrack inside the existing account-scoped routine record. Neither choosing nor saving starts music.",
+    "Explicit Play routine music starts one continuous Apple Music queue independently of the workout timer. Phase changes do not select songs.",
+    "Saved routine music is displayed separately from the actual current global player queue. Shuffle on a saved routine and shuffle on an active queue are separate preferences.",
+    "Selections and metadata use a bounded strict whitelist. Missing or invalid legacy soundtrack values normalize to null; old timed playlist fields are never converted automatically.",
+    "Existing local/device round assignments, durations, volumes, Advanced alerts and legacy choices remain separate and preserved.",
+    "Manual Play reserves companion ownership before awaiting checked local audio cleanup. Later timer phases cannot restart saved round audio while that queue is reserved or owned.",
+    "Background retires pending new start intents without stopping an already owned playing queue. Foreground never retries the retired intent.",
+    "Picker request IDs, routine generations, blur/unmount and connection retirement reject stale selection callbacks."
+  ],
+  "validation": {
+    "passed": 1025,
+    "failed": 0,
+    "skipped": 0,
+    "node": "22.23.4",
+    "isolatedPinnedPGliteEnabled": true,
+    "logSHA256": "d44e7bd2389bfa97a1ba3038ab0542e5fb2a75177388bb3b0a087bdfe71d62ae"
+  },
+  "sourceFreezeSHA256": "cc32900aacffe0006ee2642adec6f145bd71062961bcaef090cea3a34987aeba",
+  "runtimeSourceSHA256": {
+    "src/components/common/AppleMusicPlayerPanel.js": "0ba5baa65fe89ba24ed9c06321287ac4dd97b20d5efe00d0275e035bb76eed4d",
+    "src/components/common/RoutineSoundtrackControl.js": "4dbdebb29903c4842a1ed3f5fb3e9ea93f2f6bcd5555d0f08990092c361c2a0a",
+    "src/context/AppleMusicConnectionContext.js": "2319c17e45e833b4fa2856e4f47ee161b6393ebfef2888f2f8c9da1289e9d824",
+    "src/domain/routineSoundtrack.js": "40b389880377802b9f9d6d6d4fcdf83ed1cecf6eed619232a39ad1bbcd73d3dd",
+    "src/domain/routines.js": "ff40bc48a646526fa6ed5c06e5e46e430fa7d116f2368404d15e094514ab0689",
+    "src/screens/Home/HomeScreen.js": "b95b6946ff941e45c3519bde78b52e481ea4f6e6f1d5f8de840a110d51256843",
+    "src/screens/Routine/CreateRoutineScreen.js": "0edbf14c051f3e1422360ccb794f38fc9fc7139f318d8abe66e12959865a867a",
+    "src/screens/Routine/components/MusicSearchModal.js": "e3add8b5333e3e634767ab6acbef3f1c80b3ff274f6957739a657f86c989dc4b",
+    "src/screens/Routine/hooks/useRoutineForm.js": "b53362e4aec9a301f4c988e305832e0ad40ca182deb4ecf373804f0af875ba97",
+    "src/screens/Training/TrainingScreen.js": "e4a537c561374483441d7f42d9916ab104f060add4af928c5979a48c69365530",
+    "src/services/appleMusic/companion.js": "f269cf96c3d3d68ea551b83daede0863827aee108121d77c0cf792f3f8c48345"
+  },
+  "persistence": {
+    "existingNestedRoutineField": "soundtrack",
+    "backupVersion": 1,
+    "newStorageKey": false,
+    "databaseSchemaOrLiveChanges": false,
+    "nativeDependenciesCapabilitiesOrReleaseFlagsChanged": false
+  },
+  "limitations": [
+    "Automatic Work/Rest song assignment is not restored or enabled; this is a continuous routine soundtrack.",
+    "The native17 host was compiled and checked separately at the prior c5a017ca source. This JS delta still requires an overlay/export and UI check before the next delivery.",
+    "MusicKit account playback and the owner’s actual library artwork must be verified on a fresh physical-device candidate; automated tests use controlled native/remote fakes."
+  ]
+}

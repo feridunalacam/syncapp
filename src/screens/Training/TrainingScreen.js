@@ -5,12 +5,15 @@ import { useTheme } from '../../context/ThemeContext';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
 import GlassSurface from '../../components/common/GlassSurface';
 import AppleMusicWorkoutControl from '../../components/common/AppleMusicWorkoutControl';
+import RoutineSoundtrackControl from '../../components/common/RoutineSoundtrackControl';
+import { useWorkout } from '../../context/WorkoutContext';
 import RoutineListScreen from '../Routine/RoutineListScreen';
 import LogScreen from '../Log/LogScreen';
 import { navigateToCreateRoutine } from '../../navigation/navigationHelpers';
 
 export default function TrainingScreen({ navigation }) {
   const { theme } = useTheme();
+  const { selectedRoutine } = useWorkout();
   return (
     <ScreenWrapper>
       <View style={styles.header}>
@@ -36,6 +39,12 @@ export default function TrainingScreen({ navigation }) {
         </Pressable>
       </View>
       <AppleMusicWorkoutControl style={styles.appleMusic} />
+      <RoutineSoundtrackControl
+        key={selectedRoutine?.id || 'no-routine'}
+        soundtrack={selectedRoutine?.soundtrack}
+        routineName={selectedRoutine?.name}
+        style={styles.appleMusic}
+      />
       <RoutineListScreen navigation={navigation} embedded />
     </ScreenWrapper>
   );

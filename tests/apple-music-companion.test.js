@@ -116,6 +116,56 @@ function harness(t, overrides = {}, options = {}) {
   };
 }
 
+test('background retires pending starts across local-stop and token waits without stopping an existing queue', async (t) => {
+  for (const stage of ['local-stop', 'token']) {
+    const waitForStart = deferred();
+    let block = false;
+    const h = harness(
+      t,
+      {
+        getAccessToken: async () =>
+          block && stage === 'token' ? waitForStart.promise : { accessToken: 'native:appleMusic' },
+      },
+      {
+        beforePlay: async () => (block && stage === 'local-stop' ? waitForStart.promise : ok),
+      },
+    );
+    await h.controller.playTrack(song('already-playing'));
+    block = true;
+    h.calls.length = 0;
+    const starting = h.controller.playPlaylist({ id: 'p.new-list', name: 'New list' }, true);
+    await flush();
+    assert.equal(h.controller.getState().reserved, true);
+    h.controller.setAppActive(false);
+    h.controller.setAppActive(true);
+    waitForStart.resolve(stage === 'token' ? { accessToken: 'native:appleMusic' } : ok);
+    assert.equal((await starting).cancelled, true);
+    await flush();
+    assert.equal(
+      h.calls.some((call) => Array.isArray(call) && ['track', 'playlist'].includes(call[0])),
+      false,
+    );
+    assert.equal(
+      h.calls.includes('stop') || h.calls.includes('pause') || h.calls.includes('resume'),
+      false,
+    );
+    assert.equal(h.controller.getState().ownsQueue, true);
+    assert.equal(h.controller.getState().playing, true);
+    assert.equal(h.controller.getState().track.id, 'already-playing');
+    assert.equal(h.controller.getState().reserved, false);
+  }
+});
+
+test('explicit Play requested while inactive does not dispatch or retry on foreground', async (t) => {
+  const h = harness(t);
+  h.controller.setAppActive(false);
+  assert.equal((await h.controller.playTrack(song('background'))).cancelled, true);
+  h.controller.setAppActive(true);
+  await flush();
+  assert.deepEqual(h.calls, []);
+  assert.equal(h.controller.isActive(), false);
+});
+
 test('same-track sparse polling retains artwork while refreshing playback metadata and progress', async (t) => {
   const selected = song('artwork');
   const h = harness(t, {

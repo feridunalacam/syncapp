@@ -10,6 +10,7 @@ import { resolveRoundAudio } from '../src/domain/audio.js';
 import { useMusicSearch } from '../src/hooks/useMusicSearch.js';
 import { normalizeRoutine, validateRoutine } from '../src/domain/routines.js';
 import { normalizeAlertConfig } from '../src/domain/alerts.js';
+import { normalizeRoutineSoundtrack } from '../src/domain/routineSoundtrack.js';
 import { createAppleMusicService } from '../src/services/appleMusic/adapter.js';
 import { createAutoRefresh } from '../src/lib/autoRefresh.js';
 
@@ -56,6 +57,7 @@ function load(relative, name, overrides = {}) {
     normalizeRoutine,
     validateRoutine,
     normalizeAlertConfig,
+    normalizeRoutineSoundtrack,
     Alert: {
       alert: (title, message) => {
         throw new Error(`${title}: ${message}`);

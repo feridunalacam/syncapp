@@ -62,6 +62,7 @@ export function createAppleMusicCompanionController({
   let disposed = false;
   let appActive = true;
   let generation = 0;
+  let startEpoch = 0;
   let starts = 0;
   let permissions = 0;
   let actions = 0;
@@ -194,12 +195,18 @@ export function createAppleMusicCompanionController({
     return current.stopping;
   };
   const start = async (kind, selection, shuffle = false) => {
-    if (disposed || (kind === 'resume' && !owns())) return cancelled();
+    if (disposed || !appActive || (kind === 'resume' && !owns())) return cancelled();
     cueIntent++;
     const ticket = ++generation;
+    const epoch = startEpoch;
     const request = {};
     requests.set(service, request);
-    const stale = () => disposed || ticket !== generation || requests.get(service) !== request;
+    const stale = () =>
+      disposed ||
+      !appActive ||
+      epoch !== startEpoch ||
+      ticket !== generation ||
+      requests.get(service) !== request;
     starts++;
     publish({ error: null });
     let started = null;
@@ -454,6 +461,8 @@ export function createAppleMusicCompanionController({
       if (disposed) return;
       appActive = !!active;
       if (!appActive) {
+        // Retire pending explicit starts without stopping an already owned queue.
+        startEpoch++;
         cueIntent++;
         clearTimer();
       } else void refresh(); // Observe only; returning to the app never starts playback.

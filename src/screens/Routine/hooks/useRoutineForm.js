@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Alert } from 'react-native';
 import { validateRoutine, normalizeRoutine } from '../../../domain/routines';
 import { normalizeAlertConfig } from '../../../domain/alerts';
+import { normalizeRoutineSoundtrack } from '../../../domain/routineSoundtrack';
 
 const ROUTINE_NAME_MAX_LENGTH = 60;
 
@@ -30,13 +31,14 @@ const validateRoutineName = (rawName) => {
  * @param {Function} params.onSave - Callback after successful save
  */
 export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onSave }) => {
-  const templateRoutineIdRef = useRef(templateRoutine?.id);
+  const templateRoutineIdRef = useRef(templateRoutine?.id || templateRoutine || null);
 
   // Initialize values from template
   const initialValues = useMemo(() => {
     if (!templateRoutine) {
       return {
         name: '',
+        soundtrack: null,
         numberOfRounds: '1',
         roundsOrder: [1],
         workSec: '60',
@@ -113,6 +115,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
 
     return {
       name: routineName,
+      soundtrack: normalized.soundtrack,
       numberOfRounds: String(numRounds),
       roundsOrder,
       workSec: String(templateRoutine.workSec ?? 60),
@@ -132,6 +135,16 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
   // Core routine state
   const [name, setNameRaw] = useState(initialValues.name);
   const [nameError, setNameError] = useState(null);
+  const [soundtrack, setSoundtrackRaw] = useState(initialValues.soundtrack);
+  const setSoundtrack = useCallback((value) => {
+    setSoundtrackRaw(normalizeRoutineSoundtrack(value));
+  }, []);
+  const setSoundtrackShuffle = useCallback((value) => {
+    setSoundtrackRaw((current) =>
+      current ? normalizeRoutineSoundtrack({ ...current, shuffle: value }) : null,
+    );
+  }, []);
+  const removeSoundtrack = useCallback(() => setSoundtrackRaw(null), []);
 
   // Wrap the name setter so the inline error clears as soon as the user
   // starts fixing the input.
@@ -184,10 +197,12 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
 
   // A reused editor must load the entire newly selected routine.
   useEffect(() => {
-    if (templateRoutineIdRef.current === templateRoutine?.id) return;
-    templateRoutineIdRef.current = templateRoutine?.id;
+    const identity = templateRoutine?.id || templateRoutine || null;
+    if (templateRoutineIdRef.current === identity) return;
+    templateRoutineIdRef.current = identity;
     setNameRaw(initialValues.name);
     setNameError(null);
+    setSoundtrackRaw(initialValues.soundtrack);
     setNumberOfRounds(initialValues.numberOfRounds);
     setRoundsOrder(initialValues.roundsOrder);
     setWorkSec(initialValues.workSec);
@@ -419,6 +434,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
 
     const routineData = {
       name: trimmedName,
+      soundtrack,
       rounds,
       workSec: parseInt(workSec),
       restSec: parseInt(restSec),
@@ -459,6 +475,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     if (onSave) onSave();
   }, [
     name,
+    soundtrack,
     numberOfRounds,
     roundsOrder,
     workSec,
@@ -490,6 +507,10 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     // Core state
     name,
     setName,
+    soundtrack,
+    setSoundtrack,
+    setSoundtrackShuffle,
+    removeSoundtrack,
     nameError,
     setNameError,
     numberOfRounds,

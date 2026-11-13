@@ -58,6 +58,7 @@ const textOf = (node) => {
 async function mount(t, { connection = {}, player: playerOverrides = {}, mini = false } = {}) {
   const events = [];
   const requests = [];
+  let renderConnection = () => {};
   const timers = new Map();
   const artworkRenders = [];
   let timerId = 0;
@@ -109,6 +110,22 @@ async function mount(t, { connection = {}, player: playerOverrides = {}, mini = 
     getPlaylists: (...args) => read('library', ...args),
     getPlaylistTracks: (...args) => read('tracks', ...args),
     getPlaylistArtwork: (...args) => read('artwork', ...args),
+    soundtrackPicker: null,
+    selectSoundtrackItem(id, item, shuffle) {
+      if (apple.soundtrackPicker?.id !== id) return { success: false, error: 'Selection expired.' };
+      events.push({ name: 'selectSoundtrackItem', requestId: id, value: item, shuffle });
+      apple.soundtrackPicker = null;
+      player.visible = false;
+      renderConnection();
+      return { success: true };
+    },
+    cancelSoundtrackPicker(id) {
+      if (apple.soundtrackPicker?.id !== id) return;
+      events.push({ name: 'cancelSoundtrackPicker', requestId: id });
+      apple.soundtrackPicker = null;
+      player.visible = false;
+      renderConnection();
+    },
     ...connection,
     player,
   };
@@ -155,8 +172,8 @@ async function mount(t, { connection = {}, player: playerOverrides = {}, mini = 
       return React.createElement('MusicArtwork', props);
     },
     StyleSheet: { create: (styles) => styles, hairlineWidth: 1 },
-    Sheet: ({ visible, onClose, children }) =>
-      React.createElement('Sheet', { visible, onClose }, visible ? children : null),
+    Sheet: ({ visible, title, onClose, children }) =>
+      React.createElement('Sheet', { visible, title, onClose }, visible ? children : null),
     setTimeout(callback) {
       const id = ++timerId;
       timers.set(id, callback);
@@ -170,6 +187,7 @@ async function mount(t, { connection = {}, player: playerOverrides = {}, mini = 
   new Script(compiled).runInNewContext(context);
   const Component = mini ? context.Mini : context.Panel;
   let renderer;
+  renderConnection = () => renderer?.update(React.createElement(Component));
   await act(async () => {
     renderer = create(React.createElement(Component));
   });
@@ -856,4 +874,149 @@ test('companion availability gates both surfaces independently of the legacy tim
   await panel.update({ companionAvailable: true, available: false, timedAvailable: false });
   assert.ok(panel.button('Search catalog'));
   assert.deepEqual(panel.events, []);
+});
+
+const routinePlaylist = {
+  platform: 'appleMusic',
+  kind: 'playlist',
+  id: 'p.routine',
+  name: 'Saved routine playlist',
+  artist: 'Saved curator',
+  image: 'https://example.com/saved.jpg',
+  shuffle: true,
+};
+const pickerRequest = (id, selection = routinePlaylist) => ({
+  id,
+  routineName: 'Morning intervals',
+  selection,
+  initialTab: 'library',
+});
+
+test('routine selector starts in library with the saved shuffle and saves without touching the actual queue', async (t) => {
+  const ui = await mount(t, {
+    connection: { soundtrackPicker: pickerRequest(1) },
+    player: { ownsQueue: true, busy: true, reserved: true, playing: true, track: song },
+  });
+  assert.equal(ui.nodes('Sheet')[0].props.title, 'Routine music');
+  assert.equal(ui.requests[0].kind, 'library');
+  assert.match(ui.text(), /Choose continuous Apple Music for Morning intervals/);
+  assert.match(ui.text(), /without starting playback or switching music at each round/);
+  assert.match(ui.text(), /ROUTINE MUSIC SELECTION/);
+  assert.match(ui.text(), /Saved routine playlist/);
+  assert.doesNotMatch(ui.text(), /First Song|First Artist/);
+  assert.equal(ui.button('Pause Apple Music'), undefined);
+  assert.equal(ui.button('Play playlist'), undefined);
+  assert.equal(ui.button('Shuffle routine playlist: On').props.accessibilityState.selected, true);
+  assert.equal(ui.button('Use for routine').props.disabled, false);
+  await ui.press('Shuffle routine playlist: On');
+  assert.deepEqual(ui.events, []);
+  await ui.press('Use for routine');
+  assert.equal(ui.events.length, 1);
+  assert.equal(ui.events[0].name, 'selectSoundtrackItem');
+  assert.equal(ui.events[0].requestId, 1);
+  assert.equal(ui.events[0].value.id, routinePlaylist.id);
+  assert.equal(ui.events[0].shuffle, false);
+  assert.equal(ui.nodes('Sheet')[0].props.visible, false);
+  assert.equal(ui.player.track, song);
+  assert.equal(ui.player.playing, true);
+});
+
+test('Use for routine retains the exact selected playlist identity and enriched visible cover without playing', async (t) => {
+  const ui = await mount(t, { connection: { soundtrackPicker: pickerRequest(2, null) } });
+  const missingCover = {
+    id: 'p.visible',
+    platform: 'appleMusic',
+    name: 'Visible playlist',
+    artist: 'A curator',
+  };
+  const sameName = { id: 'p.other', platform: 'appleMusic', name: 'Visible playlist' };
+  await ui.resolve(0, [missingCover, sameName]);
+  await ui.viewable(0);
+  await ui.tick();
+  assert.equal(ui.requests[1].kind, 'artwork');
+  assert.deepEqual(Array.from(ui.requests[1].args[0]), ['p.visible']);
+  const cover = 'https://example.com/enriched.jpg';
+  await ui.resolve(1, [
+    { id: 'p.visible', image: cover },
+    { id: 'p.other', image: 'https://example.com/wrong.jpg' },
+  ]);
+  await ui.press('Select playlist Visible playlist');
+  assert.equal(ui.requests[2].kind, 'tracks');
+  await ui.resolve(2, [song]);
+  await ui.press('Shuffle routine playlist: Off');
+  assert.deepEqual(ui.events, []);
+  await ui.press('Use for routine');
+  const [saved] = ui.events;
+  assert.equal(saved.name, 'selectSoundtrackItem');
+  assert.equal(saved.value.id, missingCover.id);
+  assert.equal(saved.value.name, missingCover.name);
+  assert.equal(saved.value.artist, missingCover.artist);
+  assert.equal(saved.value.image, cover);
+  assert.equal(saved.shuffle, true);
+  assert.equal(ui.requests.length, 3, 'saving does not fetch or play extra content');
+});
+
+test('new routine requests reset library and selection while retired search and Use callbacks cannot change them', async (t) => {
+  const ui = await mount(t, { connection: { soundtrackPicker: pickerRequest(11) } });
+  const oldUse = ui.button('Use for routine').props.onPress;
+  await ui.press('Search catalog');
+  await ui.fill('old query');
+  await ui.tick();
+  const pendingSearch = ui.requests.findIndex((request) => request.kind === 'search');
+  const savedTrack = {
+    platform: 'appleMusic',
+    kind: 'track',
+    id: 'other-track',
+    name: 'New routine song',
+    shuffle: false,
+  };
+  await ui.update({ soundtrackPicker: pickerRequest(12, savedTrack) });
+  assert.equal(ui.button('My playlists').props.accessibilityState.selected, true);
+  assert.equal(ui.nodes('TextInput').length, 0, 'new request returns to the library');
+  assert.match(ui.text(), /New routine song/);
+  assert.equal(ui.button('Shuffle routine playlist: On'), undefined);
+  await act(async () => oldUse());
+  assert.deepEqual(ui.events, []);
+  await ui.resolve(pendingSearch, { tracks: [{ ...song, name: 'Retired search song' }] });
+  assert.doesNotMatch(ui.text(), /Retired search song/);
+  await ui.press('Use for routine');
+  assert.equal(ui.events[0].requestId, 12);
+  assert.equal(ui.events[0].value.id, savedTrack.id);
+  assert.equal(ui.events[0].shuffle, false);
+});
+
+test('closing the routine selector cancels only that request and preserves independent playback', async (t) => {
+  const ui = await mount(t, {
+    connection: { soundtrackPicker: pickerRequest(20) },
+    player: { ownsQueue: true, playing: true, track: song },
+  });
+  await ui.closeSheet();
+  assert.deepEqual(ui.events, [{ name: 'cancelSoundtrackPicker', requestId: 20 }]);
+  assert.equal(ui.player.playing, true);
+  await ui.resolve(0, [{ ...playlist, name: 'Cancelled routine library' }]);
+  assert.doesNotMatch(ui.text(), /Cancelled routine library/);
+  await ui.update({}, { visible: true });
+  assert.equal(ui.nodes('Sheet')[0].props.title, 'Apple Music');
+  assert.ok(ui.button('Pause Apple Music'));
+  assert.equal(ui.button('Use for routine'), undefined);
+  assert.equal(ui.button('Search catalog').props.accessibilityState.selected, true);
+});
+
+test('routine save errors are scoped and retryable without claiming playback', async (t) => {
+  const ui = await mount(t, {
+    connection: {
+      soundtrackPicker: pickerRequest(30),
+      selectSoundtrackItem: () => ({
+        success: false,
+        error: 'This choice is no longer available.',
+      }),
+    },
+  });
+  await ui.press('Use for routine');
+  assert.match(ui.text(), /This choice is no longer available/);
+  assert.equal(ui.button('Use for routine').props.disabled, false);
+  assert.equal(ui.button('Pause Apple Music'), undefined);
+  assert.deepEqual(ui.events, []);
+  await ui.update({ soundtrackPicker: pickerRequest(31, null) });
+  assert.doesNotMatch(ui.text(), /This choice is no longer available/);
 });

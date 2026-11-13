@@ -6,6 +6,7 @@ import React, { act } from 'react';
 import { create } from 'react-test-renderer';
 import { normalizeRoutine, validateRoutine } from '../src/domain/routines.js';
 import { normalizeAlertConfig } from '../src/domain/alerts.js';
+import { normalizeRoutineSoundtrack } from '../src/domain/routineSoundtrack.js';
 import { resolveRoundAudio } from '../src/domain/audio.js';
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -20,6 +21,7 @@ const context = {
   normalizeRoutine,
   validateRoutine,
   normalizeAlertConfig,
+  normalizeRoutineSoundtrack,
   Alert: {
     alert(title, message) {
       throw new Error(`${title}: ${message}`);

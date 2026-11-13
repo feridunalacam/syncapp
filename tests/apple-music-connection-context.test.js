@@ -7,6 +7,10 @@ import React, { act } from 'react';
 import { create } from 'react-test-renderer';
 import { createAppleMusicCompanionController } from '../src/services/appleMusic/companion.js';
 import { createCueHandoff } from '../src/services/alerts/cueHandoff.js';
+import {
+  normalizeRoutineSoundtrack,
+  soundtrackPlaybackItem,
+} from '../src/domain/routineSoundtrack.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
@@ -43,6 +47,7 @@ const deferred = () => {
 const flush = () => new Promise((done) => setImmediate(done));
 function world({ connected = true } = {}) {
   const events = [];
+  const nativeStarts = [];
   const timers = new Map();
   let timerSequence = 0;
   const cueHandoff = createCueHandoff({ stopOutput: async () => {} });
@@ -94,13 +99,15 @@ function world({ connected = true } = {}) {
       return controls.authorize();
     },
     getAccessToken: () => controls.token(),
-    playTrack: async () => {
+    playTrack: async (...args) => {
+      nativeStarts.push({ kind: 'track', args });
       counts.play++;
       playing = true;
       events.push('play');
       return ok;
     },
-    playPlaylist: async () => {
+    playPlaylist: async (...args) => {
+      nativeStarts.push({ kind: 'playlist', args });
       counts.play++;
       playing = true;
       return ok;
@@ -168,6 +175,8 @@ function world({ connected = true } = {}) {
     appleMusicService: { available: false },
     appleMusicCompanionService: service,
     createAppleMusicCompanionController,
+    normalizeRoutineSoundtrack,
+    soundtrackPlaybackItem,
     acquireMusicCueSilence: () => lease('cues'),
     registerCueMusicSource: (source) => cueHandoff.register(source),
   };
@@ -176,6 +185,7 @@ function world({ connected = true } = {}) {
     ...scope.result,
     counts,
     events,
+    nativeStarts,
     controls,
     marker,
     service,
@@ -568,4 +578,148 @@ test('successful optional artwork clears its deadline without affecting playback
   assert.equal(fixture.counts.cues, 1);
   await act(async () => ui.value.player.clear());
   assert.equal(fixture.counts.ads, 0);
+});
+
+const soundtrack = {
+  platform: 'appleMusic',
+  kind: 'playlist',
+  id: 'p.saved',
+  name: 'Saved list',
+  shuffle: true,
+};
+
+test('routine selector chooses once without starting music or changing a global queue', async (t) => {
+  const fixture = world();
+  const ui = await mount(t, fixture);
+  const selected = [];
+  const shuffleValues = [];
+  await act(async () =>
+    ui.value.openSoundtrackPicker({
+      routineName: 'Boxing',
+      selection: soundtrack,
+      onSelect: (item, shuffle) => {
+        selected.push(item);
+        shuffleValues.push(shuffle);
+      },
+    }),
+  );
+  const request = ui.value.soundtrackPicker;
+  assert.equal(request.initialTab, 'library');
+  assert.equal(request.routineName, 'Boxing');
+  assert.equal(request.selection.id, 'p.saved');
+  assert.equal(request.selection.shuffle, true);
+  assert.equal(ui.value.player.visible, true);
+  assert.equal(fixture.counts.play, 0);
+  await act(async () => {
+    assert.equal(ui.value.selectSoundtrackItem(request.id, soundtrack, true).success, true);
+    assert.equal(ui.value.selectSoundtrackItem(request.id, soundtrack, true).success, false);
+  });
+  assert.equal(selected.length, 1);
+  assert.equal(selected[0].shuffle, true);
+  assert.deepEqual(
+    shuffleValues,
+    [true],
+    'the editor callback receives the saved shuffle preference explicitly',
+  );
+  assert.equal(ui.value.soundtrackPicker, null);
+  assert.equal(ui.value.player.visible, false);
+  assert.equal(fixture.counts.play, 0);
+  assert.equal(fixture.counts.ads, 0);
+});
+
+test('selector cancellation is request-scoped and old callbacks cannot select into a newer routine', async (t) => {
+  const fixture = world();
+  const ui = await mount(t, fixture);
+  const selected = [];
+  let cancelOld, cancelNew, oldID, newID;
+  await act(async () => {
+    cancelOld = ui.value.openSoundtrackPicker({
+      routineName: 'A',
+      onSelect: () => selected.push('old'),
+    });
+  });
+  oldID = ui.value.soundtrackPicker.id;
+  await act(async () => {
+    cancelNew = ui.value.openSoundtrackPicker({
+      routineName: 'B',
+      onSelect: () => selected.push('new'),
+    });
+  });
+  newID = ui.value.soundtrackPicker.id;
+  await act(async () => cancelOld());
+  assert.equal(ui.value.soundtrackPicker.id, newID);
+  assert.equal(ui.value.player.visible, true);
+  await act(async () =>
+    assert.equal(ui.value.selectSoundtrackItem(oldID, soundtrack, true).success, false),
+  );
+  assert.equal(ui.value.soundtrackPicker.id, newID);
+  await act(async () => cancelNew());
+  assert.equal(ui.value.soundtrackPicker, null);
+  await act(async () =>
+    assert.equal(ui.value.selectSoundtrackItem(newID, soundtrack, true).success, false),
+  );
+  assert.deepEqual(selected, []);
+  assert.equal(fixture.counts.play, 0);
+});
+
+test('opening normal player, disconnect and unmount retire pending routine selectors', async (t) => {
+  for (const boundary of ['normal-player', 'disconnect', 'unmount']) {
+    const fixture = world();
+    const ui = await mount(t, fixture);
+    let selections = 0;
+    await act(async () => ui.value.openSoundtrackPicker({ onSelect: () => selections++ }));
+    const id = ui.value.soundtrackPicker.id;
+    if (boundary === 'normal-player') await act(async () => ui.value.player.open());
+    if (boundary === 'disconnect') await act(async () => ui.value.disconnect());
+    if (boundary === 'unmount') await ui.unmount();
+    await act(async () =>
+      assert.equal(ui.value.selectSoundtrackItem(id, soundtrack, true).success, false),
+    );
+    assert.equal(selections, 0);
+    assert.equal(fixture.counts.play, 0);
+    if (boundary === 'normal-player') assert.equal(ui.value.player.visible, true);
+  }
+});
+
+test('explicit routine Play uses saved identity and shuffle only after previous audio stop acknowledgement', async (t) => {
+  const fixture = world();
+  const ui = await mount(t, fixture);
+  const stop = deferred();
+  ui.value.player.registerBeforePlay(() => stop.promise);
+  let pending;
+  await act(async () => {
+    pending = ui.value.player.playSoundtrack(soundtrack);
+    await flush();
+  });
+  assert.equal(
+    ui.value.player.isActive(),
+    true,
+    'reservation blocks phase audio before transport starts',
+  );
+  assert.equal(fixture.counts.play, 0);
+  stop.resolve(ok);
+  await act(async () => pending);
+  assert.equal(fixture.nativeStarts.length, 1);
+  assert.equal(fixture.nativeStarts[0].kind, 'playlist');
+  assert.equal(fixture.nativeStarts[0].args[1], 'p.saved');
+  assert.equal(fixture.nativeStarts[0].args[3], true);
+  await act(async () => ui.value.player.clear());
+  assert.equal(fixture.counts.ads, 0);
+});
+
+test('invalid routine music and failed local-audio stop never start companion transport', async (t) => {
+  const fixture = world();
+  const ui = await mount(t, fixture);
+  await act(async () =>
+    assert.equal(
+      (await ui.value.player.playSoundtrack({ ...soundtrack, id: 'file:///bad' })).success,
+      false,
+    ),
+  );
+  ui.value.player.registerBeforePlay(async () => ({ success: false, error: 'Local stop failed' }));
+  await act(async () =>
+    assert.equal((await ui.value.player.playSoundtrack(soundtrack)).success, false),
+  );
+  assert.equal(fixture.counts.play, 0);
+  assert.equal(fixture.nativeStarts.length, 0);
 });
