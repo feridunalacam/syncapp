@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "recordType": "Historical exact TestFlight delivery receipt; later public-review status is separate",
+  "verifiedAtUTC": "2026-11-13T12:30:36.634Z",
+  "platform": "ios",
+  "version": "1.0.0",
+  "buildNumber": "10",
+  "profile": "production",
+  "sourceCommit": "008e5987095dda72b26fd86d7a34af613669e5b0",
+  "runtimeNativeAndEASFreeze": "cd7c976c5892e82697ab7babc08c987ab4f69096",
+  "easBuildID": "e1063739-ffba-4735-96b2-a6210945e19e",
+  "ascBuildID": "167d5b8c-814b-4c51-8e02-a62391c99ebd",
+  "ipaSHA256": "24df3bce587b4789290dc813a639e0c42f343ad7c1786ca08024557c5c88e3ed",
+  "ipaBytes": 22994678,
+  "actualHBCSHA256": "dcfc5631346190435e20b3543f9b4c26f7dbc31dadd8166ad80e7f0a67132396",
+  "localProductionHBCSHA256": "26ca8c5f83b6cd0d1cca807c4039dd5c9070dafad33db97435a2334381f65abd",
+  "rawHBCByteEquality": false,
+  "nativeAuditChecks": {
+    "passed": 43,
+    "total": 44,
+    "onlyFalse": "hermesMatchesApprovedProductionExport",
+    "historicalResultPreserved": true
+  },
+  "strictSemanticReplacement": {
+    "passed": true,
+    "allByteDifferencesAccountedFor": true,
+    "executableBytesExact": true,
+    "codeStringAssetFlagNormalizationApplied": false,
+    "sourceCommentElisionPerformed": false,
+    "sourceSHA1BindsExactUnmodifiedApprovedRawJS": true,
+    "secondIndependentAdversarialReplayPassed": true,
+    "freshPinnedCompilerReplayAndBothDirectionWholeFileReconstructionPassed": true,
+    "rootAdditionalExactRawSourceSHA1AndWholeFileReplayPassed": true,
+    "onlyByteDifferences": "51 bytes from one compiler debug filename and its dependent size/checksum fields"
+  },
+  "officialAppleValidation": {
+    "passed": true,
+    "attempts": 1,
+    "verifiedAtUTC": "2026-11-13T12:20:22.460Z"
+  },
+  "officialAppleUpload": {
+    "passed": true,
+    "attempts": 1,
+    "deliveryID": "167d5b8c-814b-4c51-8e02-a62391c99ebd",
+    "completedAtUTC": "2026-11-13T12:27:34.142Z",
+    "easSubmitUsed": false
+  },
+  "appleProcessingState": "VALID",
+  "internalBetaState": "IN_BETA_TESTING",
+  "group": {
+    "name": "Sync Internal QA",
+    "testerCount": 1,
+    "buildCount": 7,
+    "allPriorBuildsRetained": true,
+    "preservationChecks": {
+      "ownerOnlyConfirmed": true,
+      "groupSettingsUnchanged": true,
+      "testerMembershipUnchanged": true,
+      "allPriorBuildsPreserved": true,
+      "onlyExpectedBuildAdded": true,
+      "store10Associated": true,
+      "appleValid": true,
+      "testing": true
+    }
+  },
+  "productionFlags": {
+    "adsEnabled": true,
+    "adsTestMode": false,
+    "standardAppleMusicCompanion": true,
+    "timedAppleMusic": false,
+    "spotifyAccountPlayback": false,
+    "webMediaAcquisition": false
+  },
+  "completeLicenseTextsPresent": 62,
+  "originalCueAssetsPresent": 8,
+  "uncertainCoachAssetsExcluded": 14,
+  "nativeAssetsVerified": 22,
+  "nativeSDKVersions": {
+    "Google-Mobile-Ads-SDK": [
+      "13.6.0"
+    ],
+    "GoogleUserMessagingPlatform": [
+      "3.1.0"
+    ],
+    "RevenueCat": [
+      "5.101.0"
+    ],
+    "PurchasesHybridCommon": [
+      "20.4.0"
+    ]
+  },
+  "distributionCredentialsReusedWithoutChanges": true,
+  "noPackagedCredentialFilesOrPrivatePEMBlocks": true,
+  "physicalMusicProAdsAndFreshAppleTokenRegistrationVerifiedAtReceipt": false,
+  "publicAppReviewSubmittedAtReceipt": false,
+  "publicReleasePerformedAtReceipt": false,
+  "safeLocalReceiptDirectory": "../artifacts/app-store/testflight-1.0.0-10/",
+  "noCredentialValuesOrPrivateOwnerSnapshotsIncluded": true,
+  "all15PrivacyFilesRawAndParsedEqualApproved9": true,
+  "fullAutomatedSuite": {
+    "passed": 865,
+    "failed": 0,
+    "skipped": 0
+  },
+  "userVisibleChanges": [
+    "Apple Music songs and playlists entry on Training and Timer/Home before choosing a queue",
+    "Independent Apple Music player entry in routine editor and round audio picker",
+    "Native round-picker dismissal completes before opening the shared player"
+  ],
+  "musicBehavior": "User taps Play; standard Apple Music companion remains independent of the workout timer; no timed Apple/Spotify/web acquisition enabled",
+  "finalExactArtifactGateSHA256": "06d457d3c904e649c623e4804b591f69388a702c82c2f15136b8a98b92b19554"
+}
