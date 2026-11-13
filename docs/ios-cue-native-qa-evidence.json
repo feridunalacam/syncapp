@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "recordType": "Unreleased exclusive music and selected-alert native QA",
+  "verifiedAtUTC": "2026-11-13T14:04:39.832Z",
+  "testFlight10ContainsTheseChanges": false,
+  "sourceCheckpoints": {
+    "exclusiveCueOrchestration": "c4ee4d8431bc52f7bc565da806967d543a677434",
+    "firstCreateNavigation": "4a6367973b6cc37bf0cacba64184d697bc2b12a5",
+    "boundedNativeCueLoading": "ca6646a0e558763194f5be0981a2bae16792587f"
+  },
+  "fullSuiteAtBoundedLoadingCheckpoint": {
+    "passed": 953,
+    "failed": 0,
+    "skipped": 0,
+    "logSHA256": "29decc6db6c3917882545ff2f64f81c08093ce06546fef920da3074205a75337",
+    "nativeResponsesAndClocksAreFakedInAutomatedAudioTests": true,
+    "independentSourceAndTestReviewFoundBlockingIssue": false
+  },
+  "actualNativeNavigationAndAdvancedUI": {
+    "sourceCommit": "4a6367973b6cc37bf0cacba64184d697bc2b12a5",
+    "classification": "Frozen JS overlay on preserved production9 Simulator native host",
+    "checksPassed": 10,
+    "coldTimerCreateSaveAndBackReturnToTrainingList": true,
+    "savedRoutineReopensWithUpdateAction": true,
+    "coldLaunchPreservesBeep10SecondsAndSelectedPhaseTargets": true,
+    "coldLaunchPreservesBoxingBellSelection": true,
+    "subsequentColdLaunchPreservesOffAndNoneChoices": true,
+    "directAppStorageInjectionUsed": false,
+    "effectVolumeSliderUIExercised": false,
+    "receiptSHA256": "2e04dd98c90b94db36660ac370ea2fd638b1f2f338869b82e3dd3c827ce81ec0"
+  },
+  "actualNativeAudioRun1": {
+    "sourceCommit": "c4ee4d8431bc52f7bc565da806967d543a677434",
+    "passedBeforeNegativeCase": 40,
+    "watchdogAtMs": 55038,
+    "finding": "Missing custom file caused native createAsync to remain pending and music to remain paused. Playback fallback began after loading, so it could not bound this wait.",
+    "watchdogCancellationWasNotANativeLoadError": true,
+    "rawResultSHA256": "ebe3bcbd7c5c9c37b232a4d615dee7167dad60fed2d3993f06ed9f203c4e09e2"
+  },
+  "actualNativeAudioRun2": {
+    "sourceCommit": "ca6646a0e558763194f5be0981a2bae16792587f",
+    "sourcePlayerSHA256": "6116b8f2acd22f5c95a4e41b5e7536348af45d111aa62707bef096ff6fc0edab",
+    "classification": "Separate private diagnostic using actual React audio hook, device music service, ExpoAVPlayer, alert output and cue handoff on preserved production9 native host",
+    "state": "complete",
+    "checksPassed": 59,
+    "checksFailed": 0,
+    "elapsedMs": 16873,
+    "selectedModernAndLegacyCuePauseUnloadResumeOrderPassed": true,
+    "validSelectedLocalWavCueAndExplicitCueStopPassed": true,
+    "manualMusicPauseStopAndIntentCancellationPreventStaleResume": true,
+    "noneOffAndZeroVolumeDoNotPauseMusic": true,
+    "missingFileSourceRejectedWithoutHarnessCancellation": true,
+    "missingFileRequestSettlementMs": 2035,
+    "sameCurrentMusicOwnerResumedAfterMissingFileError": true,
+    "pendingMissingNativeLoadWasInitializedSilentAndNeverPlayed": true,
+    "actualLateNativeLoadReturnOrCleanupObserved": false,
+    "injectedLateLoadAndCleanupRegressionTestsAreSeparateEvidence": true,
+    "diagnosticAppTerminatedAfterResultPreservation": true,
+    "all16NativeInputsUnchanged": true,
+    "strictDeepAdHocSignaturePassed": true,
+    "rawResultSHA256": "1dcbcce13282f8ec09a14276f7d22bd74077d97c3a6d332865d38f3adf2ed089",
+    "safeSummarySHA256": "d6a475b6a8b774e67adb7d8e16c331101ae31ab046566c2bb9689ded3352692d",
+    "buildReceiptSHA256": "f2c9ac16a25efd9e5e7a10db3dcabd9b1681fc53c87e4fda8dc5f015a1a34c96"
+  },
+  "evidenceDirectories": [
+    "artifacts/app-store/cue-navigation-qa-2026-11-13",
+    "artifacts/app-store/cue-handoff-native-qa-2026-11-13"
+  ],
+  "limits": [
+    "Native SDK statuses and acknowledgements prove these local checks; no acoustic recording or physical iPhone MusicKit playback was tested.",
+    "The separate diagnostic does not exercise full account/background lifecycle dispatch; actual cancellation APIs are checked, and automated integration tests cover lifecycle ownership.",
+    "The native manual music stop case is not a full WorkoutContext stop dispatch.",
+    "No missing-library artwork repair or original playlist/round-assignment workflow is established by these results.",
+    "A subsequent native artwork change requires a fresh native build; these preserved-host results do not validate that new native helper."
+  ],
+  "newCloudBuildOrPublicReleasePerformed": false,
+  "privateCredentialsOrAccountValuesIncluded": false
+}
