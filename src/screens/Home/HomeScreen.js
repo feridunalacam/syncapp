@@ -13,7 +13,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useRoutineContext } from '../../context/RoutineContext';
 import { useWorkout } from '../../context/WorkoutContext';
 import { useAppleMusicConnection } from '../../context/AppleMusicConnectionContext';
-import { AppleMusicMiniPlayer } from '../../components/common/AppleMusicPlayerPanel';
+import AppleMusicWorkoutControl from '../../components/common/AppleMusicWorkoutControl';
 import { getRoutineDuration, buildTimeline } from '../../domain/routines';
 import { formatTime } from '../../utils/timeFormatters';
 import { navigateToCreateRoutine } from '../../navigation/navigationHelpers';
@@ -275,7 +275,7 @@ export default function HomeScreen({ navigation, route }) {
             <Text style={{ color: theme.textSecondary, fontSize: 12 }}>End session</Text>
           </Pressable>
         )}
-        <AppleMusicMiniPlayer />
+        <AppleMusicWorkoutControl style={styles.appleMusic} />
         {appleMusic.player?.isActive?.() && (
           <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
             Apple Music plays independently. Clear its queue to use routine audio and cues again.
@@ -460,6 +460,7 @@ export default function HomeScreen({ navigation, route }) {
   );
 }
 const styles = StyleSheet.create({
+  appleMusic: { marginBottom: 14 },
   content: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 18 },
   header: {
     flexDirection: 'row',

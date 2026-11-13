@@ -269,6 +269,7 @@ function applePickerFixture() {
       setTimeout: schedule,
       clearTimeout: cancel,
       useFocusEffect: (callback) => React.useEffect(callback, [callback]),
+      useIsFocused: () => true,
       AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
       createAutoRefresh: (refresh) => createAutoRefresh(refresh, { schedule, cancel }),
       Sheet: ({ visible, children }) =>

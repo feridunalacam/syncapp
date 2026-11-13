@@ -14,6 +14,7 @@ import { useTheme } from '../../context/ThemeContext';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
 import GlassSurface from '../../components/common/GlassSurface';
 import FormFieldError from '../../components/common/FormFieldError';
+import AppleMusicWorkoutControl from '../../components/common/AppleMusicWorkoutControl';
 import { MusicSearchModal } from './components/MusicSearchModal';
 import { RoundEditor } from './components/RoundEditor';
 import { RoundConfiguration } from './components/RoundConfiguration';
@@ -228,6 +229,7 @@ export default function CreateRoutineScreen({ navigation, route }) {
         showsVerticalScrollIndicator={false}
       >
         <View>
+          <AppleMusicWorkoutControl style={styles.appleMusic} />
           {/* Round Configuration */}
           <RoundConfiguration
             totalDurationSec={getRoutineDuration({
@@ -442,4 +444,7 @@ export default function CreateRoutineScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({ fill: { flex: 1 } });
+const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  appleMusic: { marginBottom: 16 },
+});

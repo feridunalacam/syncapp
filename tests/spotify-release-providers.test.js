@@ -68,6 +68,7 @@ function load(relative, names, overrides) {
     Platform: { OS: 'ios' },
     Ionicons: 'Icon',
     useTheme: () => ({ theme, isDark: true, toggleTheme: noop }),
+    useIsFocused: () => true,
     Sheet,
     WEB_MEDIA_IMPORT_AVAILABLE: false,
     ...overrides,

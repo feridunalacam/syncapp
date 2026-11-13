@@ -11,6 +11,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../../../context/ThemeContext';
 import { usePlatformContext } from '../../../context/PlatformContext';
 import { useMusicSearch } from '../../../hooks/useMusicSearch';
@@ -45,6 +46,7 @@ export const MusicSearchModal = ({
   isForCountdownSound = false,
 }) => {
   const { theme } = useTheme();
+  const screenFocused = useIsFocused();
   const spotify = useSpotifyConnection();
   const apple = useAppleMusicConnection();
   const platforms = usePlatformContext();
@@ -59,7 +61,12 @@ export const MusicSearchModal = ({
           : 'device';
   const music = useMusicSearch({ ...platforms, loadDeviceMusic });
   const [source, setSource] = useState(isForCountdownSound ? 'voices' : defaultSource);
-  const isRemote = source === 'spotify' || source === 'appleMusic';
+  const isApplePlayer =
+    !isForCountdownSound &&
+    source === 'appleMusic' &&
+    apple.companionAvailable &&
+    !apple.timedAvailable;
+  const isRemote = !isApplePlayer && (source === 'spotify' || source === 'appleMusic');
   const connected = !!platforms.connectedPlatforms[source]?.connected;
   const connection = source === 'appleMusic' ? apple : spotify;
   const providerName = source === 'appleMusic' ? 'Apple Music' : 'Spotify';
@@ -69,6 +76,20 @@ export const MusicSearchModal = ({
   const [deviceLoaded, setDeviceLoaded] = useState(false);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const pendingApplePlayer = useRef(false);
+  const mounted = useRef(true);
+  const latestPlayer = useRef(null);
+  latestPlayer.current = { apple, isForCountdownSound, screenFocused };
+  useEffect(() => {
+    if (!screenFocused) pendingApplePlayer.current = false;
+  }, [screenFocused]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      pendingApplePlayer.current = false;
+    };
+  }, []);
   const reset = music.reset;
   useEffect(() => {
     reset();
@@ -76,7 +97,10 @@ export const MusicSearchModal = ({
     setPlaylist(null);
     setDeviceLoaded(false);
     setCategory('track');
-    if (visible) setSource(isForCountdownSound ? 'voices' : defaultSource);
+    if (visible) {
+      pendingApplePlayer.current = false;
+      setSource(isForCountdownSound ? 'voices' : defaultSource);
+    }
   }, [visible, isForCountdownSound, selectedRoundForSong, reset]);
   useEffect(() => {
     if (visible && isRemote && connected) music.loadPlaylists(source);
@@ -104,8 +128,40 @@ export const MusicSearchModal = ({
     setCategory('track');
   };
   const close = () => {
+    pendingApplePlayer.current = false;
     music.reset();
     onClose();
+  };
+  const openApplePlayer = () => {
+    const current = latestPlayer.current;
+    if (
+      !mounted.current ||
+      !visibleRef.current ||
+      !current.screenFocused ||
+      current.isForCountdownSound ||
+      !current.apple.companionAvailable ||
+      !current.apple.ready ||
+      typeof current.apple.player?.open !== 'function'
+    )
+      return;
+    pendingApplePlayer.current = true;
+    music.reset();
+    onClose();
+  };
+  const finishPlayerHandoff = () => {
+    const requested = pendingApplePlayer.current;
+    pendingApplePlayer.current = false;
+    const current = latestPlayer.current;
+    if (
+      requested &&
+      mounted.current &&
+      !visibleRef.current &&
+      current.screenFocused &&
+      !current.isForCountdownSound &&
+      current.apple.companionAvailable &&
+      current.apple.ready
+    )
+      current.apple.player?.open?.();
   };
   const choose = useCallback(
     (item) => {
@@ -151,7 +207,7 @@ export const MusicSearchModal = ({
         ...(spotify.available
           ? [{ id: 'spotify', label: 'Spotify', icon: 'musical-notes-outline' }]
           : []),
-        ...(apple.timedAvailable
+        ...(apple.timedAvailable || apple.companionAvailable
           ? [{ id: 'appleMusic', label: 'Apple Music', icon: 'logo-apple' }]
           : []),
         {
@@ -166,7 +222,13 @@ export const MusicSearchModal = ({
     ),
   );
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={close}
+      onDismiss={finishPlayerHandoff}
+    >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.overlay, { backgroundColor: theme.modalOverlay }]}
@@ -183,13 +245,17 @@ export const MusicSearchModal = ({
               <Text
                 style={{ color: theme.text, fontSize: 25, fontWeight: '600', letterSpacing: -0.6 }}
               >
-                {isForCountdownSound
-                  ? 'Choose a sound'
-                  : `${songType === 'rest' ? 'Rest' : 'Work'} music`}
+                {isApplePlayer
+                  ? 'Apple Music'
+                  : isForCountdownSound
+                    ? 'Choose a sound'
+                    : `${songType === 'rest' ? 'Rest' : 'Work'} music`}
               </Text>
               {!isForCountdownSound && (
                 <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 5 }}>
-                  Round {String(selectedRoundForSong || 1).padStart(2, '0')}
+                  {isApplePlayer
+                    ? 'Songs and playlists for your workout'
+                    : `Round ${String(selectedRoundForSong || 1).padStart(2, '0')}`}
                 </Text>
               )}
             </View>
@@ -204,7 +270,20 @@ export const MusicSearchModal = ({
             </Pressable>
           </View>
           <PickerTabs items={sources} value={source} onChange={changeSource} />
-          {source === 'browser' ? (
+          {isApplePlayer ? (
+            <View style={{ paddingTop: 12, paddingBottom: 16, gap: 14 }}>
+              <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 20 }}>
+                Choose songs or a playlist in the Apple Music player, then press Play. Music plays
+                independently of your timer.
+              </Text>
+              <PrimaryAction
+                label="Open Apple Music player"
+                icon="logo-apple"
+                disabled={!apple.ready}
+                onPress={openApplePlayer}
+              />
+            </View>
+          ) : source === 'browser' ? (
             visible && <BrowserAudioPanel picker={picker} />
           ) : (
             <ScrollView
