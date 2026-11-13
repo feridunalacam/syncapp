@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { Script } from 'node:vm';
 import { createCueController } from '../src/services/alerts/controller.js';
 import { createCueHandoff } from '../src/services/alerts/cueHandoff.js';
+import { createAppleMusicCompanionController } from '../src/services/appleMusic/companion.js';
 import { buildCuePreview, resolveAlertSound } from '../src/domain/alerts.js';
 
 const settle = () => new Promise(setImmediate);
@@ -66,13 +67,16 @@ function fakeClock() {
 function harness(options = {}) {
   const time = fakeClock();
   const sounds = [];
+  const loads = [];
   let audioModes = 0;
   const audio = {
     async setAudioModeAsync() {
       audioModes++;
+      await options.mode?.();
     },
     Sound: {
       async createAsync(source, configuration) {
+        loads.push(source);
         await options.load?.(source);
         const sound = {
           source,
@@ -98,6 +102,11 @@ function harness(options = {}) {
     },
   };
   const context = {
+    Date: class extends Date {
+      static now() {
+        return time.now();
+      }
+    },
     Audio: audio,
     InterruptionModeIOS: { MixWithOthers: 0 },
     InterruptionModeAndroid: { DuckOthers: 1 },
@@ -117,6 +126,7 @@ function harness(options = {}) {
     api: context.api,
     time,
     sounds,
+    loads,
     get audioModes() {
       return audioModes;
     },
@@ -129,6 +139,74 @@ const cue = (uri = 'speech://go', additions = {}) => ({
   language: 'en-US',
   ...additions,
 });
+
+async function musicHarness(t, options = {}) {
+  const h = harness(options);
+  const events = [];
+  let playing = false;
+  const track = {
+    id: 'independent',
+    uri: 'apple-music:song:independent',
+    name: 'Independent song',
+    duration_ms: 60000,
+  };
+  const service = {
+    getAccessToken: async () => ({ accessToken: 'native:appleMusic' }),
+    playTrack: async () => {
+      playing = true;
+      return { success: true };
+    },
+    pause: async () => {
+      playing = false;
+      events.push('music.pause');
+      return { success: true };
+    },
+    play: async () => {
+      playing = true;
+      events.push('music.resume');
+      return { success: true };
+    },
+    cleanup: async () => {
+      playing = false;
+      events.push('music.clear');
+      return { success: true };
+    },
+    setRepeat: async () => ({ success: true }),
+    getCurrentPlayback: async () => ({ item: track, is_playing: playing, progress_ms: 1000 }),
+  };
+  const controller = createAppleMusicCompanionController({
+    service,
+    pollIntervalMs: 100000,
+    beforePlay: () => Promise.all([h.api.stopWorkoutCues(), h.api.stopCuePreview()]),
+  });
+  const release = h.api.acquireMusicCueSilence();
+  const unregister = h.api.registerCueMusicSource({ suspendForCue: controller.suspendForCue });
+  await controller.playTrack(track);
+  await settle();
+  events.length = 0;
+  t.after(async () => {
+    controller.cancelCueResume();
+    unregister();
+    await Promise.allSettled([h.api.stopWorkoutCues(), h.api.stopCuePreview()]);
+    await controller.dispose();
+    release();
+  });
+  return {
+    ...h,
+    controller,
+    unregister,
+    events,
+    get musicPlaying() {
+      return playing;
+    },
+    resumes: () => events.filter((event) => event === 'music.resume').length,
+    request(event = cue('file:///missing-custom.wav')) {
+      const pending = h.api.playWorkoutCue(event);
+      pending.catch(() => {});
+      return pending;
+    },
+  };
+}
 
 test('all fourteen saved speech URIs play only original effects in both saved languages', async () => {
   const expected = [
@@ -225,6 +303,7 @@ test('a fallback loaded after its useful deadline is unloaded without playing', 
   await h.time.advance(20);
   loading.resolve();
   assert.equal((await playing).cancelled, true);
+  await settle(); // The cancelled request settles before its late native load retires.
   assert.equal(h.sounds[0].plays, 0);
   assert.equal(h.sounds[0].unloads, 1);
   assert.equal(h.time.jobs.size, 0);
@@ -464,3 +543,226 @@ test('a still-loaded native stop result cannot release music until a checked ret
   assert.ok(h.sounds[0].unloads >= 2);
   unregister();
 });
+
+for (const stage of ['mode', 'load']) {
+  test(`real Apple music resumes by the two-second budget when native ${stage} never settles`, async (t) => {
+    const waiting = deferred();
+    const h = await musicHarness(t, { [stage]: () => waiting.promise });
+    const playing = h.request();
+    let settledAt = null;
+    playing.then(
+      () => {
+        settledAt = h.time.now();
+      },
+      () => {
+        settledAt = h.time.now();
+      },
+    );
+    await settle();
+    assert.equal(h.musicPlaying, false);
+    await h.time.advance(1999);
+    assert.equal(settledAt, null);
+    await h.time.advance(2000);
+    await assert.rejects(playing, /did not load in time/);
+    await settle();
+    assert.equal(settledAt, 2000);
+    assert.equal(h.musicPlaying, true);
+    assert.equal(h.resumes(), 1);
+    assert.equal(h.sounds.length, 0);
+    assert.equal(h.loads.length, stage === 'mode' ? 0 : 1);
+    assert.equal(h.time.jobs.size, 0);
+    waiting.resolve();
+    await settle();
+    await settle();
+    assert.equal(
+      h.loads.length,
+      stage === 'mode' ? 0 : 1,
+      'mode completing after timeout cannot begin a native load',
+    );
+    assert.ok(h.sounds.every((sound) => sound.plays === 0 && sound.unloads === 1));
+    assert.equal(h.resumes(), 1, 'late native completion cannot restore music a second time');
+  });
+}
+
+test('native mode taking 1500ms leaves only 500ms of the same total preplay budget', async (t) => {
+  const mode = deferred();
+  const loading = deferred();
+  const h = await musicHarness(t, { mode: () => mode.promise, load: () => loading.promise });
+  const playing = h.request();
+  await settle();
+  await h.time.advance(1500);
+  assert.equal(h.loads.length, 0);
+  mode.resolve();
+  await settle();
+  assert.equal(h.loads.length, 1);
+  let settled = false;
+  playing.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  await h.time.advance(1999);
+  assert.equal(settled, false);
+  await h.time.advance(2000);
+  await assert.rejects(playing, /did not load in time/);
+  assert.equal(h.musicPlaying, true);
+  assert.equal(h.resumes(), 1);
+});
+
+test('an event deadline of 600ms cancels a hanging load and restores real Apple music early', async (t) => {
+  const loading = deferred();
+  const h = await musicHarness(t, { load: () => loading.promise });
+  const playing = h.request(cue('file:///missing.wav', { kind: 'signal', expiresAt: 600 }));
+  await settle();
+  await h.time.advance(599);
+  assert.equal(h.musicPlaying, false);
+  await h.time.advance(600);
+  assert.equal((await playing).cancelled, true);
+  await settle();
+  assert.equal(h.musicPlaying, true);
+  assert.equal(h.resumes(), 1);
+  assert.equal(h.sounds.length, 0);
+  assert.equal(h.time.jobs.size, 0);
+});
+
+for (const boundary of ['timeout', 'supersede']) {
+  test(`a custom load completing after ${boundary} retires only its own silent sound beside a newer cue`, async (t) => {
+    const loading = deferred();
+    const h = await musicHarness(t, {
+      load: (source) => (source.uri === 'file:///old.wav' ? loading.promise : undefined),
+    });
+    const old = h.request(cue('file:///old.wav'));
+    await settle();
+    if (boundary === 'timeout') {
+      await h.time.advance(2000);
+      await assert.rejects(old, /did not load in time/);
+      assert.equal(h.musicPlaying, true);
+    }
+    const next = h.request(cue('speech://rest'));
+    await settle();
+    if (boundary === 'supersede') assert.equal((await old).cancelled, true);
+    const current = h.sounds.find(
+      (sound) => sound.source === '../../../assets/sounds/cues/gong.wav',
+    );
+    assert.ok(current);
+    assert.equal(current.plays, 1);
+    const jobs = h.time.jobs.size;
+    const resumes = h.resumes();
+    loading.resolve();
+    await settle();
+    await settle();
+    const late = h.sounds.find((sound) => sound.source.uri === 'file:///old.wav');
+    assert.equal(late.configuration.shouldPlay, false);
+    assert.equal(late.plays, 0);
+    assert.equal(late.unloads, 1);
+    assert.equal(current.unloads, 0);
+    assert.equal(h.time.jobs.size, jobs, 'late disposal cannot clear the newer cue watchdog');
+    assert.equal(
+      h.resumes(),
+      resumes,
+      'late disposal cannot settle the current cue or resume its music',
+    );
+    current.callback({ didJustFinish: true });
+    assert.equal((await next).completed, true);
+    await settle();
+    assert.equal(h.musicPlaying, true);
+    assert.equal(h.resumes(), resumes + 1);
+  });
+}
+
+test('a native load rejecting after timeout is handled without disturbing the newer cue', async (t) => {
+  const loading = deferred();
+  const h = await musicHarness(t, {
+    load: (source) => (source.uri === 'file:///old.wav' ? loading.promise : undefined),
+  });
+  const old = h.request(cue('file:///old.wav'));
+  await settle();
+  await h.time.advance(2000);
+  await assert.rejects(old, /did not load in time/);
+  const next = h.request(cue('speech://rest'));
+  await settle();
+  const current = h.sounds[0];
+  loading.reject(new Error('Late missing-file rejection'));
+  await settle();
+  await settle();
+  assert.equal(current.plays, 1);
+  assert.equal(current.unloads, 0);
+  assert.equal(h.resumes(), 1);
+  current.callback({ didJustFinish: true });
+  assert.equal((await next).completed, true);
+  await settle();
+  assert.equal(h.resumes(), 2);
+});
+
+test('a failed late unload stays owned, blocks the next cue and needs explicit recovery without automatic resume', async (t) => {
+  const loading = deferred();
+  let fail = true;
+  const h = await musicHarness(t, {
+    load: (source) => (source.uri === 'file:///old.wav' ? loading.promise : undefined),
+    unload: (source) => {
+      if (source.uri === 'file:///old.wav' && fail) throw new Error('Late native unload failed');
+    },
+  });
+  const old = h.request(cue('file:///old.wav'));
+  await settle();
+  await h.time.advance(2000);
+  await assert.rejects(old, /did not load in time/);
+  loading.resolve();
+  await settle();
+  await settle();
+  const late = h.sounds[0];
+  assert.equal(late.plays, 0);
+  assert.equal(late.unloads, 1);
+  await h.time.advance(9000);
+  assert.equal(late.unloads, 1, 'there is no timer-based cleanup retry');
+  const blocked = h.request(cue('speech://rest'));
+  await assert.rejects(blocked, /Late native unload failed/);
+  await settle();
+  assert.equal(h.sounds.length, 1, 'no new cue loads over an uncertain native sound');
+  assert.equal(h.resumes(), 1);
+  assert.equal(h.musicPlaying, false);
+  fail = false;
+  await h.api.stopWorkoutCues();
+  await settle();
+  assert.ok(late.unloads >= 3);
+  assert.equal(h.resumes(), 1, 'acknowledged recovery does not restart a failed cue burst');
+  await h.controller.resume();
+  assert.equal(h.musicPlaying, true);
+});
+
+for (const boundary of ['manual pause', 'clear', 'background', 'dispose and unregister']) {
+  test(`${boundary} promptly cancels pending native mode/load and prevents late playback or resume`, async (t) => {
+    for (const stage of ['mode', 'load']) {
+      const waiting = deferred();
+      const h = await musicHarness(t, { [stage]: () => waiting.promise });
+      const playing = h.request();
+      await settle();
+      assert.equal(h.musicPlaying, false);
+      if (boundary === 'manual pause') await h.controller.pause();
+      else if (boundary === 'clear') await h.controller.clear();
+      else if (boundary === 'background') h.controller.setAppActive(false);
+      else {
+        h.unregister();
+        await h.controller.dispose();
+      }
+      await h.api.stopWorkoutCues();
+      assert.equal((await playing).cancelled, true);
+      assert.equal(h.time.now(), 0, 'explicit cancellation does not wait for the loading timeout');
+      waiting.resolve();
+      await settle();
+      await settle();
+      assert.equal(
+        h.loads.length,
+        stage === 'mode' ? 0 : 1,
+        'late mode acknowledgement cannot begin a native load',
+      );
+      assert.ok(h.sounds.every((sound) => sound.plays === 0 && sound.unloads === 1));
+      assert.equal(h.resumes(), 0);
+      assert.equal(h.musicPlaying, false);
+      assert.equal(h.time.jobs.size, 0);
+    }
+  });
+}

@@ -13,6 +13,49 @@ let fallback = null;
 // its acknowledgement available to every later handover stop, including failures.
 const retiringSounds = new Set();
 const unloadingSounds = new Map();
+const pendingLoads = new Set();
+const waitForCueLoad = (operation, deadline, discardLate = async () => {}) =>
+  new Promise((resolve, reject) => {
+    let terminal = false;
+    let timer;
+    const finish = (error, value) => {
+      if (terminal) return;
+      terminal = true;
+      clearTimeout(timer);
+      pendingLoads.delete(cancel);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const cancel = () => {
+      const error = new Error('Alert loading cancelled.');
+      error.cancelled = true;
+      finish(error);
+    };
+    const timeout = () =>
+      finish(new Error('The selected alert did not load in time. Try another sound.'));
+    pendingLoads.add(cancel);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      timeout();
+      return;
+    }
+    timer = setTimeout(timeout, remaining);
+    Promise.resolve()
+      .then(() => (terminal ? undefined : operation()))
+      .then(
+        (value) => {
+          if (!terminal && Date.now() >= deadline) timeout();
+          if (terminal) {
+            Promise.resolve()
+              .then(() => discardLate(value))
+              .catch(() => {});
+          } else finish(null, value);
+        },
+        (error) => {
+          if (!terminal) finish(error);
+        },
+      );
+  });
 const unloadSound = (sound) => {
   if (unloadingSounds.has(sound)) return unloadingSounds.get(sound);
   retiringSounds.add(sound);
@@ -36,6 +79,7 @@ const settle = (result) => {
 };
 const output = {
   async stop() {
+    [...pendingLoads].forEach((cancel) => cancel());
     settle({ cancelled: true });
     const previous = currentSound;
     currentSound = null;
@@ -47,21 +91,45 @@ const output = {
     const uri = soundConfig?.uri;
     if (!uri || cue.volume === 0) return { completed: true };
     const volume = Math.max(0, Math.min(100, cue.volume ?? 80)) / 100;
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
-      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-      shouldDuckAndroid: true,
-    });
-    if (cancelled()) return { cancelled: true };
+    // One pre-play budget covers both native awaits. Missing files can leave
+    // createAsync pending indefinitely even though no audible sound was created.
+    const deadline = Math.min(
+      Date.now() + 2000,
+      Number.isFinite(cue.expiresAt) ? cue.expiresAt : Infinity,
+    );
     const asset = CUE_ASSETS[uri] || LEGACY_CUE_ASSETS[uri];
     if (!asset && !/^(file|https?|content|asset):\/\//i.test(uri))
       throw new Error('Choose a sound file or a built-in cue.');
-    const { sound } = await Audio.Sound.createAsync(asset || { uri }, {
-      shouldPlay: false,
-      volume,
-      progressUpdateIntervalMillis: 100,
-    });
+    let sound;
+    try {
+      await waitForCueLoad(
+        () =>
+          Audio.setAudioModeAsync({
+            playsInSilentModeIOS: true,
+            interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+            interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+            shouldDuckAndroid: true,
+          }),
+        deadline,
+      );
+      if (cancelled()) return { cancelled: true };
+      const loaded = await waitForCueLoad(
+        () =>
+          Audio.Sound.createAsync(asset || { uri }, {
+            shouldPlay: false,
+            volume,
+            progressUpdateIntervalMillis: 100,
+          }),
+        deadline,
+        (late) => (late?.sound ? unloadSound(late.sound) : undefined),
+      );
+      sound = loaded?.sound;
+      if (!sound) throw new Error('The selected alert could not be loaded.');
+    } catch (error) {
+      if (error.cancelled || cancelled() || (cue.expiresAt != null && Date.now() >= cue.expiresAt))
+        return { cancelled: true };
+      throw error;
+    }
     if (cancelled()) {
       await unloadSound(sound);
       return { cancelled: true };
