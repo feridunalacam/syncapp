@@ -13,6 +13,18 @@ const check = (result) => {
     throw new Error(result?.error || 'Apple Music could not complete this request.');
   return result;
 };
+const coverOf = (item) =>
+  [item?.coverUrl, item?.image, item?.album?.images?.[0]?.url]
+    .find((value) => typeof value === 'string' && value.trim())
+    ?.trim() || null;
+const songIdentity = (item) => {
+  if (item?.type === 'playlist' || (item?.platform && item.platform !== 'appleMusic'))
+    return null;
+  const id = typeof item?.id === 'string' && item.id ? item.id : null;
+  const uriID = /^apple-music:song:([A-Za-z0-9._-]+)$/.exec(item?.uri || '')?.[1];
+  if ((item?.uri && !uriID) || (id && uriID && id !== uriID)) return null;
+  return id || uriID || null;
+};
 const metadata = (item) =>
   item
     ? {
@@ -21,7 +33,7 @@ const metadata = (item) =>
         artist: item.artists?.[0]?.name || item.artist || '',
         album: typeof item.album === 'string' ? item.album : item.album?.name || '',
         duration: item.duration ?? (item.duration_ms ?? item.durationMs ?? 0) / 1000,
-        coverUrl: item.coverUrl || item.image || item.album?.images?.[0]?.url || null,
+        coverUrl: coverOf(item),
       }
     : null;
 
@@ -114,7 +126,12 @@ export function createAppleMusicCompanionController({
         check(playback);
         if (disposed || !appActive || entry !== current || !owns() || generation !== ticket)
           return cancelled();
-        const track = playback?.item ? metadata(playback.item) : state.track;
+        let track = playback?.item ? metadata(playback.item) : state.track;
+        // Sparse native updates may omit artwork for the same song. Retain only
+        // that song's known cover; never infer identity from its title or index.
+        const identity = songIdentity(track);
+        if (playback?.item && !track.coverUrl && identity && identity === songIdentity(state.track))
+          track = { ...track, coverUrl: coverOf(state.track) };
         const position = (playback?.progress_ms ?? playback?.progressMs ?? 0) / 1000;
         const percent = track?.duration > 0 ? (position / track.duration) * 100 : 0;
         publish({

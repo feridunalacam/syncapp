@@ -116,6 +116,77 @@ function harness(t, overrides = {}, options = {}) {
   };
 }
 
+test('same-track sparse polling retains artwork while refreshing playback metadata and progress', async (t) => {
+  const selected = song('artwork');
+  const h = harness(t, {
+    getCurrentPlayback: async () => ({
+      item: {
+        id: selected.id,
+        uri: selected.uri,
+        name: 'Updated title',
+        artist: 'Updated artist',
+        duration_ms: 120000,
+        image: '',
+        coverUrl: ' ',
+      },
+      is_playing: false,
+      progress_ms: 30000,
+    }),
+  });
+  await h.controller.playTrack(selected);
+  await h.controller.refresh();
+  const state = h.controller.getState();
+  assert.equal(state.track.coverUrl, selected.image);
+  assert.equal(state.track.title, 'Updated title');
+  assert.equal(state.track.artist, 'Updated artist');
+  assert.equal(state.track.duration, 120);
+  assert.equal(state.progress, 25);
+  assert.equal(state.playing, false);
+});
+
+test('fresh playback artwork replaces retained same-track artwork', async (t) => {
+  const selected = song('new-cover');
+  let image = '';
+  const h = harness(t, {
+    getCurrentPlayback: async () => ({ item: { ...selected, image }, is_playing: true }),
+  });
+  await h.controller.playTrack(selected);
+  await h.controller.refresh();
+  assert.equal(h.controller.getState().track.coverUrl, selected.image);
+  image = 'https://example.test/updated-cover.jpg';
+  await h.controller.refresh();
+  assert.equal(h.controller.getState().track.coverUrl, image);
+});
+
+test('sparse playback never carries artwork to a different, unidentified or conflicting track', async (t) => {
+  const selected = song('original');
+  for (const item of [
+    { ...song('next'), image: '' },
+    { name: selected.name, image: '' },
+    { id: selected.id, uri: 'apple-music:song:next', image: '' },
+    { id: selected.id, type: 'playlist', image: '' },
+    { id: selected.id, platform: 'spotify', image: '' },
+    { id: selected.id, uri: 'https://example.test/another-song', image: '' },
+  ]) {
+    const h = harness(t, {
+      getCurrentPlayback: async () => ({ item, is_playing: true }),
+    });
+    await h.controller.playTrack(selected);
+    await h.controller.refresh();
+    assert.equal(h.controller.getState().track.coverUrl, null);
+  }
+});
+
+test('a sparse URI-only playback item retains artwork for the same Apple Music song', async (t) => {
+  const selected = song('uri-only');
+  const h = harness(t, {
+    getCurrentPlayback: async () => ({ item: { uri: selected.uri, image: '' }, is_playing: true }),
+  });
+  await h.controller.playTrack(selected);
+  await h.controller.refresh();
+  assert.equal(h.controller.getState().track.coverUrl, selected.image);
+});
+
 test('opening the companion and foregrounding never initiates music or reads an unrelated player', async (t) => {
   const h = harness(t);
   h.controller.setVisible(true);
