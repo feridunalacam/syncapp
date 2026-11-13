@@ -1,11 +1,16 @@
-# Apple account deletion — local implementation, activation pending
+# Apple account deletion — live activation and verification boundaries
 
-This change is not live-deployed or enabled by the source alone. No Apple signing
-key, database change, hosted function deployment, existing-account deletion, or
-provider change was performed in this implementation task. Ordinary Apple login
-and Sync account deletion continue when this optional registration is unavailable.
+## Current live activation
 
-## Data flow and access
+On 13 November, Root verified the owner's exact signing-key/backend approval and completed live activation. The downloaded key is scoped only to Sign in with Apple for the exact Sync App ID; EC P-256 format and private local directory `0700` / file `0600` permissions passed. **Five server secrets** were saved, with all five 64-character SHA256 digests matching after UI reload; no private values are included here.
+
+Hosted migration **20261113091118**, SHA256 `c200caaaad3606fa1c8ee2990c6f6bdf367762371cc2f8882c4af599162276b9`, is applied. Private-table RLS/all-role privileges, exact RPC signatures/service-only EXECUTE and Auth-user FK cascade checks pass; the activation snapshot has **zero token rows**. **delete-account v11 was deployed first; register-apple-token v1 last**, with all 12 deployed source files read back exactly. Missing-auth POST401, GET405 and OPTIONS204 checks across both routes pass **6/6**. These checks do not exercise authenticated Apple registration or revocation. [Activation receipt](../artifacts/app-store/apple-revocation-activation-preflight-2026-11-13/live-activation-safe.json), [HTTP smoke](../artifacts/app-store/apple-revocation-activation-preflight-2026-11-13/live-http-smoke-safe.json).
+
+Existing billing code digests remain unchanged, but five secret saves advanced their deployed revisions: sync-subscription **11**, production webhook **11**, review webhook **6**. Do not treat revision numbers as unchanged. Advisors show only five expected private-RLS/no-policy INFO entries and the existing leaked-password-protection WARN, with no new unexpected findings. No owner/review account was deleted and no real Apple code/token was sent. **Fresh native Apple token registration and actual Apple revocation remain unproven**, pending phone QA; ordinary sign-in/deletion and manual fallback source behavior are distinct from this missing positive evidence.
+
+The later source commit `bdc7d22bbbc7754f6990b60c0f982fb30af8fcd2` aligns the migration filename and one test reference without changing SQL; actual PG 1/1 and unchanged 157 runtime/16 native-input checks pass. Signed production9 is now Apple VALID/IN_BETA_TESTING in the existing owner-only group (1 tester/6 builds), with strict artifact verification and eight preservation checks. This distribution result does not prove real Apple token registration or revocation. Separate local native spot-checks passed; full walkthrough/physical QA remains open. [Exact signed9 receipt](ios-build-1.0.0-9-evidence.json). The original implementation task itself made no live changes; this separately approved activation supersedes its old pending status.
+
+## Source data flow and access — positive live Apple path still unverified
 
 1. Native Apple authentication still verifies nonce/state and signs into Supabase
    using the identity token. The transient Apple `authorizationCode` is then sent
@@ -39,7 +44,7 @@ and Sync account deletion continue when this optional registration is unavailabl
    provider unlinking, unmounts and stale queued results are fenced. OS failures
    are not treated as revocation.
 
-## Server-only configuration required before live activation
+## Server-only configuration — now saved and verified
 
 | Variable                     | Purpose                                                                                   |
 | ---------------------------- | ----------------------------------------------------------------------------------------- |
@@ -56,21 +61,24 @@ undo an already verified Apple sign-in. Rotating the encryption key without a
 planned server-side re-encryption makes old ciphertext unreadable; deletion still
 works with the explicit manual fallback.
 
-Before enabling this live, obtain the owner's specific approval for signing-key
-creation/use and the new private-token data processing, update the public privacy
-policy, review the migration/security advisors and deploy the migration/functions.
+Those activation prerequisites are now completed under the owner's specific
+approval, published policy and the verified migration/function boundaries above.
+This does not replace positive native Apple registration/revocation testing.
 This is a server retention addition: encrypted Apple refresh tokens are kept only
 for validating/revoking the user's Apple authorization and removed with the Sync
-account. No new advertising or music data flow is introduced. The existing review
+account. There is no automatic expiry cleanup: a later registration replaces the
+credential, while sign-out or OS permission revocation alone does not erase it.
+No new advertising or music data flow is introduced. The existing review
 account UUID retention/reservation and billing environment separation are unchanged.
 
-## Verification scope
+## Verification scope — positive live Apple path still open
 
 Tests use synthetic credentials, generated in-memory signing keys, offline Apple
 responses and ephemeral PostgreSQL. They exercise the actual handlers and
 migration, WebCrypto signatures/authenticated encryption, stale-account/native
 notification fences and manual-deletion UI. They neither delete the owner's Apple
-account nor establish live Apple revocation until a separately authorized test.
+account nor establish live Apple revocation. The live negative HTTP/security
+checks above are now additional evidence; the positive Apple path remains open.
 
 Primary references: [Apple TN3194](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple),
 [Apple token revocation](https://developer.apple.com/documentation/signinwithapplerestapi/revoke-tokens),
