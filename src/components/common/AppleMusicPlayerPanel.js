@@ -13,6 +13,7 @@ import { useAppleMusicConnection } from '../../context/AppleMusicConnectionConte
 import { useTheme } from '../../context/ThemeContext';
 import MusicArtwork from './MusicArtwork';
 import Sheet from './Sheet';
+import usePlaylistArtwork from '../../hooks/usePlaylistArtwork';
 
 const itemsOf = (value) => (Array.isArray(value) ? value : value?.items || []).filter(Boolean);
 const titleOf = (item) => item?.name || item?.title || 'Untitled';
@@ -30,6 +31,7 @@ const repeatLabels = { off: 'Off', context: 'All', track: 'One' };
 const repeatNext = { off: 'context', context: 'track', track: 'off' };
 const emptyItems = [];
 const musicItemKey = (item, index) => `${item.type}:${item.id || item.uri || 'item'}:${index}`;
+const artworkViewability = { itemVisiblePercentThreshold: 50, minimumViewTime: 100 };
 
 // Each read belongs to one visible browser state. Retiring it never touches playback.
 function useMusicList(enabled, request, dependencies, delay = 0) {
@@ -100,7 +102,13 @@ function MusicButton({
   );
 }
 
-const MusicItem = React.memo(function MusicItem({ item, onSelect, selected }) {
+const MusicItem = React.memo(function MusicItem({
+  item,
+  artwork,
+  onArtworkUnavailable,
+  onSelect,
+  selected,
+}) {
   const { theme } = useTheme();
   return (
     <Pressable
@@ -111,7 +119,9 @@ const MusicItem = React.memo(function MusicItem({ item, onSelect, selected }) {
       style={[styles.item, { borderColor: theme.border }]}
     >
       <MusicArtwork
-        item={item}
+        item={artwork || item}
+        fallbackItem={artwork ? item : undefined}
+        onUnavailable={() => onArtworkUnavailable(item)}
         icon={item.type === 'playlist' ? 'albums-outline' : 'musical-note'}
       />
       <View style={styles.metadata}>
@@ -276,6 +286,19 @@ export default function AppleMusicPlayerPanel() {
       })),
     [playlist?.id, apple.getPlaylistTracks, retry],
   );
+  const artwork = usePlaylistArtwork({
+    active,
+    enabled:
+      active &&
+      tab === 'library' &&
+      !playlist &&
+      !apple.connecting &&
+      !library.loading &&
+      !library.error,
+    items: library.items,
+    request: apple.getPlaylistArtwork,
+    source: apple.getPlaylists,
+  });
   const invalidateReads = useCallback(() => {
     search.invalidate();
     library.invalidate();
@@ -319,6 +342,7 @@ export default function AppleMusicPlayerPanel() {
   };
   const close = () => {
     invalidateReads();
+    artwork.invalidate();
     actionGeneration.current++;
     player.close?.();
   };
@@ -338,11 +362,13 @@ export default function AppleMusicPlayerPanel() {
     ({ item }) => (
       <MusicItem
         item={item}
+        artwork={artwork.artworkFor(item)}
+        onArtworkUnavailable={artwork.onUnavailable}
         selected={selected?.id === item.id && selected?.type === item.type}
         onSelect={choose}
       />
     ),
-    [choose, selected?.id, selected?.type],
+    [choose, selected?.id, selected?.type, artwork.artworkFor, artwork.onUnavailable],
   );
   const changeTab = (value) => {
     if (value === tab && !playlist) return;
@@ -376,6 +402,9 @@ export default function AppleMusicPlayerPanel() {
         keyboardShouldPersistTaps="handled"
         data={browsing && !list.loading && !list.error ? list.items : emptyItems}
         renderItem={renderMusicItem}
+        extraData={artwork.revision}
+        onViewableItemsChanged={artwork.onViewableItemsChanged}
+        viewabilityConfig={artworkViewability}
         keyExtractor={musicItemKey}
         initialNumToRender={8}
         maxToRenderPerBatch={8}
@@ -471,7 +500,8 @@ export default function AppleMusicPlayerPanel() {
                   <View style={[styles.card, { backgroundColor: theme.cardSecondary }]}>
                     <View style={styles.item}>
                       <MusicArtwork
-                        item={selected}
+                        item={artwork.artworkFor(selected) || selected}
+                        fallbackItem={artwork.artworkFor(selected) ? selected : undefined}
                         size={52}
                         icon={selected.type === 'playlist' ? 'albums-outline' : 'musical-note'}
                       />
@@ -546,6 +576,7 @@ export default function AppleMusicPlayerPanel() {
                 icon="log-out-outline"
                 onPress={() => {
                   invalidateReads();
+                  artwork.invalidate();
                   void runAction(apple.disconnect, true);
                 }}
                 disabled={apple.connecting}

@@ -24,6 +24,10 @@ public final class SyncAppleMusicModule: Module {
       guard #available(iOS 16.0, *) else { throw UnsupportedMusicKit() }
       return try await AppleMusicController.shared.playlistTracks(id)
     }
+    AsyncFunction("getPlaylistArtwork") { (ids: [String]) async throws -> [[String: String]] in
+      guard #available(iOS 16.0, *) else { throw UnsupportedMusicKit() }
+      return try await AppleMusicController.shared.playlistArtwork(ids)
+    }
     AsyncFunction("playTrack") { (id: String, _: Bool) async throws -> [String: Any] in
       guard #available(iOS 16.0, *) else { throw UnsupportedMusicKit() }
       return try await AppleMusicController.shared.playTrack(id)

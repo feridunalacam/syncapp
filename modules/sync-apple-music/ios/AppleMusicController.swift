@@ -11,6 +11,13 @@ final class AppleMusicController {
   private var accessUntil = Date.distantPast
   private var songs: [String: (Song, Date)] = [:]
   private var playlistsByID: [String: (Playlist, Date)] = [:]
+  private let libraryArtwork = AppleMusicLibraryArtwork()
+  private var libraryArtworkRevision = 0
+
+  private func invalidateLibraryArtwork() {
+    libraryArtworkRevision += 1
+    libraryArtwork.invalidate()
+  }
 
   func connectionState() async throws -> [String: Any] {
     let status = MusicAuthorization.currentStatus
@@ -20,6 +27,8 @@ final class AppleMusicController {
     var result: [String: Any] = ["status": names[status] ?? "denied", "canPlayCatalogContent": false]
     if status == .authorized {
       result["canPlayCatalogContent"] = try await canPlayCatalog()
+    } else {
+      invalidateLibraryArtwork()
     }
     return result
   }
@@ -34,9 +43,13 @@ final class AppleMusicController {
       accessUntil = .distantPast
       songs.removeAll()
       playlistsByID.removeAll()
+      invalidateLibraryArtwork()
       throw failure("Music access is required.")
     }
-    guard try await canPlayCatalog() else { throw failure("An Apple Music subscription is required.") }
+    guard try await canPlayCatalog() else {
+      invalidateLibraryArtwork()
+      throw failure("An Apple Music subscription is required.")
+    }
   }
 
   private func canPlayCatalog() async throws -> Bool {
@@ -59,6 +72,7 @@ final class AppleMusicController {
 
   func playlists() async throws -> [[String: Any]] {
     try await requireAccess()
+    invalidateLibraryArtwork()
     var request = MusicLibraryRequest<Playlist>()
     request.limit = 100
     var result: [[String: Any]] = []
@@ -69,6 +83,13 @@ final class AppleMusicController {
       request.offset += batch.count
     }
     return result
+  }
+
+  func playlistArtwork(_ ids: [String]) async throws -> [[String: String]] {
+    let ticket = libraryArtworkRevision
+    try await requireAccess()
+    guard ticket == libraryArtworkRevision else { throw CancellationError() }
+    return try await libraryArtwork.getPlaylistArtwork(ids).map(\.bridgeValue)
   }
 
   private func playlist(_ id: String) async throws -> Playlist {
@@ -188,6 +209,7 @@ final class AppleMusicController {
       accessUntil = .distantPast
       songs.removeAll()
       playlistsByID.removeAll()
+      invalidateLibraryArtwork()
     }
   }
 

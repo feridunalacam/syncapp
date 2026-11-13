@@ -30,10 +30,16 @@ function strictNative() {
         const value = args[index];
         if (type === 'String') assert.equal(typeof value, 'string', `${method}[${index}]`);
         else if (type === 'Bool') assert.equal(typeof value, 'boolean', `${method}[${index}]`);
-        else throw new Error(`Add explicit native contract validation for ${type}`);
+        else if (type === '[String]') {
+          assert.ok(Array.isArray(value), `${method}[${index}]: array`);
+          assert.ok(
+            value.every((item) => typeof item === 'string'),
+            `${method}[${index}]: strings`,
+          );
+        } else throw new Error(`Add explicit native contract validation for ${type}`);
       });
       calls.push({ method, args });
-      return { success: true };
+      return method === 'getPlaylistArtwork' ? [] : { success: true };
     };
   }
   return { native, calls };
@@ -55,6 +61,17 @@ test('track, playlist and resume adapter calls match the actual Swift bridge arg
     { method: 'playPlaylist', args: ['p.playlist', false] },
     { method: 'resume', args: ['', false] },
   ]);
+});
+
+test('optional library artwork uses the exact one-array Swift bridge and preserves library IDs', async () => {
+  assert.deepEqual(signatures.getPlaylistArtwork, ['[String]']);
+  const h = strictNative();
+  const service = createAppleMusicService(h.native);
+  assert.deepEqual(await service.getPlaylistArtwork(null, ['p.one', 'p.two']), []);
+  assert.deepEqual(h.calls, [{ method: 'getPlaylistArtwork', args: [['p.one', 'p.two']] }]);
+  await assert.rejects(h.native.getPlaylistArtwork('p.one'), /array/);
+  await assert.rejects(h.native.getPlaylistArtwork(['p.one', 2]), /strings/);
+  await assert.rejects(h.native.getPlaylistArtwork(['p.one'], false), /native argument count/);
 });
 
 test('the strict native boundary rejects missing, surplus and wrongly typed transport arguments', async () => {

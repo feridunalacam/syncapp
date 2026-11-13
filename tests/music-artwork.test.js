@@ -124,6 +124,61 @@ test('a failed cover tries the playlist cover and keeps a placeholder; changing 
   assert.equal(root.root.findByType('Image').props.source.uri, 'https://example.org/new.jpg');
 });
 
+test('artwork reports unavailable once per exhausted candidate set while retaining fallback and late-error guards', async (t) => {
+  let reports = 0;
+  const notify = () => {
+    reports++;
+  };
+  const props = {
+    item: { image: template },
+    fallbackItem: { image: fallback },
+    onUnavailable: notify,
+  };
+  const root = await mount(t, MusicArtwork, props);
+  assert.equal(reports, 0);
+  const oldError = root.root.findByType('Image').props.onError;
+  await act(async () => oldError());
+  assert.equal(reports, 0, 'a usable fallback is not an unavailable cover');
+  await act(async () => root.root.findByType('Image').props.onError());
+  assert.equal(reports, 1);
+  await act(async () =>
+    root.update(
+      React.createElement(MusicArtwork, {
+        ...props,
+        onUnavailable: () => {
+          reports++;
+        },
+      }),
+    ),
+  );
+  await act(async () => oldError());
+  assert.equal(reports, 1, 'a new callback or repeated old native error cannot report twice');
+  await act(async () =>
+    root.update(React.createElement(MusicArtwork, { item: {}, onUnavailable: notify })),
+  );
+  assert.equal(reports, 2, 'missing artwork reports once without an Image request');
+  await act(async () =>
+    root.update(React.createElement(MusicArtwork, { item: {}, onUnavailable: notify })),
+  );
+  assert.equal(reports, 2);
+  await act(async () =>
+    root.update(
+      React.createElement(MusicArtwork, {
+        item: { image: 'https://example.test/new.jpg' },
+        onUnavailable: notify,
+      }),
+    ),
+  );
+  await act(async () => oldError());
+  assert.equal(root.root.findByType('Image').props.source.uri, 'https://example.test/new.jpg');
+  await act(async () => root.root.findByType('Image').props.onError());
+  assert.equal(reports, 3);
+  await act(async () => root.update(React.createElement(MusicArtwork, props)));
+  await act(async () => root.root.findByType('Image').props.onError());
+  await act(async () => root.root.findByType('Image').props.onError());
+  assert.equal(reports, 4, 'a reused row tracks only its current candidate lifecycle');
+});
+
 test('round editor displays both shuffled song covers and selected playlist covers', async (t) => {
   const RoundEditor = load('screens/Routine/components/RoundEditor.js', 'RoundEditor', {
     MusicArtwork,

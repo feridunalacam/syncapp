@@ -43,13 +43,27 @@ const deferred = () => {
 const flush = () => new Promise((done) => setImmediate(done));
 function world({ connected = true } = {}) {
   const events = [];
+  const timers = new Map();
+  let timerSequence = 0;
   const cueHandoff = createCueHandoff({ stopOutput: async () => {} });
-  const counts = { ads: 0, cues: 0, auth: 0, play: 0, stop: 0, save: 0, disconnect: 0, library: 0 };
+  const counts = {
+    ads: 0,
+    cues: 0,
+    auth: 0,
+    play: 0,
+    stop: 0,
+    save: 0,
+    disconnect: 0,
+    library: 0,
+    artwork: 0,
+  };
   const controls = {
     stopFails: false,
     stopPromise: null,
     presenter: Promise.resolve(),
     library: async () => [],
+    artwork: async () => [],
+    token: async () => ({ accessToken: 'native:appleMusic' }),
     authorize: async () => ({ authentication: 'native' }),
   };
   let render = () => {};
@@ -79,7 +93,7 @@ function world({ connected = true } = {}) {
       events.push('authorize');
       return controls.authorize();
     },
-    getAccessToken: async () => ({ accessToken: 'native:appleMusic' }),
+    getAccessToken: () => controls.token(),
     playTrack: async () => {
       counts.play++;
       playing = true;
@@ -116,6 +130,10 @@ function world({ connected = true } = {}) {
     },
     search: async () => ({ tracks: [song], playlists: [] }),
     getPlaylistTracks: async () => [song],
+    getPlaylistArtwork: async (_token, ids) => {
+      counts.artwork++;
+      return controls.artwork(ids);
+    },
   };
   const lease = (kind) => {
     counts[kind]++;
@@ -138,6 +156,12 @@ function world({ connected = true } = {}) {
   const scope = {
     ...React,
     React,
+    setTimeout: (callback, milliseconds) => {
+      const id = ++timerSequence;
+      timers.set(id, { callback, milliseconds });
+      return id;
+    },
+    clearTimeout: (id) => timers.delete(id),
     AppState: { currentState: 'active', addEventListener: () => ({ remove() {} }) },
     usePlatformContext: () => platform,
     useAds: () => ads,
@@ -156,6 +180,14 @@ function world({ connected = true } = {}) {
     marker,
     service,
     cueHandoff,
+    timers,
+    expireArtworkDeadline: () => {
+      for (const [id, timer] of timers) {
+        assert.equal(timer.milliseconds, 12000);
+        timers.delete(id);
+        timer.callback();
+      }
+    },
     setRender: (callback) => {
       render = callback;
     },
@@ -228,7 +260,12 @@ test('real provider playback updates keep catalog callback identities and pendin
   fixture.controls.library = () => library.promise;
   const ui = await mount(t, fixture, { readLibrary: true });
   await act(async () => ui.value.player.open());
-  const callbacks = [ui.value.search, ui.value.getPlaylists, ui.value.getPlaylistTracks];
+  const callbacks = [
+    ui.value.search,
+    ui.value.getPlaylists,
+    ui.value.getPlaylistTracks,
+    ui.value.getPlaylistArtwork,
+  ];
   assert.equal(fixture.counts.library, 1);
   await act(async () => {
     await ui.value.player.playTrack(song);
@@ -236,7 +273,15 @@ test('real provider playback updates keep catalog callback identities and pendin
   await act(async () => {
     await ui.value.player.pause();
   });
-  assert.deepEqual([ui.value.search, ui.value.getPlaylists, ui.value.getPlaylistTracks], callbacks);
+  assert.deepEqual(
+    [
+      ui.value.search,
+      ui.value.getPlaylists,
+      ui.value.getPlaylistTracks,
+      ui.value.getPlaylistArtwork,
+    ],
+    callbacks,
+  );
   assert.equal(
     fixture.counts.library,
     1,
@@ -388,4 +433,139 @@ test('catalog success leaves a separate connection failure visible', async (t) =
     await ui.value.getPlaylists();
   });
   assert.match(ui.value.error, /Connection permission failure/);
+});
+
+test('optional artwork holds only its catalog lease and returns failures without a connection alert', async (t) => {
+  const fixture = world();
+  const ui = await mount(t, fixture);
+  const reply = deferred();
+  fixture.controls.artwork = (ids) => {
+    assert.deepEqual(ids, ['p.one']);
+    return reply.promise;
+  };
+  let pending;
+  await act(async () => {
+    pending = ui.value.getPlaylistArtwork(['p.one']);
+    await flush();
+  });
+  assert.equal(fixture.counts.artwork, 1);
+  assert.equal(fixture.counts.ads, 1);
+  assert.equal(fixture.counts.cues, 0);
+  assert.equal(fixture.counts.play, 0);
+  reply.reject(new Error('Optional artwork offline'));
+  await act(async () => assert.deepEqual(Array.from(await pending), []));
+  assert.equal(fixture.counts.ads, 0);
+  assert.equal(ui.value.error, null);
+  delete fixture.service.getPlaylistArtwork;
+  await act(async () =>
+    assert.deepEqual(Array.from(await ui.value.getPlaylistArtwork(['p.one'])), []),
+  );
+  assert.equal(fixture.counts.ads, 0);
+});
+
+test('disconnect and reconnect cannot publish artwork from the previous connection', async (t) => {
+  const fixture = world();
+  const ui = await mount(t, fixture);
+  const reply = deferred();
+  fixture.controls.artwork = () => reply.promise;
+  let pending;
+  await act(async () => {
+    pending = ui.value.getPlaylistArtwork(['p.one']);
+    await flush();
+  });
+  await act(async () => {
+    await ui.value.disconnect();
+    await ui.value.connect();
+  });
+  assert.equal(ui.value.connected, true);
+  reply.resolve([{ id: 'p.one', image: 'https://example.test/retired.jpg' }]);
+  await act(async () => assert.deepEqual(Array.from(await pending), []));
+  assert.equal(fixture.counts.ads, 0);
+  assert.equal(ui.value.error, null);
+  fixture.controls.artwork = async () => [
+    { id: 'p.one', image: 'https://example.test/current.jpg' },
+  ];
+  await act(async () =>
+    assert.equal(
+      (await ui.value.getPlaylistArtwork(['p.one']))[0].image,
+      'https://example.test/current.jpg',
+    ),
+  );
+});
+
+test('an artwork read retired by provider unmount releases its lease and never returns stale rows', async (t) => {
+  const fixture = world();
+  const ui = await mount(t, fixture);
+  const reply = deferred();
+  fixture.controls.artwork = () => reply.promise;
+  let pending;
+  await act(async () => {
+    pending = ui.value.getPlaylistArtwork(['p.one']);
+    await flush();
+  });
+  assert.equal(fixture.counts.ads, 1);
+  await ui.unmount();
+  reply.resolve([{ id: 'p.one', image: 'https://example.test/retired.jpg' }]);
+  assert.deepEqual(Array.from(await pending), []);
+  assert.equal(fixture.counts.ads, 0);
+});
+
+test('optional artwork has one total deadline across presenter, token and native waits', async (t) => {
+  for (const stage of ['presenter', 'token', 'native']) {
+    const fixture = world();
+    const ui = await mount(t, fixture);
+    const wait = deferred();
+    if (stage === 'presenter') fixture.controls.presenter = wait.promise;
+    if (stage === 'token') fixture.controls.token = () => wait.promise;
+    if (stage === 'native') fixture.controls.artwork = () => wait.promise;
+    let pending;
+    await act(async () => {
+      pending = ui.value.getPlaylistArtwork(['p.one']);
+      await flush();
+    });
+    assert.equal(fixture.counts.ads, 1);
+    assert.equal(fixture.timers.size, 1);
+    await act(async () => {
+      fixture.expireArtworkDeadline();
+      assert.deepEqual(Array.from(await pending), []);
+    });
+    assert.equal(fixture.counts.ads, 0, `${stage}: caller returns before underlying wait settles`);
+    assert.equal(fixture.timers.size, 0);
+    assert.equal(ui.value.error, null);
+    wait.resolve(
+      stage === 'token'
+        ? { accessToken: 'native:appleMusic' }
+        : [{ id: 'p.one', image: 'https://example.test/late.jpg' }],
+    );
+    await act(async () => flush());
+    assert.equal(
+      fixture.counts.artwork,
+      stage === 'native' ? 1 : 0,
+      'late preflight never dispatches a native artwork read',
+    );
+    assert.equal(fixture.counts.ads, 0, 'late settlement cannot reacquire the released lease');
+    await ui.unmount();
+  }
+});
+
+test('successful optional artwork clears its deadline without affecting playback leases', async (t) => {
+  const fixture = world();
+  const ui = await mount(t, fixture);
+  await act(async () => ui.value.player.playTrack(song));
+  assert.equal(fixture.counts.ads, 1);
+  fixture.controls.artwork = async () => [
+    { id: 'p.one', image: 'https://example.test/current.jpg' },
+  ];
+  await act(async () =>
+    assert.equal((await ui.value.getPlaylistArtwork(['p.one']))[0].id, 'p.one'),
+  );
+  assert.equal(fixture.timers.size, 0);
+  assert.equal(
+    fixture.counts.ads,
+    1,
+    'artwork releases only its own lease; music still owns its queue',
+  );
+  assert.equal(fixture.counts.cues, 1);
+  await act(async () => ui.value.player.clear());
+  assert.equal(fixture.counts.ads, 0);
 });

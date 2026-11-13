@@ -62,6 +62,40 @@ export function createAppleMusicService(native, { unavailableMessage } = {}) {
     },
     search: (_token, query, types = ['track'], limit = 50) => call('search', query, types, limit),
     getUserPlaylists: () => call('getUserPlaylists'),
+    async getPlaylistArtwork(_token, input) {
+      if (!available) return [];
+      try {
+        if (typeof native.getPlaylistArtwork !== 'function' || !Array.isArray(input)) return [];
+        const ids = [
+          ...new Set(
+            input.filter((id) => typeof id === 'string' && /^p\.[A-Za-z0-9._-]{1,180}$/.test(id)),
+          ),
+        ].slice(0, 8);
+        if (!ids.length) return [];
+        const rows = await call('getPlaylistArtwork', ids);
+        if (!Array.isArray(rows)) return [];
+        const artwork = new Map();
+        for (const row of rows.slice(0, 64)) {
+          if (!ids.includes(row?.id) || artwork.has(row.id) || typeof row.image !== 'string')
+            continue;
+          let url;
+          try {
+            url = new URL(row.image.trim());
+          } catch {
+            continue;
+          }
+          if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) continue;
+          const result = { id: row.id, image: url.href };
+          if (['library', 'catalog'].includes(row.artworkSource))
+            result.artworkSource = row.artworkSource;
+          artwork.set(row.id, result);
+        }
+        return ids.flatMap((id) => (artwork.has(id) ? [artwork.get(id)] : []));
+      } catch {
+        // Artwork is optional decoration, including on an older native binary.
+        return [];
+      }
+    },
     getPlaylistTracks: (_token, id) => call('getPlaylistTracks', id),
     playTrack: (_token, uri, _device, options) => {
       const match = /^apple-music:song:([A-Za-z0-9._-]+)$/.exec(uri || '');

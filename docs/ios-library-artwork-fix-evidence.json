@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "status": "source-verified-awaiting-fresh-native-build",
+  "testFlight10ContainsTheseChanges": false,
+  "scope": "Visible Apple Music library playlist artwork repair",
+  "behavior": [
+    "Keep existing MusicKit library playlist IDs, row order, selection and playback identity.",
+    "Only visible rows with missing or exhausted artwork request optional enrichment, in batches of at most eight and one in flight.",
+    "Match returned artwork only by exact library ID. Catalog cover fallback requires an unambiguous explicit catalog identity supplied by Apple.",
+    "Keep at most 128 cover entries in memory; per-item weak marks prevent automatic retry loops without retaining historical playlist IDs.",
+    "A later viewability event is serviced after the current batch settles; completion alone does not scan the rest of the library.",
+    "The entire optional provider read has one 12-second caller deadline, including presenter/token waits. Retired preflight never dispatches a later artwork operation.",
+    "Native caller cancellation/deadline returns without awaiting a stalled transport. The single raw transport slot remains owned until actual settlement; late retired results never cache.",
+    "Connection revisions and source/list/close guards reject retired results. Older native clients and optional lookup failures preserve browsing with placeholders."
+  ],
+  "validation": {
+    "javascript": {
+      "passed": 979,
+      "failed": 0,
+      "skipped": 0,
+      "node": "22.23.4",
+      "logSHA256": "09d3ecc4abc80025ff12f684f048c93fd9f72bfb09f3a99e48750e171ee8bd27"
+    },
+    "nativeOffline": {
+      "passed": 57,
+      "fakeTransportOnly": true,
+      "evidenceSHA256": "d288d8d150161f88e4656c0c9fbeeb727be97d2ddae1cfce2d9c8108b7a7b954"
+    }
+  },
+  "nativeLimits": {
+    "maximumBatch": 8,
+    "maximumResponseBytes": 524288,
+    "maximumWaitersPerFlight": 16,
+    "maximumCallerDeadlineSeconds": 12,
+    "maximumCacheEntries": 128,
+    "positiveTTLSeconds": 300,
+    "missingTTLSeconds": 30
+  },
+  "runtimeSourceSHA256": {
+    "modules/sync-apple-music/ios/AppleMusicLibraryArtwork.swift": "2282dc4bde67c2b41edc5e1802cf28a868269f316d65d5bf5eabed41fb300033",
+    "modules/sync-apple-music/ios/AppleMusicController.swift": "6cc336fba15ca27f3cb5c4224378361ca6a3b5aae84a571863bf8a2ee9a0bcb8",
+    "modules/sync-apple-music/ios/SyncAppleMusicModule.swift": "0f4836846f541cbcf108caf23480858477fa3831157dfd92916bed8ec361fb02",
+    "src/hooks/usePlaylistArtwork.js": "76f550a6e49f1cc39e8d574a8232b19e5c9dd112a32848e61bb1735afb2f8960",
+    "src/components/common/AppleMusicPlayerPanel.js": "9dfbe6e7c1d27bbfefe295aded78792970d4f6292a2f9170ed7a8ca6d85523fa",
+    "src/components/common/MusicArtwork.js": "1883d13012029a883f847dbe796cf1d78ddf413636d0c2780c04e8de447714ce",
+    "src/context/AppleMusicConnectionContext.js": "4cee27d9c2ad3b9b270ae7a68b81f7a1eb9e191addb3a6e5e64272121a17a983",
+    "src/services/appleMusic/adapter.js": "8a44b5b39ae05a5aed3cf9cc472e88834ca1e9b49e1b182d0e5b511dccbb1b7a"
+  },
+  "limits": [
+    "Automated Swift checks use a fake transport and make no Apple Music account requests.",
+    "A fresh native build is required because this adds an Expo native bridge method and Swift helper.",
+    "Actual recovery of the owner’s library playlist covers remains to be checked on the fresh physical iPhone candidate.",
+    "This change does not restore automatic song changes at workout round boundaries; the production timed-music flag is unchanged."
+  ]
+}

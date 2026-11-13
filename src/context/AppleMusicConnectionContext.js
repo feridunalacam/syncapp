@@ -29,6 +29,7 @@ export function AppleMusicConnectionProvider({ children }) {
   const [error, setError] = useState(null);
   const [playerState, setPlayerState] = useState(null);
   const pending = useRef(false);
+  const catalogRevision = useRef(0);
   const alive = useRef(true);
   const cueLease = useRef(null);
   const beforePlay = useRef(null);
@@ -83,6 +84,7 @@ export function AppleMusicConnectionProvider({ children }) {
     if (!latest.current.ready || pending.current || !(companionAvailable || timedAvailable))
       return { success: false, error: 'Apple Music is not ready yet.' };
     pending.current = true;
+    catalogRevision.current++;
     setConnecting(true);
     setError(null);
     try {
@@ -107,6 +109,7 @@ export function AppleMusicConnectionProvider({ children }) {
     if (pending.current || !(companionAvailable || timedAvailable))
       return { success: false, error: 'Please wait for the current connection change.' };
     pending.current = true;
+    catalogRevision.current++;
     setConnecting(true);
     setError(null);
     try {
@@ -128,22 +131,39 @@ export function AppleMusicConnectionProvider({ children }) {
     }
   }, [companionAvailable, timedAvailable]);
   const catalog = useCallback(
-    async (operation) => {
+    async (operation, { timeoutMs } = {}) => {
       if (!companionAvailable || !latest.current.ready || !latest.current.connected)
         throw new Error('Connect Apple Music to browse songs and playlists.');
+      const revision = catalogRevision.current;
+      let retired = false;
+      const cancelled = () =>
+        retired ||
+        !alive.current ||
+        !latest.current.connected ||
+        revision !== catalogRevision.current;
       const release = latest.current.ads.acquirePresentationBlocker();
-      try {
+      const read = async () => {
         await latest.current.ads.waitForAdPresenters();
-        if (!alive.current || !latest.current.connected)
-          throw new Error('Music request cancelled.');
+        if (cancelled()) throw new Error('Music request cancelled.');
         const token = await appleMusicCompanionService.getAccessToken();
-        if (!alive.current || !latest.current.connected)
-          throw new Error('Music request cancelled.');
+        if (cancelled()) throw new Error('Music request cancelled.');
         const result = await operation(token.accessToken);
-        if (!alive.current || !latest.current.connected)
-          throw new Error('Music request cancelled.');
+        if (cancelled()) throw new Error('Music request cancelled.');
         return result;
+      };
+      let timer;
+      try {
+        if (!timeoutMs) return await read();
+        const deadline = new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            retired = true;
+            reject(new Error('Music artwork request timed out.'));
+          }, timeoutMs);
+        });
+        return await Promise.race([read(), deadline]);
       } finally {
+        retired = true;
+        if (timer !== undefined) clearTimeout(timer);
         release();
       }
     },
@@ -160,6 +180,13 @@ export function AppleMusicConnectionProvider({ children }) {
   );
   const getPlaylistTracks = useCallback(
     (id) => catalog((token) => appleMusicCompanionService.getPlaylistTracks(token, id)),
+    [catalog],
+  );
+  const getPlaylistArtwork = useCallback(
+    (ids) =>
+      catalog((token) => appleMusicCompanionService.getPlaylistArtwork?.(token, ids) ?? [], {
+        timeoutMs: 12000,
+      }).catch(() => []),
     [catalog],
   );
   const state = playerState || controller.current.getState();
@@ -205,6 +232,7 @@ export function AppleMusicConnectionProvider({ children }) {
         search,
         getPlaylists,
         getPlaylistTracks,
+        getPlaylistArtwork,
       }}
     >
       {children}

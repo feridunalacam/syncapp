@@ -5,10 +5,17 @@ import { Script } from 'node:vm';
 import { createRequire } from 'node:module';
 import React, { act } from 'react';
 import { create } from 'react-test-renderer';
+import { musicArtworkUrls } from '../src/domain/musicArtwork.js';
 
 const require = createRequire(import.meta.url);
 const { transformSync } = require('@babel/core');
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+const artworkHookScript = new Script(
+  readFileSync(new URL('../src/hooks/usePlaylistArtwork.js', import.meta.url), 'utf8')
+    .replace(/^import .*;\n/gm, '')
+    .replace('export default function', 'function') +
+    '\nglobalThis.usePlaylistArtwork = usePlaylistArtwork;',
+);
 const source = readFileSync(
   new URL('../src/components/common/AppleMusicPlayerPanel.js', import.meta.url),
   'utf8',
@@ -101,6 +108,7 @@ async function mount(t, { connection = {}, player: playerOverrides = {}, mini = 
     search: (...args) => read('search', ...args),
     getPlaylists: (...args) => read('library', ...args),
     getPlaylistTracks: (...args) => read('tracks', ...args),
+    getPlaylistArtwork: (...args) => read('artwork', ...args),
     ...connection,
     player,
   };
@@ -129,6 +137,7 @@ async function mount(t, { connection = {}, player: playerOverrides = {}, mini = 
   const context = {
     ...React,
     React,
+    musicArtworkUrls,
     useAppleMusicConnection: () => apple,
     useTheme: () => ({
       theme: { text: '#111', textSecondary: '#555', accent: '#345', error: '#f00' },
@@ -157,6 +166,7 @@ async function mount(t, { connection = {}, player: playerOverrides = {}, mini = 
       timers.delete(id);
     },
   };
+  artworkHookScript.runInNewContext(context);
   new Script(compiled).runInNewContext(context);
   const Component = mini ? context.Mini : context.Panel;
   let renderer;
@@ -201,6 +211,25 @@ async function mount(t, { connection = {}, player: playerOverrides = {}, mini = 
     },
     async scrollListTo(index) {
       await act(async () => renderer.root.findByType('FlatList').props.testScrollToIndex(index));
+    },
+    async viewable(...indices) {
+      await act(async () => {
+        const list = renderer.root.findByType('FlatList');
+        list.props.onViewableItemsChanged({
+          viewableItems: indices.map((index) => ({
+            item: list.props.data[index],
+            isViewable: true,
+          })),
+        });
+      });
+    },
+    async failArtwork(id) {
+      await act(async () =>
+        renderer.root
+          .findAllByType('MusicArtwork')
+          .find((node) => node.props.item?.id === id || node.props.fallbackItem?.id === id)
+          .props.onUnavailable(),
+      );
     },
     async tick() {
       const pending = [...timers.entries()];
@@ -395,6 +424,98 @@ test('playback polling preserves the list header search field, query and explici
     ui.events[0].value.name,
     'First Song',
     'explicit selection survives current-track metadata changes',
+  );
+});
+
+test('visible library cover enrichment matches exact IDs and never alters playlist order or explicit playback selection', async (t) => {
+  const ui = await mount(t);
+  const rows = [
+    { id: 'p.one', name: 'Same playlist' },
+    { id: 'p.two', name: 'Same playlist' },
+    { id: 'purchased', name: 'Purchased Music' },
+  ];
+  await ui.press('My playlists');
+  await ui.resolve(0, rows);
+  const callback = ui.nodes('FlatList')[0].props.onViewableItemsChanged;
+  await ui.viewable(0, 2);
+  await ui.tick();
+  assert.equal(ui.requests[1].kind, 'artwork');
+  assert.deepEqual(Array.from(ui.requests[1].args[0]), ['p.one']);
+  await ui.resolve(1, [
+    { id: 'p.two', image: 'https://example.test/wrong.jpg' },
+    { id: 'p.one', image: 'https://example.test/found.jpg', name: 'Wrong title' },
+  ]);
+  const cover = ui.nodes('MusicArtwork').find((node) => node.props.fallbackItem?.id === 'p.one');
+  assert.equal(cover.props.item.image, 'https://example.test/found.jpg');
+  assert.ok(
+    ui
+      .nodes('MusicArtwork')
+      .some((node) => node.props.item?.id === 'p.two' && !node.props.item.image),
+  );
+  assert.deepEqual(
+    Array.from(ui.nodes('FlatList')[0].props.data, (item) => item.id),
+    ['p.one', 'p.two', 'purchased'],
+  );
+  assert.equal(ui.nodes('FlatList')[0].props.onViewableItemsChanged, callback);
+  assert.deepEqual(
+    ui.requests.map((request) => request.kind),
+    ['library', 'artwork'],
+    'enrichment never fetches playlist tracks or searches the catalog',
+  );
+  assert.deepEqual(ui.events, []);
+  await ui.press('Select playlist Same playlist');
+  await ui.press('Play playlist');
+  assert.equal(ui.events[0].name, 'playPlaylist');
+  assert.equal(ui.events[0].value.id, 'p.one');
+  assert.equal(ui.events[0].value.name, 'Same playlist');
+  assert.equal(
+    ui.events[0].value.image,
+    undefined,
+    'the memory-only cover never changes the selected native item',
+  );
+});
+
+test('failed existing library URLs can request one replacement while optional old-binary artwork stays silent', async (t) => {
+  const ui = await mount(t);
+  await ui.press('My playlists');
+  await ui.resolve(0, [
+    { id: 'p.broken', name: 'Broken cover', image: 'https://example.test/broken.jpg' },
+  ]);
+  await ui.viewable(0);
+  await ui.tick();
+  assert.equal(ui.requests.length, 1);
+  await ui.failArtwork('p.broken');
+  await ui.tick();
+  assert.deepEqual(Array.from(ui.requests[1].args[0]), ['p.broken']);
+  await ui.resolve(1, []);
+  await ui.failArtwork('p.broken');
+  await ui.viewable(0);
+  await ui.tick();
+  assert.equal(ui.requests.length, 2, 'empty optional results cannot cause an automatic retry');
+  const older = await mount(t, { connection: { getPlaylistArtwork: undefined } });
+  await older.press('My playlists');
+  await older.resolve(0, [{ id: 'p.old', name: 'Old binary playlist' }]);
+  await older.viewable(0);
+  await older.tick();
+  assert.equal(older.requests.length, 1);
+  assert.deepEqual(older.events, []);
+});
+
+test('closing the player retires queued enrichment without a native artwork request', async (t) => {
+  const ui = await mount(t);
+  await ui.press('My playlists');
+  await ui.resolve(0, [{ id: 'p.one', name: 'Library playlist' }]);
+  await ui.viewable(0);
+  await ui.closeSheet();
+  await ui.update({}, { visible: false });
+  await ui.tick();
+  assert.deepEqual(
+    ui.requests.map((request) => request.kind),
+    ['library'],
+  );
+  assert.deepEqual(
+    ui.events.map((event) => event.name),
+    ['close'],
   );
 });
 
