@@ -1,6 +1,18 @@
 # iOS App Store release draft
 
-## Current release overview — 13 November 2026
+## Current release overview — 14 November 2026
+
+**TestFlight 1.0.0 (11) is delivered to the existing owner-only Sync Internal QA group.** Apple reports VALID / IN_BETA_TESTING; the group contains one tester and eight builds, with all ten delivery/preservation checks passing. Runtime source is `b9130a72`; the submitted commit `72b36285` adds only documentation. One Free EAS build and one official Apple upload were used. [Exact build11 receipt](ios-build-1.0.0-11-evidence.json)
+
+Build11 includes configurable selected-alert music handoff, bounded custom-sound loading, saved per-routine Apple Music choices/shuffle, optional library-cover recovery and the before-Start ad boundary. Selecting or saving music does not play it; explicit Play starts a continuous queue. Automatic timed Apple Music assignments, public Spotify control and new web acquisition remain off. Pro removes ads and enables supported cloud backup/sync.
+
+The full suite passes 1,077 tests with zero failures/skips. Local native UI checks include Start/Pause/Resume/End, editable Advanced choices and the owner's post-Finish test-ad closure followed by Timer Ready. The signed artifact passed signature/profile/privacy checks; its sole raw-HBC inequality is accounted for by two strict independent filename-only proofs and Root's full-file replay. No code, strings, assets or source comments were normalized.
+
+**Public review remains held.** Physical build11 Pro/Restore, genuine backup-content restoration, fresh Apple token registration/revocation and subscribed MusicKit/library-cover checks remain separate from the source/native evidence. The owner has received the single build11 Restore test card. Two new routine-editor screenshots are prepared; saving them in the existing store draft awaits the owner's renewed Apple browser login. Existing build10 screenshot placements remain unchanged. No App Review build selection, submission or public release has occurred.
+
+## Historical checkpoints — through 13 November 2026
+
+The snapshots below retain their original dates and build scope. Earlier uses of “current”, Ads OFF, unresolved routine selection or pending local walkthrough do not override the build11 overview above.
 
 **Current product/artwork HOLD:** latest owner10 feedback describes smooth standalone playback, but the intended old Training auto-library/playlist loading, shuffle and round-song assignment are **not restored**; the production timed guard and standalone-player handoff still differ from that workflow. Later owner feedback answers the cover question: **search covers PRESENT; library/playlist covers ABSENT**. Offline audit reproduced same-ID empty poll artwork erasing a valid selected cover; the actual phone cause is unproven. **865/865 belongs to delivered10's defined behavior, not proof of intended user logic.** Post10 source fix `5423f5e` preserves a known cover during sparse same-song polls and passes **66 targeted tests**. It is not in delivered10; initial library artwork and round workflow remain unresolved. No product-flow/native/flag/build change is part of that fix. No Pro, `Phone10Check` backup or fresh Apple positive PASS is reported; sign-out/no-ad cause is **unknown, not attributed to Pro**. Root made no new app/native/source change, build or phone card; the existing peer owns the next fix/decision. [Read-only source audit](../artifacts/app-store/music-owner10-audit-2026-11-13/source-audit-safe.json)
 
