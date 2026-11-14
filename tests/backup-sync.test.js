@@ -205,7 +205,7 @@ test('a cloud conflict committed just before pause reloads once on idle before f
   allowed = true;
   await sync.sync();
   assert.equal(events[0], 'reload');
-  assert.deepEqual(events, ['reload', 'snapshot', 'read', 'write']);
+  assert.deepEqual(events, ['reload', 'snapshot', 'read', 'write', 'snapshot']);
   assert.equal(reloads, 1);
   assert.equal(writes, 1);
   assert.equal(cloud.payload.data.profileBio, 'Edit while consumer reload is paused');
@@ -338,7 +338,7 @@ test('failed post-commit re-journaling retains a complete cloud copy and safely 
   allowed = true;
   events.length = 0;
   await sync.sync();
-  assert.deepEqual(events, ['reload', 'snapshot', 'read', 'write']);
+  assert.deepEqual(events, ['reload', 'snapshot', 'read', 'write', 'snapshot']);
   assert.equal(reloads, 1);
   assert.equal(writes, 1);
   assert.deepEqual(cloud.payload.data.routines, [{ id: 'cloud' }]);
@@ -573,4 +573,229 @@ test('network failure preserves dirty device data for a retry', async () => {
   assert.equal(states.at(-1).status, 'error');
   assert.equal((await local.snapshot()).meta.dirty, true);
   assert.deepEqual(await local.getJSON('routines'), [{ id: 'offline-edit' }]);
+});
+
+test('recovering a newer device routine after choosing older cloud data waits for a deliberate upload choice across restart', async () => {
+  const base = memoryStorage();
+  const local = createAccountStore(base, 'a');
+  await local.setJSON('routines', [
+    { id: 'phone', name: 'Phone11Check', workSong: { id: 'track', uri: 'file:///private.mp3' } },
+  ]);
+  let cloud = {
+    revision: 3,
+    payload: { version: 1, data: { routines: [{ id: 'nns', name: 'Nns' }] } },
+  };
+  let uploads = 0;
+  const states = [];
+  const remote = {
+    read: async () => cloud,
+    write: async (payload, expected) => {
+      uploads++;
+      assert.equal(expected, cloud.revision);
+      cloud = { payload, revision: cloud.revision + 1 };
+      return { revision: cloud.revision };
+    },
+  };
+  const sync = createBackupSync({ local, remote });
+  await sync.sync();
+  const review = await sync.getBackupPreview();
+  assert.deepEqual(review.local.routineNames, ['Phone11Check']);
+  assert.deepEqual(review.cloud.routineNames, ['Nns']);
+  assert.equal((await sync.sync('cloud', review.intent)).status, 'synced');
+  assert.deepEqual(
+    (await local.getJSON('routines')).map((row) => row.name),
+    ['Nns'],
+  );
+  const recoverable = await local.getRecoveryPreview();
+  await local.recoverDeviceCopy(recoverable.intent);
+  sync.stop();
+  const restartedLocal = createAccountStore(base, 'a');
+  const restarted = createBackupSync({
+    local: restartedLocal,
+    remote,
+    onState: (state) => states.push(state),
+  });
+  await restarted.sync();
+  await restartedLocal.setString('profileBio', 'Edit after recovery');
+  await restarted.sync();
+  assert.equal(uploads, 0);
+  assert.equal(states.at(-1).status, 'conflict');
+  assert.deepEqual(
+    cloud.payload.data.routines.map((row) => row.name),
+    ['Nns'],
+  );
+  assert.equal((await restartedLocal.snapshot()).meta.recoveryPending, true);
+  const finalReview = await restarted.getBackupPreview();
+  assert.equal((await restarted.sync('local', finalReview.intent)).status, 'synced');
+  assert.equal(uploads, 1);
+  assert.deepEqual(
+    cloud.payload.data.routines.map((row) => row.name),
+    ['Nns', 'Phone11Check'],
+  );
+  assert.equal(cloud.payload.data.routines[1].workSong.uri, null);
+  assert.equal((await restartedLocal.snapshot()).meta.recoveryPending, false);
+});
+
+test('reviewed conflict choices reject changed cloud revisions and local counters without replacing or uploading', async () => {
+  for (const changed of ['local', 'cloud']) {
+    const local = createAccountStore(memoryStorage(), 'a');
+    await local.setJSON('routines', [{ id: 'phone', name: 'Phone11Check' }]);
+    let cloud = { revision: 3, payload: cloudPayload('nns') };
+    let uploads = 0;
+    const states = [];
+    const sync = createBackupSync({
+      local,
+      remote: {
+        read: async () => cloud,
+        write: async () => {
+          uploads++;
+        },
+      },
+      onState: (state) => states.push(state),
+    });
+    const review = await sync.getBackupPreview();
+    if (changed === 'local') await local.setString('profileBio', 'New edit');
+    else cloud = { revision: 4, payload: cloudPayload('other-device') };
+    for (const choice of ['cloud', 'local'])
+      await assert.rejects(sync.sync(choice, review.intent), /changed.*Review both copies again/);
+    assert.deepEqual(await local.getJSON('routines'), [{ id: 'phone', name: 'Phone11Check' }]);
+    assert.equal(uploads, 0);
+    assert.equal(states.at(-1).status, 'conflict');
+  }
+});
+
+test('a reviewed choice waits for a running background request and is applied separately', async () => {
+  const local = createAccountStore(memoryStorage(), 'a');
+  await local.setJSON('routines', [{ id: 'phone' }]);
+  const pending = deferred();
+  let deferNext = false;
+  let reads = 0;
+  let uploads = 0;
+  const cloud = { revision: 3, payload: cloudPayload('nns') };
+  const sync = createBackupSync({
+    local,
+    remote: {
+      read: async () => {
+        reads++;
+        if (deferNext) {
+          deferNext = false;
+          await pending.promise;
+        }
+        return cloud;
+      },
+      write: async () => {
+        uploads++;
+        return { revision: 4 };
+      },
+    },
+  });
+  const review = await sync.getBackupPreview();
+  deferNext = true;
+  const background = sync.sync();
+  await settle();
+  const choosing = sync.sync('local', review.intent);
+  pending.resolve();
+  await background;
+  assert.equal((await choosing).status, 'synced');
+  assert.equal(uploads, 1);
+  assert.equal(reads, 3, 'Preview, background and explicit choice are separate reads');
+});
+
+test('recovery during an older read or upload preserves its hold and cannot publish synced or upload recovered records', async () => {
+  for (const stage of ['read', 'upload']) {
+    const local = createAccountStore(memoryStorage(), 'a');
+    await local.setJSON('routines', [{ id: 'phone', name: 'Phone11Check' }]);
+    let cloud = { revision: 3, payload: cloudPayload('nns') };
+    await local.replaceFromCloud(cloud.payload, 3, 1);
+    if (stage === 'upload') await local.setString('profileBio', 'Edit before old upload');
+    const review = await local.getRecoveryPreview();
+    const reached = deferred();
+    const waiting = deferred();
+    const uploaded = [];
+    const states = [];
+    const sync = createBackupSync({
+      local,
+      onState: (state) => states.push(state),
+      remote: {
+        read: async () => {
+          if (stage === 'read') {
+            reached.resolve();
+            await waiting.promise;
+          }
+          return cloud;
+        },
+        write: async (payload) => {
+          uploaded.push(payload);
+          reached.resolve();
+          await waiting.promise;
+          cloud = { revision: 4, payload };
+          return { revision: 4 };
+        },
+      },
+    });
+    const oldRequest = sync.sync();
+    await reached.promise;
+    assert.equal(await local.recoverDeviceCopy(review.intent), true);
+    waiting.resolve();
+    assert.equal((await oldRequest).status, 'conflict');
+    assert.equal(states.at(-1).status, 'conflict');
+    assert.equal(
+      states.some((state) => state.status === 'synced'),
+      false,
+    );
+    assert.equal((await local.snapshot()).meta.recoveryPending, true);
+    assert.deepEqual(
+      (await local.getJSON('routines')).map((row) => row.id),
+      ['nns', 'phone'],
+    );
+    assert.equal(uploaded.length, stage === 'upload' ? 1 : 0);
+    assert.equal(
+      uploaded.some((payload) => payload.data.routines.some((row) => row.id === 'phone')),
+      false,
+    );
+    assert.deepEqual(cloud.payload.data.routines, [{ id: 'nns' }]);
+  }
+});
+
+test('the final local-meta read rechecks stop, workout and intent generation before publishing success', async () => {
+  for (const change of ['stop', 'workout', 'generation']) {
+    const finalRead = deferred();
+    const reached = deferred();
+    let reads = 0;
+    let allowed = true;
+    let current = true;
+    const states = [];
+    const snapshot = {
+      payload: cloudPayload('nns'),
+      meta: { revision: 3, counter: 1, dirty: false },
+    };
+    const sync = createBackupSync({
+      local: {
+        snapshot: async () => {
+          reads++;
+          if (reads === 2) {
+            reached.resolve();
+            return finalRead.promise;
+          }
+          return snapshot;
+        },
+      },
+      remote: { read: async () => ({ revision: 3, payload: snapshot.payload }) },
+      canSync: () => allowed,
+      onState: (state) => states.push(state),
+    });
+    const request = sync.sync(undefined, undefined, () => current);
+    await reached.promise;
+    if (change === 'stop') sync.stop();
+    if (change === 'workout') allowed = false;
+    if (change === 'generation') current = false;
+    finalRead.resolve(snapshot);
+    const result = await request;
+    assert.notEqual(result?.status, 'synced');
+    assert.equal(
+      states.some((state) => state.status === 'synced'),
+      false,
+    );
+    if (change !== 'stop') assert.equal(states.at(-1).status, 'paused');
+  }
 });

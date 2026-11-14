@@ -57,7 +57,14 @@ export function AccountDataProvider({ children }) {
     };
   }, [user?.id]);
   const access = useRef(null);
-  access.current = { userId: user?.id, scope, scopeConfirmed, accessVerified, isPro };
+  access.current = {
+    userId: user?.id,
+    scope,
+    scopeConfirmed,
+    accessVerified,
+    isPro,
+    ready: subscriptionReady,
+  };
   const { theme } = useTheme();
   const [preparedStorage, setPreparedStorage] = useState(null);
   const [localError, setLocalError] = useState(false);
@@ -77,7 +84,15 @@ export function AccountDataProvider({ children }) {
       }),
     [user?.id, scope?.namespace],
   );
+  const currentStorage = useRef(storage);
+  currentStorage.current = storage;
+  const currentEpoch = useRef(epoch);
+  currentEpoch.current = epoch;
+  const recoveryReloadPending = useRef(null);
+  const previewIntents = useRef(new WeakMap());
   const localReady = hasLocalScope && preparedStorage === storage;
+  const currentLocalReady = useRef(localReady);
+  currentLocalReady.current = localReady;
   const scopeBusy = scopeAction?.userId === user?.id && scopeAction?.pending;
   const scopeFailed =
     !hasLocalScope &&
@@ -110,8 +125,29 @@ export function AccountDataProvider({ children }) {
     if (!user) throw new Error('Sign in to use cloud backup.');
     if (!isPro) throw new Error('Cloud backup is included with Sync Pro.');
     if (paused.current) throw new Error('Finish your active workout before syncing.');
-    return engine.current?.sync();
-  }, [user?.id, isPro]);
+    if (
+      currentUser.current !== user.id ||
+      currentStorage.current !== storage ||
+      authSession.current?.user?.id !== user.id ||
+      !authSession.current?.access_token
+    )
+      throw new Error('Your account changed. Sign in and verify this account before syncing.');
+    const sync = engine.current;
+    if (
+      !localReady ||
+      !currentLocalReady.current ||
+      !subscriptionReady ||
+      !access.current?.ready ||
+      !access.current?.scopeConfirmed ||
+      !access.current?.accessVerified ||
+      !access.current?.isPro ||
+      !sameBillingScope(scope, access.current?.scope) ||
+      !billingScopeActive(access.current?.scope) ||
+      !sync
+    )
+      throw new Error('Cloud backup is not ready. Refresh account access in Sync Pro, then retry.');
+    return sync.sync();
+  }, [user?.id, isPro, storage, localReady, subscriptionReady, scope]);
   useEffect(() => {
     let alive = true;
     setPreparedStorage(null);
@@ -181,7 +217,10 @@ export function AccountDataProvider({ children }) {
           }));
       },
       onRestore: () => {
-        if (alive) setEpoch((value) => value + 1);
+        if (alive) {
+          currentEpoch.current += 1;
+          setEpoch((value) => value + 1);
+        }
       },
     });
     engine.current = sync;
@@ -220,17 +259,107 @@ export function AccountDataProvider({ children }) {
     if (paused.current) throw new Error('Finish your active workout before importing records.');
     await storage.importGuestData();
     setGuest(await storage.guestImportState());
+    currentEpoch.current += 1;
     setEpoch((value) => value + 1);
     schedule.current();
   };
-  const resolveConflict = async (choice) => {
+  const captureIntent = (kind, nativeIntent, syncEngine = null) => {
+    const intent = {};
+    previewIntents.current.set(intent, {
+      kind,
+      nativeIntent,
+      storage,
+      scope,
+      epoch: currentEpoch.current,
+      token: authSession.current?.access_token,
+      syncEngine,
+    });
+    return intent;
+  };
+  const isCurrentCopy = (copy) =>
+    copy?.storage === storage &&
+    currentStorage.current === storage &&
+    currentUser.current === user?.id &&
+    copy.epoch === currentEpoch.current &&
+    copy.token === authSession.current?.access_token &&
+    sameBillingScope(copy.scope, access.current?.scope) &&
+    !paused.current;
+  const getRecoveryPreview = async () => {
+    if (!user || currentStorage.current !== storage || !localReady)
+      throw new Error('Open this account before reviewing saved device records.');
+    if (paused.current) throw new Error('Finish your active workout before recovering records.');
+    const capture = {
+      storage,
+      scope,
+      epoch: currentEpoch.current,
+      token: authSession.current?.access_token,
+    };
+    const preview = await storage.getRecoveryPreview();
+    if (!isCurrentCopy(capture))
+      throw new Error('Your account or workout changed. Review the copy again.');
+    return preview ? { ...preview, intent: captureIntent('recovery', preview.intent) } : null;
+  };
+  const getBackupPreview = async () => {
+    const sync = engine.current;
+    if (!sync || !user || currentStorage.current !== storage)
+      throw new Error('Verify this account’s Sync Pro access before reviewing cloud backup.');
+    const capture = {
+      storage,
+      scope,
+      epoch: currentEpoch.current,
+      token: authSession.current?.access_token,
+    };
+    const preview = await sync.getBackupPreview();
+    if (!isCurrentCopy(capture) || engine.current !== sync)
+      throw new Error('Your account or workout changed. Review both copies again.');
+    return { ...preview, intent: captureIntent('backup', preview.intent, sync) };
+  };
+  const recoverDeviceCopy = async (intent) => {
+    const copy = intent && previewIntents.current.get(intent);
+    if (copy?.kind !== 'recovery' || !isCurrentCopy(copy))
+      throw new Error('Your account or workout changed. Review the saved device copy again.');
+    const applied = await storage.recoverDeviceCopy(copy.nativeIntent, () => isCurrentCopy(copy));
+    if (!applied) throw new Error('Your records changed. Review the saved device copy again.');
+    if (!isCurrentCopy(copy)) {
+      recoveryReloadPending.current = copy;
+      return { status: 'paused' };
+    }
+    currentEpoch.current += 1;
+    setEpoch((value) => value + 1);
+    setState((previous) => ({
+      ...previous,
+      status: 'conflict',
+      error: 'Recovered records are on this device. Review both copies before syncing.',
+    }));
+    return { status: 'recovered' };
+  };
+  const resolveConflict = async (choice, intent) => {
     if (!['cloud', 'local'].includes(choice)) throw new Error('Choose a valid backup.');
     if (paused.current) throw new Error('Finish your active workout before restoring a backup.');
-    return engine.current?.sync(choice);
+    const copy = intent && previewIntents.current.get(intent);
+    if (copy?.kind !== 'backup' || !isCurrentCopy(copy) || copy.syncEngine !== engine.current)
+      throw new Error('Review both copies again before choosing a backup.');
+    return copy.syncEngine.sync(
+      choice,
+      copy.nativeIntent,
+      () => isCurrentCopy(copy) && copy.syncEngine === engine.current,
+    );
   };
   const setSyncPaused = useCallback((value) => {
     paused.current = value;
-    if (!value) schedule.current();
+    if (!value) {
+      const pending = recoveryReloadPending.current;
+      recoveryReloadPending.current = null;
+      if (
+        pending &&
+        pending.storage === currentStorage.current &&
+        sameBillingScope(pending.scope, access.current?.scope)
+      ) {
+        currentEpoch.current += 1;
+        setEpoch((previous) => previous + 1);
+      }
+      schedule.current();
+    }
   }, []);
   const value = {
     storage,
@@ -239,6 +368,9 @@ export function AccountDataProvider({ children }) {
     ...guest,
     importGuestData,
     syncNow,
+    getBackupPreview,
+    getRecoveryPreview,
+    recoverDeviceCopy,
     resolveConflict,
     setSyncPaused,
     reportLoadFailure,

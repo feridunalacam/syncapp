@@ -30,8 +30,54 @@ const validateRoutineName = (rawName) => {
  * @param {Function} params.updateRoutine - Context function to update existing routine
  * @param {Function} params.onSave - Callback after successful save
  */
-export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onSave }) => {
+export const useRoutineForm = ({
+  templateRoutine,
+  addRoutine,
+  updateRoutine,
+  onSave,
+  saveOwner,
+  isCurrent = () => true,
+}) => {
+  const saveLifetime = useRef({
+    active: true,
+    generation: 0,
+    owner: saveOwner,
+    identity: templateRoutine?.id || templateRoutine || null,
+  });
+  const editorIdentity = templateRoutine?.id || templateRoutine || null;
+  if (saveLifetime.current.owner !== saveOwner || saveLifetime.current.identity !== editorIdentity)
+    saveLifetime.current = {
+      active: true,
+      generation: saveLifetime.current.generation + 1,
+      owner: saveOwner,
+      identity: editorIdentity,
+    };
+  const currentEditor = useRef(isCurrent);
+  currentEditor.current = isCurrent;
+  const pendingSave = useRef(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const invalidateSave = useCallback(() => {
+    saveLifetime.current = {
+      ...saveLifetime.current,
+      generation: saveLifetime.current.generation + 1,
+    };
+    pendingSave.current = null;
+    setSaving(false);
+  }, []);
+  useEffect(() => {
+    saveLifetime.current.active = true;
+    return () => {
+      saveLifetime.current.active = false;
+    };
+  }, []);
+  useEffect(() => {
+    pendingSave.current = null;
+    setSaving(false);
+    setSaveError(null);
+  }, [saveOwner, editorIdentity]);
   const templateRoutineIdRef = useRef(templateRoutine?.id || templateRoutine || null);
+  const templateOwnerRef = useRef(saveOwner);
 
   // Initialize values from template
   const initialValues = useMemo(() => {
@@ -198,8 +244,9 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
   // A reused editor must load the entire newly selected routine.
   useEffect(() => {
     const identity = templateRoutine?.id || templateRoutine || null;
-    if (templateRoutineIdRef.current === identity) return;
+    if (templateRoutineIdRef.current === identity && templateOwnerRef.current === saveOwner) return;
     templateRoutineIdRef.current = identity;
+    templateOwnerRef.current = saveOwner;
     setNameRaw(initialValues.name);
     setNameError(null);
     setSoundtrackRaw(initialValues.soundtrack);
@@ -224,7 +271,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     setCountdownBeforeStartSound(templateRoutine?.countdownBeforeStartSound ?? null);
     setEndWorkSound(templateRoutine?.endWorkSound ?? null);
     setEndRestSound(templateRoutine?.endRestSound ?? null);
-  }, [templateRoutine, initialValues]);
+  }, [templateRoutine, initialValues, saveOwner]);
 
   const setGlobalWorkSec = useCallback((value) => {
     setWorkSec(value);
@@ -388,7 +435,8 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     });
   }, []);
 
-  const handleSaveRoutine = useCallback(() => {
+  const handleSaveRoutine = useCallback(async () => {
+    if (pendingSave.current || !currentEditor.current()) return false;
     const nameValidation = validateRoutineName(name);
     if (nameValidation) {
       setNameError(nameValidation);
@@ -463,16 +511,41 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
       return;
     }
 
-    if (templateRoutine?.id) {
-      updateRoutine({
-        ...normalizeRoutine({ ...templateRoutine, ...routineData }),
-        id: templateRoutine.id,
-      });
-    } else {
-      addRoutine(normalizeRoutine(routineData));
+    const lifetime = saveLifetime.current;
+    const operation = {};
+    const current = () =>
+      saveLifetime.current === lifetime && lifetime.active && currentEditor.current();
+    pendingSave.current = operation;
+    setSaveError(null);
+    setSaving(true);
+    try {
+      const saved = templateRoutine?.id
+        ? await updateRoutine(
+            {
+              ...normalizeRoutine({ ...templateRoutine, ...routineData }),
+              id: templateRoutine.id,
+            },
+            { isCurrent: current },
+          )
+        : await addRoutine(normalizeRoutine(routineData), { isCurrent: current });
+      if (saved === false)
+        throw new Error(
+          'Could not save this routine on your device. Your draft is still here. Try Save again.',
+        );
+      if (!current()) return false;
+      onSave?.();
+      return true;
+    } catch (error) {
+      if (current())
+        setSaveError(
+          error?.message ||
+            'Could not save this routine. Your draft is still here. Try Save again.',
+        );
+      return false;
+    } finally {
+      if (pendingSave.current === operation) pendingSave.current = null;
+      if (saveLifetime.current === lifetime && lifetime.active) setSaving(false);
     }
-
-    if (onSave) onSave();
   }, [
     name,
     soundtrack,
@@ -501,6 +574,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     addRoutine,
     updateRoutine,
     onSave,
+    saveOwner,
   ]);
 
   return {
@@ -513,6 +587,9 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     removeSoundtrack,
     nameError,
     setNameError,
+    saving,
+    saveError,
+    invalidateSave,
     numberOfRounds,
     setNumberOfRounds,
     roundsOrder,

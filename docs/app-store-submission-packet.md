@@ -2,11 +2,13 @@
 
 ## Current handoff — 14 November 2026
 
+**Public-review blocker found after build11 delivery:** cloud restore replaced a newer local routine with the older cloud copy. Build11's hidden previous-device snapshot needs a user-visible recovery path. The recovery/conflict/durable-Save repair passes 1,109 tests and two independent reviews; its new native/distribution/physical recovery checks are pending. Do not select or submit build11 for public review. [Recovery source evidence](ios-backup-recovery-fix-evidence.json)
+
 **Owner-only TestFlight 1.0.0 (11) is ready: VALID / IN_BETA_TESTING.** Existing Sync Internal QA membership remains one tester; eight builds are retained, with all ten delivery/preservation checks passing. Runtime `b9130a72` was submitted as documentation-only successor `72b36285`. [Exact build11 receipt](ios-build-1.0.0-11-evidence.json)
 
 Saved per-routine music selection and playlist shuffle, selected-alert handoff, library-cover recovery and the safe before-Start ad path are included. Explicit Play controls continuous music; automatic timed Apple Music, public Spotify control and new web acquisition remain disabled. The full suite passes 1,077 tests. Native Simulator session/Advanced checks and the owner's test-ad closure/Timer Ready return are recorded separately from physical-device claims.
 
-Public review/build selection remains held for the outstanding physical paid/content/fresh-Apple checks and final screenshot work. The build11 Restore card is pending. Two native current routine-editor images are prepared; their store-draft update awaits Apple browser login. The existing eight screenshots retain their build10 provenance. No review submission or public release has occurred.
+Public review/build selection remains held for the outstanding physical paid/content/fresh-Apple checks and final screenshot work. The owner reports build11 B-account Pro active and Restore successful. The subsequent cloud-content replacement finding above remains blocking. Two updated native routine-editor placements are saved/reload-verified; six other frames retain build10 provenance, and the next recovery candidate still needs comparison. No review submission or public release has occurred.
 
 ## Historical checkpoints — through 13 November 2026
 

@@ -42,18 +42,20 @@ async function mountRecords(t, name, records, failureKey = null, userId = null) 
   const writes = [];
   let failures = 0;
   let value;
+  const storage = {
+    userId,
+    async getJSON(key) {
+      if (key === failureKey) throw new Error('Device storage unavailable');
+      return records[key] ?? null;
+    },
+    async setJSON(key, data) {
+      writes.push([key, data]);
+      return true;
+    },
+  };
   const context = loadProvider(name, {
     useAccountData: () => ({
-      storage: {
-        userId,
-        async getJSON(key) {
-          if (key === failureKey) throw new Error('Device storage unavailable');
-          return records[key] ?? null;
-        },
-        async setJSON(key, data) {
-          writes.push([key, data]);
-        },
-      },
+      storage,
       reportLoadFailure() {
         failures++;
       },

@@ -1,3 +1,5 @@
+import { summarizeBackup } from './accountStore.js';
+
 export function createBackupSync({
   local,
   remote,
@@ -9,11 +11,13 @@ export function createBackupSync({
   let stopped = false;
   let conflict = false;
   let pendingReload = false;
+  const previewIntents = new WeakMap();
   const state = (status, error = null, lastSyncedAt = null) => {
     if (!stopped) onState({ status, error, lastSyncedAt });
   };
-  const run = async (choice) => {
-    if (!canSync()) {
+  const run = async (choice, intent, intentIsCurrent = () => true) => {
+    const allowed = () => canSync() && intentIsCurrent();
+    if (!allowed()) {
       state('paused');
       return;
     }
@@ -26,17 +30,35 @@ export function createBackupSync({
     state('syncing');
     const initial = await local.snapshot();
     if (stopped) return;
-    if (!canSync()) {
+    if (!allowed()) {
       state('paused');
       return;
     }
     const cloud = await remote.read();
     if (stopped) return;
-    if (!canSync()) {
+    if (!allowed()) {
       state('paused');
       return;
     }
     const revision = cloud?.revision || 0;
+    if (intent) {
+      const expected = previewIntents.get(intent);
+      const latest = await local.snapshot();
+      if (stopped || !allowed())
+        throw new Error('Your account or workout changed. Review both copies again.');
+      if (!expected || expected.counter !== latest.meta.counter || expected.revision !== revision) {
+        conflict = true;
+        state('conflict', 'The device or cloud copy changed. Review both copies again.');
+        const error = new Error('The device or cloud copy changed. Review both copies again.');
+        error.code = 'BACKUP_REVIEW_STALE';
+        throw error;
+      }
+    }
+    if (initial.meta.recoveryPending && !choice) {
+      conflict = true;
+      state('conflict', 'Recovered records are on this device. Review both copies before syncing.');
+      return { status: 'conflict' };
+    }
     if (choice === 'cloud' || (revision !== initial.meta.revision && !initial.meta.dirty)) {
       if (!cloud) throw new Error('No cloud backup is available.');
       if (
@@ -44,11 +66,11 @@ export function createBackupSync({
           cloud.payload,
           revision,
           initial.meta.counter,
-          () => !stopped && canSync(),
+          () => !stopped && allowed(),
         ))
       ) {
         if (stopped) return;
-        if (!canSync()) {
+        if (!allowed()) {
           state('paused');
           return;
         }
@@ -59,12 +81,10 @@ export function createBackupSync({
       if (stopped) return;
       conflict = false;
       pendingReload = true;
-      if (!canSync()) {
+      if (!allowed()) {
         state('paused');
         return;
       }
-      pendingReload = false;
-      onRestore();
     } else if (revision !== initial.meta.revision && choice !== 'local') {
       conflict = true;
       state('conflict', 'This device and the cloud both have changes. Choose the copy to keep.');
@@ -72,15 +92,64 @@ export function createBackupSync({
     } else if (initial.meta.dirty || choice === 'local') {
       const result = await remote.write(initial.payload, revision);
       if (stopped) return;
+      if (!allowed()) {
+        state('paused');
+        return;
+      }
       await local.markSynced(result.revision, initial.meta.counter);
+      if (!allowed()) {
+        state('paused');
+        return;
+      }
+    }
+    // Recovery can commit while an older read/upload is in flight. Its durable
+    // manual-choice hold takes precedence over that older request's success.
+    const latest = await local.snapshot();
+    if (stopped) return;
+    if (!allowed()) {
+      state('paused');
+      return;
+    }
+    if (pendingReload) {
+      pendingReload = false;
+      onRestore();
+    }
+    if (latest.meta.recoveryPending) {
+      conflict = true;
+      state('conflict', 'Recovered records are on this device. Review both copies before syncing.');
+      return { status: 'conflict' };
     }
     conflict = false;
     state('synced', null, new Date().toISOString());
+    return { status: 'synced' };
   };
   return {
-    sync(choice) {
+    async getBackupPreview() {
+      if (inFlight) await inFlight;
+      if (stopped || !canSync())
+        throw new Error('Finish your workout and verify this account before syncing.');
+      const initial = await local.snapshot();
+      if (stopped || !canSync())
+        throw new Error('Your account or workout changed. Review the copies again.');
+      const cloud = await remote.read();
+      const latest = await local.snapshot();
+      if (stopped || !canSync() || latest.meta.counter !== initial.meta.counter)
+        throw new Error('Your records changed. Review the copies again.');
+      const intent = {};
+      previewIntents.set(intent, { counter: initial.meta.counter, revision: cloud?.revision || 0 });
+      return {
+        local: summarizeBackup(initial.payload, initial.meta.updatedAt || null),
+        cloud: cloud ? summarizeBackup(cloud.payload, cloud.updated_at || null) : null,
+        intent,
+      };
+    },
+    sync(choice, intent, intentIsCurrent) {
       if (stopped) return Promise.resolve();
-      if (inFlight) return inFlight;
+      if (inFlight) {
+        // An explicit reviewed choice must not be mistaken for an unrelated
+        // background request that happened to be running when it was confirmed.
+        return choice ? inFlight.then(() => this.sync(choice, intent, intentIsCurrent)) : inFlight;
+      }
       if (conflict && !choice) {
         // A workout can interrupt an explicit copy choice. Restore the choice
         // controls once idle instead of leaving the UI permanently paused.
@@ -91,9 +160,12 @@ export function createBackupSync({
         );
         return Promise.resolve();
       }
-      inFlight = run(choice)
+      inFlight = run(choice, intent, intentIsCurrent)
         .catch((error) => {
-          if (error.code === '40001') {
+          if (error.code === 'BACKUP_REVIEW_STALE') {
+            conflict = true;
+            state('conflict', error.message);
+          } else if (error.code === '40001') {
             conflict = true;
             state('conflict', 'The cloud copy changed during sync. Choose the copy to keep.');
           } else

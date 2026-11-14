@@ -177,7 +177,7 @@
     "publicReleaseHeld": true,
     "draftAppStoreBuildSelectionHeld": true,
     "existingScreenshotCount": 8,
-    "existingScreenshotScope": "build 10",
+    "existingScreenshotScope": "Six retained build10 frames and two new local runtime164/native17 editor frames bound to signed11 code/assets; next recovery candidate comparison pending",
     "finalScreenshotComparisonComplete": false,
     "necessaryScreenshotUpdatesIfAnyPending": true,
     "physicalBuild11ProPurchaseVerified": false,
@@ -186,8 +186,17 @@
     "physicalBuild11BackupVerified": false,
     "freshAppleSignInVerified": false,
     "twoNewNativeRoutineEditorScreenshotsPrepared": true,
-    "newScreenshotStoreSaveAwaitingOwnerAppleBrowserLogin": true,
-    "physicalBuild11RestoreTestCardPending": true
+    "newScreenshotStoreSaveAwaitingOwnerAppleBrowserLogin": false,
+    "physicalBuild11RestoreTestCardPending": false,
+    "physicalBuild11ProActiveOwnerReported": true,
+    "physicalBuild11RestoreOwnerReportedPassed": true,
+    "hostedReviewProLeaseRenewalObserved": true,
+    "hostedReviewBackupRevisionAdvancedFrom2To3": true,
+    "olderCloudCopyReplacedNewLocalRoutineOwnerReported": true,
+    "blockingRecoveryFixRequiredBeforePublicReview": true,
+    "physicalRecoveryCopyPresenceVerified": false,
+    "newRoutineEditorStorePlacementsSavedAndReloadVerified": true,
+    "physicalBuild11RestoreVerificationScope": "Owner report; no direct phone instrumentation. Later hosted reads separately observed lease renewal and backup revision advance; recovery/content-preservation failed as scoped."
   },
   "evidenceSHA256": {
     "group-delivery-proof.json": "8c2d476c2a402334ccf74407373ae2e55f94166c7f8f3273b83b240546dd24ce",
@@ -212,7 +221,7 @@
     "sha256": "341d85630a303b4e333261b5a639939777092f489337de935503dd4ff0c74da6",
     "actualLocalNativeCapture": true,
     "physicalSigned11CaptureClaimed": false,
-    "storeDraftSavePerformed": false
+    "storeDraftSavePerformed": true
   },
   "safeLocalReceiptDirectory": "../artifacts/app-store/testflight-1.0.0-11/",
   "documentPreparation": {
@@ -220,5 +229,14 @@
     "liveServiceCalls": false,
     "keysContactValuesPrivateURLsOrRawLogsIncluded": false,
     "rootReviewedAndSaved": true
-  }
+  },
+  "newRoutineEditorStoreSaveReceipt": {
+    "repositoryPath": "artifacts/app-store/current-runtime164-2026-11-14/asc-editor-placement-saved-safe.json",
+    "sha256": "a661830e56427925119fa2d62de9810c069d3882ea76a389b3ab4550e0fc934f"
+  },
+  "physicalOwnerFeedbackReceipt": {
+    "repositoryPath": "artifacts/app-store/testflight-1.0.0-11/physical-owner-feedback-safe.json",
+    "sha256": "f91aa56e0136fbdbe56f0472b1630de207e3aeac619a8ecda6245e8e10a66ee2"
+  },
+  "newBlockingIssueEvidence": "ios-backup-recovery-fix-evidence.json"
 }

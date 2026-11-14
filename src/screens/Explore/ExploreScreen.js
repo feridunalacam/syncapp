@@ -24,9 +24,19 @@ import DiscoverAdSlot from './components/DiscoverAdSlot';
 import DiscoverRoutineCard from './components/DiscoverRoutineCard';
 
 const categories = ['all', 'sport', 'learn', 'study', 'mindfulness'];
-export default function ExploreScreen() {
+export default function ExploreScreen({ navigation } = {}) {
   const { posts, upvotePost, downvotePost } = usePostContext();
-  const { addRoutine, routines } = useRoutineContext();
+  const { addRoutine, routines, saveOwner } = useRoutineContext();
+  const saveLifetime = useRef({ active: true, owner: saveOwner });
+  if (saveLifetime.current.owner !== saveOwner)
+    saveLifetime.current = { active: true, owner: saveOwner };
+  const savingPosts = useRef(new Set());
+  useEffect(() => {
+    saveLifetime.current.active = true;
+    return () => {
+      saveLifetime.current.active = false;
+    };
+  }, []);
   const { theme } = useTheme();
   const [query, setQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -48,8 +58,13 @@ export default function ExploreScreen() {
     [posts, query, category],
   );
   const isSaved = (post) => routines.some((r) => r.sourcePostId === post.id);
-  const save = (post) => {
-    if (isSaved(post)) return;
+  const save = async (post) => {
+    if (isSaved(post) || savingPosts.current.has(post.id)) return;
+    const lifetime = saveLifetime.current;
+    const current = () =>
+      saveLifetime.current === lifetime && lifetime.active && navigation?.isFocused?.() !== false;
+    if (!current()) return;
+    savingPosts.current.add(post.id);
     // Session metadata belongs to history, not to a new reusable routine.
     const {
       sessionId,
@@ -62,8 +77,19 @@ export default function ExploreScreen() {
       skippedPhases,
       ...template
     } = post.routine;
-    addRoutine({ ...template, id: `saved-${Date.now()}`, sourcePostId: post.id });
-    Alert.alert('Routine saved', 'You can find it in Training and open it in Timer.');
+    try {
+      const saved = await addRoutine(
+        { ...template, id: `saved-${Date.now()}`, sourcePostId: post.id },
+        { isCurrent: current },
+      );
+      if (!current()) return;
+      if (saved === false) throw new Error('Could not save this routine. Please try again.');
+      Alert.alert('Routine saved', 'You can find it in Training and open it in Timer.');
+    } catch (error) {
+      if (current()) Alert.alert('Could not save routine', error?.message || 'Please try again.');
+    } finally {
+      savingPosts.current.delete(post.id);
+    }
   };
   const selectedRoutine = selected ? normalizeRoutine(selected.routine) : null;
   return (

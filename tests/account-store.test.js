@@ -503,6 +503,280 @@ test('valid restore keeps a recoverable device copy and rejects malformed format
   assert.deepEqual(await account.getJSON('routines'), [{ id: 'cloud-copy' }]);
 });
 
+test('the TestFlight 11 recovery copy restores Phone11Check alongside Nns without changing guest or cloud copies', async () => {
+  const legacy = JSON.stringify({
+    payload: payload({
+      routines: [{ id: 'phone', name: 'Phone11Check' }],
+      profileBio: 'Earlier bio',
+    }),
+    meta: { revision: 2, counter: 4, dirty: true },
+  });
+  const base = memoryStorage({
+    routines: '[{"id":"guest-private"}]',
+    '@syncapp_guest_import_cleanup': '{"userId":"other-account","entries":[]}',
+    [scopedKey('a', 'routines')]: '[{"id":"nns","name":"Nns"}]',
+    [scopedKey('a', 'profileBio')]: 'Current bio',
+    [scopedKey('a', '@syncmeta')]: '{"revision":3,"counter":5,"dirty":false}',
+    [scopedKey('a', '@before-cloud-restore')]: legacy,
+  });
+  let notifications = 0;
+  const account = createAccountStore(base, 'a', () => notifications++);
+  const before = new Map(base.values);
+  const preview = await account.getRecoveryPreview();
+  assert.equal(preview.routineCount, 1);
+  assert.deepEqual(preview.routineNames, ['Phone11Check']);
+  assert.equal(preview.updatedAt, null, 'Legacy copies do not invent a capture time');
+  assert.deepEqual(base.values, before, 'Review and cancellation are read-only');
+  assert.equal(await account.recoverDeviceCopy(preview.intent), true);
+  assert.deepEqual(
+    (await account.getJSON('routines')).map((row) => row.name),
+    ['Nns', 'Phone11Check'],
+  );
+  assert.equal(await account.getString('profileBio'), 'Current bio');
+  assert.equal(base.values.get(scopedKey('a', '@before-cloud-restore')), legacy);
+  assert.equal(base.values.get('routines'), before.get('routines'));
+  assert.equal(
+    base.values.get('@syncapp_guest_import_cleanup'),
+    before.get('@syncapp_guest_import_cleanup'),
+  );
+  assert.equal(notifications, 0, 'Recovery itself never schedules an upload');
+  assert.equal((await account.snapshot()).meta.recoveryPending, true);
+  assert.equal((await account.snapshot()).meta.revision, 3);
+});
+
+test('bounded recovery keeps the original and latest successful device copies with exact local audio', async () => {
+  const base = memoryStorage();
+  const account = createAccountStore(base, 'a');
+  await account.replaceFromCloud(payload({ routines: [{ id: 'nns', name: 'Nns' }] }), 1, 0);
+  const original = base.values.get(scopedKey('a', '@before-cloud-restore'));
+  const phone = {
+    id: 'phone',
+    name: 'Phone11Check',
+    workSong: { id: 'audio', uri: 'file:///phone.mp3' },
+  };
+  await account.setJSON('routines', [phone]);
+  const before = await account.snapshot();
+  await account.replaceFromCloud(
+    payload({ routines: [{ id: 'nns', name: 'Nns' }] }),
+    3,
+    before.meta.counter,
+  );
+  assert.equal(base.values.get(scopedKey('a', '@before-cloud-restore')), original);
+  const preview = await account.getRecoveryPreview();
+  assert.deepEqual(preview.routineNames, ['Phone11Check']);
+  assert.equal(Number.isFinite(Date.parse(preview.updatedAt)), true);
+  const latest = base.values.get(scopedKey('a', '@latest-before-cloud-restore'));
+  const repeatedRestore = await account.snapshot();
+  await account.replaceFromCloud(
+    payload({ routines: [{ id: 'nns', name: 'Nns' }] }),
+    4,
+    repeatedRestore.meta.counter,
+  );
+  assert.equal(
+    base.values.get(scopedKey('a', '@latest-before-cloud-restore')),
+    latest,
+    'Repeating the same restore must not discard the only Phone11Check copy',
+  );
+  const refreshedPreview = await account.getRecoveryPreview();
+  assert.deepEqual(refreshedPreview.routineNames, ['Phone11Check']);
+  assert.equal(await account.recoverDeviceCopy(refreshedPreview.intent), true);
+  assert.deepEqual(await account.getJSON('routines'), [{ id: 'nns', name: 'Nns' }, phone]);
+  assert.equal(base.values.get(scopedKey('a', '@latest-before-cloud-restore')), latest);
+  assert.equal((await account.snapshot()).payload.data.routines[1].workSong.uri, null);
+  assert.equal(
+    [...base.values.keys()].filter((key) => key.endsWith('before-cloud-restore')).length,
+    2,
+  );
+});
+
+test('keep-both recovery preserves same-ID variants and repeated recovery does not add copies', async () => {
+  const base = memoryStorage({
+    [scopedKey('a', 'routines')]: '[{"id":"same","name":"Current"}]',
+    [scopedKey('a', '@before-cloud-restore')]: JSON.stringify({
+      payload: payload({
+        routines: [{ id: 'same', name: 'Phone11Check' }],
+        completedRoutines: [{ sessionId: 'saved-session', id: 'same', completedAt: 'yesterday' }],
+      }),
+    }),
+  });
+  const account = createAccountStore(base, 'a');
+  const preview = await account.getRecoveryPreview();
+  await account.recoverDeviceCopy(preview.intent);
+  const first = await account.getJSON('routines');
+  assert.equal(first[0].id, 'same');
+  assert.deepEqual(
+    first.map((row) => row.name),
+    ['Current', 'Phone11Check'],
+  );
+  assert.notEqual(first[1].id, 'same');
+  await account.recoverDeviceCopy((await account.getRecoveryPreview()).intent);
+  assert.deepEqual(await account.getJSON('routines'), first);
+  assert.equal((await account.getJSON('completedRoutines')).length, 1);
+});
+
+test('recovery reattaches exact saved audio to unchanged identities without duplicating reordered properties', async () => {
+  const saved = {
+    id: 'phone',
+    name: 'Phone11Check',
+    workSong: { id: 'song', uri: 'content://original-file' },
+  };
+  const base = memoryStorage();
+  const account = createAccountStore(base, 'a');
+  await account.setJSON('routines', [saved]);
+  await account.replaceFromCloud(
+    payload({
+      routines: [{ name: 'Phone11Check', id: 'phone', workSong: { uri: null, id: 'song' } }],
+    }),
+    3,
+    1,
+  );
+  // Simulate an earlier restore that lost the local link, while the recovery
+  // record still contains the exact original native URI.
+  await account.setJSON('routines', [
+    { name: 'Phone11Check', id: 'phone', workSong: { uri: null, id: 'song' } },
+  ]);
+  const review = await account.getRecoveryPreview();
+  await account.recoverDeviceCopy(review.intent);
+  const recovered = await account.getJSON('routines');
+  assert.equal(recovered.length, 1);
+  assert.equal(recovered[0].workSong.uri, 'content://original-file');
+  assert.equal((await account.snapshot()).payload.data.routines[0].workSong.uri, null);
+});
+
+test('failed or cancelled latest-copy commits roll back current records and both saved copies', async () => {
+  for (const mode of ['failure', 'workout']) {
+    let active = false;
+    let allowed = true;
+    const base = memoryStorage(
+      {},
+      {
+        beforeSet: (key) => {
+          if (!active || key !== scopedKey('a', '@latest-before-cloud-restore')) return;
+          active = false;
+          if (mode === 'failure') throw new Error('Recovery storage unavailable');
+          allowed = false;
+        },
+      },
+    );
+    const account = createAccountStore(base, 'a');
+    await account.setJSON('routines', [{ id: 'phone', name: 'Phone11Check' }]);
+    let before = await account.snapshot();
+    await account.replaceFromCloud(
+      payload({ routines: [{ id: 'nns', name: 'Nns' }] }),
+      3,
+      before.meta.counter,
+    );
+    await account.setString('profileBio', 'Latest local bio');
+    before = await account.snapshot();
+    const exact = new Map(base.values);
+    active = true;
+    const replacing = account.replaceFromCloud(
+      payload({ routines: [{ id: 'other' }] }),
+      4,
+      before.meta.counter,
+      () => allowed,
+    );
+    if (mode === 'failure') await assert.rejects(replacing, /Recovery storage unavailable/);
+    else assert.equal(await replacing, false);
+    assert.deepEqual(base.values, exact);
+    assert.deepEqual((await account.getRecoveryPreview()).routineNames, ['Phone11Check']);
+  }
+});
+
+test('recovery intents reject local edits, different adapters, namespaces and mismatched saved ownership', async () => {
+  const base = memoryStorage();
+  const account = createAccountStore(base, 'a');
+  await account.setJSON('routines', [{ id: 'phone' }]);
+  await account.replaceFromCloud(payload({ routines: [{ id: 'cloud' }] }), 3, 1);
+  const preview = await account.getRecoveryPreview();
+  assert.equal(await createAccountStore(base, 'a').recoverDeviceCopy(preview.intent), false);
+  assert.equal(await createAccountStore(base, 'b').getRecoveryPreview(), null);
+  await assert.rejects(
+    createAccountStore(base, null).getRecoveryPreview(),
+    /verified account namespace/,
+  );
+  await assert.rejects(
+    createAccountStore(base, null).recoverDeviceCopy(preview.intent),
+    /verified account namespace/,
+  );
+  await assert.rejects(
+    createAccountStore(base, 'a', undefined, { namespace: 'unresolved:a' }).getRecoveryPreview(),
+    /verified account namespace/,
+  );
+  assert.equal(
+    await createAccountStore(base, 'a', undefined, {
+      namespace: 'review:1:a',
+    }).getRecoveryPreview(),
+    null,
+  );
+  await account.setString('profileBio', 'Concurrent edit');
+  const exact = new Map(base.values);
+  assert.equal(await account.recoverDeviceCopy(preview.intent), false);
+  assert.deepEqual(base.values, exact);
+  const damaged = JSON.parse(base.values.get(scopedKey('a', '@before-cloud-restore')));
+  damaged.namespace = 'b';
+  base.values.set(scopedKey('a', '@before-cloud-restore'), JSON.stringify(damaged));
+  await assert.rejects(account.getRecoveryPreview(), /different account/);
+});
+
+test('a workout beginning during recovery rolls back exact records and preserves the pinned copy', async () => {
+  let allowed = true;
+  let recovering = false;
+  const base = memoryStorage(
+    {
+      [scopedKey('a', 'routines')]: '[{"id":"nns"}]',
+      [scopedKey('a', '@before-cloud-restore')]: JSON.stringify({
+        payload: payload({ routines: [{ id: 'phone' }] }),
+      }),
+    },
+    {
+      beforeSet: (key) => {
+        if (recovering && key === scopedKey('a', 'routines')) allowed = false;
+      },
+    },
+  );
+  const account = createAccountStore(base, 'a');
+  const preview = await account.getRecoveryPreview();
+  const exact = new Map(base.values);
+  recovering = true;
+  assert.equal(await account.recoverDeviceCopy(preview.intent, () => allowed), false);
+  assert.deepEqual(base.values, exact);
+});
+
+test('interrupted latest-copy rollback is retried before a new adapter can read mixed records', async () => {
+  let fail = false;
+  let rollbackUnavailable = false;
+  const base = memoryStorage(
+    {},
+    {
+      beforeSet: (key, raw) => {
+        if (!fail) return;
+        if (key === scopedKey('a', '@latest-before-cloud-restore') && !rollbackUnavailable) {
+          rollbackUnavailable = true;
+          throw new Error('Latest-copy commit failed');
+        }
+        if (rollbackUnavailable) throw new Error('Rollback unavailable');
+      },
+    },
+  );
+  const account = createAccountStore(base, 'a');
+  await account.setJSON('routines', [{ id: 'phone', name: 'Phone11Check' }]);
+  await account.replaceFromCloud(payload({ routines: [{ id: 'nns' }] }), 3, 1);
+  const exact = new Map(base.values);
+  const before = await account.snapshot();
+  fail = true;
+  await assert.rejects(
+    account.replaceFromCloud(payload({ routines: [{ id: 'new-cloud' }] }), 4, before.meta.counter),
+    /Rollback unavailable/,
+  );
+  const reopened = createAccountStore(base, 'a');
+  await assert.rejects(reopened.getRecoveryPreview(), /Rollback unavailable/);
+  fail = false;
+  await reopened.prepare();
+  assert.deepEqual(base.values, exact);
+  assert.deepEqual((await reopened.getRecoveryPreview()).routineNames, ['Phone11Check']);
+});
+
 test('a failed cloud replacement rolls back exact local media and preserves a queued edit', async () => {
   const waiting = deferred();
   let fail = true;

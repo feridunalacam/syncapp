@@ -2,13 +2,15 @@
 
 ## Current release overview — 14 November 2026
 
+**New blocking physical-test finding:** after choosing the older cloud copy, the owner's newly saved routine stopped appearing. Build11 has a hidden previous-device snapshot but no recovery UI. A focused repair now preserves that copy, exposes local keep-both recovery, makes conflict choices explicit and waits for durable Save. It passes 1,109 tests and two independent reviews; native/physical recovery and the next TestFlight delivery remain pending. Build11 must remain an internal historical beta while this is resolved. [Recovery source evidence](ios-backup-recovery-fix-evidence.json)
+
 **TestFlight 1.0.0 (11) is delivered to the existing owner-only Sync Internal QA group.** Apple reports VALID / IN_BETA_TESTING; the group contains one tester and eight builds, with all ten delivery/preservation checks passing. Runtime source is `b9130a72`; the submitted commit `72b36285` adds only documentation. One Free EAS build and one official Apple upload were used. [Exact build11 receipt](ios-build-1.0.0-11-evidence.json)
 
 Build11 includes configurable selected-alert music handoff, bounded custom-sound loading, saved per-routine Apple Music choices/shuffle, optional library-cover recovery and the before-Start ad boundary. Selecting or saving music does not play it; explicit Play starts a continuous queue. Automatic timed Apple Music assignments, public Spotify control and new web acquisition remain off. Pro removes ads and enables supported cloud backup/sync.
 
 The full suite passes 1,077 tests with zero failures/skips. Local native UI checks include Start/Pause/Resume/End, editable Advanced choices and the owner's post-Finish test-ad closure followed by Timer Ready. The signed artifact passed signature/profile/privacy checks; its sole raw-HBC inequality is accounted for by two strict independent filename-only proofs and Root's full-file replay. No code, strings, assets or source comments were normalized.
 
-**Public review remains held.** Physical build11 Pro/Restore, genuine backup-content restoration, fresh Apple token registration/revocation and subscribed MusicKit/library-cover checks remain separate from the source/native evidence. The owner has received the single build11 Restore test card. Two new routine-editor screenshots are prepared; saving them in the existing store draft awaits the owner's renewed Apple browser login. Existing build10 screenshot placements remain unchanged. No App Review build selection, submission or public release has occurred.
+**Public review remains held.** Physical build11 Pro/Restore, genuine backup-content restoration, fresh Apple token registration/revocation and subscribed MusicKit/library-cover checks remain separate from the source/native evidence. The owner reports B-account Pro active and Restore successful on build11; targeted hosted reads separately observed a renewed review lease and backup revision advance. The later restore/content-loss finding above remains blocking. Two new routine-editor screenshots are saved and reload-verified; the other six retain build10 provenance. No App Review build selection, submission or public release has occurred.
 
 ## Historical checkpoints — through 13 November 2026
 

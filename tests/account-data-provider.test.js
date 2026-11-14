@@ -54,6 +54,7 @@ async function mount({
   subscriptionError = null,
   refresh = async () => {},
   signOut = async () => {},
+  sessionToken = 'offline-fixture',
   beforeRead = () => {},
   remote,
 } = {}) {
@@ -97,7 +98,7 @@ async function mount({
     AsyncStorage: base,
     useAuth: () => ({
       user,
-      session: user ? { user, access_token: 'offline-fixture' } : null,
+      session: user ? { user, access_token: sessionToken } : null,
       signOut,
     }),
     useSubscription: () => ({
@@ -178,6 +179,7 @@ async function mount({
       if (Object.hasOwn(next, 'subscriptionReady')) subscriptionReady = next.subscriptionReady;
       if (Object.hasOwn(next, 'subscriptionError')) subscriptionError = next.subscriptionError;
       if (Object.hasOwn(next, 'user')) user = next.user;
+      if (Object.hasOwn(next, 'sessionToken')) sessionToken = next.sessionToken;
       await act(async () =>
         renderer.update(
           React.createElement(AccountDataProvider, {}, React.createElement(Observer)),
@@ -282,6 +284,37 @@ test('waiting for subscription verification never blocks readable local account 
     assert.equal(await app.value.storage.getString('profileBio'), 'Available offline');
   } finally {
     await app.close();
+  }
+});
+
+test('manual sync rejects a missing or unverified engine instead of silently claiming completion', async () => {
+  for (const admission of ['unconfigured', 'unverified', 'pending']) {
+    const app = await mount({
+      user: { id: ACCOUNT_ID },
+      pro: true,
+      ...(admission === 'pending' ? { subscriptionReady: false } : {}),
+      ...(admission === 'unverified' ? { scopeConfirmed: false, accessVerified: false } : {}),
+      remote:
+        admission === 'unconfigured'
+          ? null
+          : {
+              from: () => assert.fail('Unadmitted manual sync cannot query the cloud'),
+            },
+    });
+    try {
+      assert.equal(app.value.ready, true, 'Unadmitted backup does not close local records');
+      await assert.rejects(
+        app.value.syncNow(),
+        /Cloud backup is not ready.*Refresh account access/,
+      );
+      assert.deepEqual(app.writes, []);
+      const oldSync = app.value.syncNow;
+      await app.updateAccess({ user: null, scope: null });
+      await assert.rejects(oldSync(), /account changed.*Sign in and verify/);
+      assert.deepEqual(app.writes, []);
+    } finally {
+      await app.close();
+    }
   }
 });
 
@@ -655,6 +688,147 @@ test('revoked review access cannot apply a previously requested cloud backup or 
     assert.equal(app.values.get('routines'), '[{"id":"guest"}]');
     assert.equal(app.value.storage.namespace, scope.namespace);
   } finally {
+    await app.close();
+  }
+});
+
+test('Free offline recovery keeps both Phone11Check and current Nns without contacting the cloud', async () => {
+  const prefix = `@syncapp/account/${ACCOUNT_ID}/`;
+  const pinned = JSON.stringify({
+    payload: { version: 1, data: { routines: [{ id: 'phone', name: 'Phone11Check' }] } },
+  });
+  const app = await mount({
+    user: { id: ACCOUNT_ID },
+    pro: false,
+    initial: {
+      [prefix + 'routines']: '[{"id":"nns","name":"Nns"}]',
+      [prefix + '@before-cloud-restore']: pinned,
+      routines: '[{"id":"guest-private"}]',
+    },
+    remote: { from: () => assert.fail('Local recovery does not require cloud access') },
+  });
+  try {
+    const review = await app.value.getRecoveryPreview();
+    assert.deepEqual(Array.from(review.routineNames), ['Phone11Check']);
+    assert.deepEqual(app.writes, [], 'Review has no storage side effects');
+    let result;
+    await act(async () => {
+      result = await app.value.recoverDeviceCopy(review.intent);
+    });
+    assert.equal(result.status, 'recovered');
+    assert.deepEqual(
+      (await app.value.storage.getJSON('routines')).map((row) => row.name),
+      ['Nns', 'Phone11Check'],
+    );
+    assert.equal(app.values.get(prefix + '@before-cloud-restore'), pinned);
+    assert.equal(app.values.get('routines'), '[{"id":"guest-private"}]');
+    assert.equal(app.mounts, 2);
+    assert.equal((await app.value.storage.snapshot()).meta.recoveryPending, true);
+  } finally {
+    await app.close();
+  }
+});
+
+test('recovery confirmation cannot cross workout, session, account, scope or consumer epoch changes', async () => {
+  const prefix = `@syncapp/account/${ACCOUNT_ID}/`;
+  const initial = {
+    [prefix + 'routines']: '[{"id":"nns"}]',
+    [prefix + '@before-cloud-restore']: JSON.stringify({
+      payload: { version: 1, data: { routines: [{ id: 'phone' }] } },
+    }),
+  };
+  for (const change of ['workout', 'session', 'account', 'scope', 'epoch']) {
+    const app = await mount({ user: { id: ACCOUNT_ID }, initial });
+    try {
+      const prior = app.value;
+      const review = await prior.getRecoveryPreview();
+      if (change === 'workout') prior.setSyncPaused(true);
+      if (change === 'session') await app.updateAccess({ sessionToken: 'new-session' });
+      if (change === 'account')
+        await app.updateAccess({
+          user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' },
+          scope: null,
+        });
+      if (change === 'scope')
+        await app.updateAccess({
+          scope: {
+            user_id: ACCOUNT_ID,
+            namespace: `review:1:${ACCOUNT_ID}`,
+            lane: 'review',
+            epoch: 1,
+            active: true,
+            expires_at: '2099-01-01T00:00:00Z',
+          },
+        });
+      if (change === 'epoch') await act(async () => app.value.importGuestData());
+      const writesBefore = app.writes.length;
+      await assert.rejects(prior.recoverDeviceCopy(review.intent), /changed|Review/);
+      assert.equal(app.writes.length, writesBefore);
+      assert.equal(app.values.get(prefix + 'routines'), initial[prefix + 'routines']);
+      assert.equal(
+        app.values.get(prefix + '@before-cloud-restore'),
+        initial[prefix + '@before-cloud-restore'],
+      );
+    } finally {
+      await app.close();
+    }
+  }
+});
+
+test('a session change while a confirmed cloud restore is downloading cannot apply the old intent', async () => {
+  const prefix = `@syncapp/account/${ACCOUNT_ID}/`;
+  let delay = false;
+  let release;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const row = {
+    revision: 3,
+    payload: { version: 1, data: { routines: [{ id: 'nns', name: 'Nns' }] } },
+  };
+  const app = await mount({
+    user: { id: ACCOUNT_ID },
+    pro: true,
+    initial: {
+      [prefix + 'routines']: '[{"id":"phone","name":"Phone11Check"}]',
+      [prefix + '@syncmeta']: '{"revision":2,"counter":1,"dirty":true}',
+    },
+    remote: {
+      from: () => {
+        const query = {
+          select: () => query,
+          setHeader: () => query,
+          eq: () => query,
+          abortSignal: () => query,
+          maybeSingle: async () => {
+            if (delay) await pending;
+            return { data: row, error: null };
+          },
+        };
+        return query;
+      },
+    },
+  });
+  try {
+    const preview = await app.value.getBackupPreview();
+    delay = true;
+    let choosing;
+    await act(async () => {
+      choosing = app.value.resolveConflict('cloud', preview.intent);
+    });
+    await app.updateAccess({ sessionToken: 'new-session-token' });
+    let result;
+    await act(async () => {
+      release();
+      result = await choosing;
+    });
+    assert.notEqual(result?.status, 'synced');
+    assert.deepEqual(await app.value.storage.getJSON('routines'), [
+      { id: 'phone', name: 'Phone11Check' },
+    ]);
+    assert.equal(app.values.has(prefix + '@before-cloud-restore'), false);
+  } finally {
+    release();
     await app.close();
   }
 });

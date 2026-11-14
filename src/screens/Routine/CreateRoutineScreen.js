@@ -29,7 +29,7 @@ import { useAppleMusicConnection } from '../../context/AppleMusicConnectionConte
 import { useRoutineForm } from './hooks/useRoutineForm';
 
 export default function CreateRoutineScreen({ navigation, route }) {
-  const { addRoutine, updateRoutine } = useRoutineContext();
+  const { addRoutine, updateRoutine, saveOwner } = useRoutineContext();
   const { theme } = useTheme();
   const spotify = useSpotifyConnection();
   const apple = useAppleMusicConnection();
@@ -42,8 +42,15 @@ export default function CreateRoutineScreen({ navigation, route }) {
     templateRoutine,
     addRoutine,
     updateRoutine,
+    saveOwner,
+    isCurrent: () => navigation.isFocused?.() !== false,
     onSave: () => navigation.goBack(),
   });
+
+  useEffect(
+    () => navigation.addListener?.('blur', form.invalidateSave),
+    [navigation, form.invalidateSave],
+  );
 
   // Check if any advanced settings were modified (for auto-expanding)
   const hasAdvancedSettingsModified =
@@ -208,6 +215,8 @@ export default function CreateRoutineScreen({ navigation, route }) {
         />
         <Pressable
           onPress={handleSave}
+          disabled={form.saving}
+          accessibilityState={{ disabled: form.saving, busy: form.saving }}
           accessibilityRole="button"
           accessibilityLabel={templateRoutine?.id ? 'Update routine' : 'Save routine'}
         >
@@ -221,7 +230,9 @@ export default function CreateRoutineScreen({ navigation, route }) {
               justifyContent: 'center',
             }}
           >
-            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.accent }}>Save</Text>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.accent }}>
+              {form.saving ? 'Saving…' : 'Save'}
+            </Text>
           </GlassSurface>
         </Pressable>
       </View>
@@ -231,6 +242,11 @@ export default function CreateRoutineScreen({ navigation, route }) {
         </View>
       ) : null}
 
+      {form.saveError ? (
+        <View style={{ paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing.xs }}>
+          <FormFieldError message={form.saveError} />
+        </View>
+      ) : null}
       <ScrollView
         style={styles.fill}
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24 }}

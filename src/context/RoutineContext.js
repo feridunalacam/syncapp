@@ -1,5 +1,13 @@
 import { useAccountData } from './AccountDataContext';
-import { createContext, useCallback, useContext, useMemo, useState, useEffect } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+  useEffect,
+  useRef,
+} from 'react';
 import { normalizeRoutine } from '../domain/routines';
 import { STORAGE_KEYS } from '../lib/storage';
 
@@ -26,9 +34,57 @@ export const RoutineProvider = ({ children }) => {
   const [completedRoutines, setCompletedRoutines] = useState([]);
   const [isLoaded, setIsLoaded] = useState(false);
   const [completedHydrated, setCompletedHydrated] = useState(false);
+  const ownerRef = useRef(null);
+  if (ownerRef.current?.storage !== storage) {
+    if (ownerRef.current) ownerRef.current.active = false;
+    ownerRef.current = {
+      storage,
+      active: true,
+      ready: false,
+      routines: [],
+      queue: Promise.resolve(),
+    };
+  }
+
+  const persistRoutines = useCallback(
+    (change, { isCurrent = () => true } = {}) => {
+      const owner = ownerRef.current;
+      const current = () => owner.active && ownerRef.current === owner && owner.storage === storage;
+      const pending = owner.queue.then(async () => {
+        if (!current() || !owner.ready || !isCurrent())
+          throw new Error('This editor is no longer current. Reopen the routine and try again.');
+        const next = change(owner.routines);
+        if (next !== owner.routines) {
+          let saved;
+          try {
+            saved = await storage.setJSON(STORAGE_KEYS.ROUTINES, next);
+          } catch {
+            throw new Error(
+              'Could not save this routine on your device. Your draft is still here. Try Save again.',
+            );
+          }
+          if (saved !== true)
+            throw new Error(
+              'Could not save this routine on your device. Your draft is still here. Try Save again.',
+            );
+          if (!current()) throw new Error('Your account changed before Save completed.');
+          owner.routines = next;
+          setRoutines(next);
+        }
+        return true;
+      });
+      owner.queue = pending.catch(() => {});
+      return pending;
+    },
+    [storage],
+  );
 
   useEffect(() => {
     let cancelled = false;
+    const owner = ownerRef.current;
+    owner.active = true;
+    setIsLoaded(false);
+    setCompletedHydrated(false);
     (async () => {
       try {
         const [stored, completed] = await Promise.all([
@@ -36,14 +92,15 @@ export const RoutineProvider = ({ children }) => {
           storage.getJSON(STORAGE_KEYS.COMPLETED_ROUTINES, null),
         ]);
         if (cancelled) return;
-        setRoutines(
-          Array.isArray(stored)
-            ? stored.map(normalizeRoutine)
-            : storage.userId
-              ? []
-              : defaultRoutines,
-        );
-        if (Array.isArray(completed)) setCompletedRoutines(completed);
+        const next = Array.isArray(stored)
+          ? stored.map(normalizeRoutine)
+          : storage.userId
+            ? []
+            : defaultRoutines;
+        owner.routines = next;
+        owner.ready = true;
+        setRoutines(next);
+        setCompletedRoutines(Array.isArray(completed) ? completed : []);
         setIsLoaded(true);
         setCompletedHydrated(true);
       } catch {
@@ -54,79 +111,87 @@ export const RoutineProvider = ({ children }) => {
     })();
     return () => {
       cancelled = true;
+      owner.active = false;
     };
-  }, []);
-
-  useEffect(() => {
-    if (!isLoaded) return;
-    storage.setJSON(STORAGE_KEYS.ROUTINES, routines);
-  }, [routines, isLoaded]);
+  }, [storage]);
 
   // Persist workout history. Skip until hydrate completes so we don't
   // overwrite the user's saved log with the seed list on first render.
   useEffect(() => {
-    if (!completedHydrated) return;
+    if (!completedHydrated || !ownerRef.current.ready) return;
     storage.setJSON(STORAGE_KEYS.COMPLETED_ROUTINES, completedRoutines);
   }, [completedRoutines, completedHydrated]);
 
-  const addRoutine = useCallback((routineInput) => {
-    if (!routineInput) return;
+  const addRoutine = useCallback(
+    (routineInput, options) => {
+      if (!routineInput) return Promise.reject(new Error('Choose a routine to save.'));
 
-    const rawName = typeof routineInput.name === 'string' ? routineInput.name.trim() : '';
-    const name = rawName || 'Custom Routine';
-    const slug = name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-    const id = `${slug || 'routine'}-${Date.now()}`;
+      const rawName = typeof routineInput.name === 'string' ? routineInput.name.trim() : '';
+      const name = rawName || 'Custom Routine';
+      const slug = name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)/g, '');
+      const id = `${slug || 'routine'}-${Date.now()}`;
 
-    // Spread the caller's routine so any new field added to the form / schema
-    // automatically lands in storage. Defaults cover only the "required" core
-    // fields a routine must have to be runnable; identity (id, name) is forced
-    // last so callers can't override it accidentally.
-    const routineToStore = {
-      rounds: 1,
-      workSec: 60,
-      restSec: 30,
-      ...routineInput,
-      id,
-      name,
-    };
+      // Spread the caller's routine so any new field added to the form / schema
+      // automatically lands in storage. Defaults cover only the "required" core
+      // fields a routine must have to be runnable; identity (id, name) is forced
+      // last so callers can't override it accidentally.
+      const routineToStore = {
+        rounds: 1,
+        workSec: 60,
+        restSec: 30,
+        ...routineInput,
+        id,
+        name,
+      };
 
-    setRoutines((prev) => [...prev, normalizeRoutine(routineToStore)]);
-  }, []);
+      return persistRoutines((prev) => [...prev, normalizeRoutine(routineToStore)], options);
+    },
+    [persistRoutines],
+  );
 
-  const updateRoutine = useCallback((updatedRoutine) => {
-    setRoutines((prev) =>
-      prev.map((routine) =>
-        routine.id === updatedRoutine.id
-          ? normalizeRoutine({ ...routine, ...updatedRoutine })
-          : routine,
-      ),
-    );
-  }, []);
+  const updateRoutine = useCallback(
+    (updatedRoutine, options) =>
+      persistRoutines((prev) => {
+        if (!prev.some((routine) => routine.id === updatedRoutine.id))
+          throw new Error('This routine is no longer available. Reopen Training and try again.');
+        return prev.map((routine) =>
+          routine.id === updatedRoutine.id
+            ? normalizeRoutine({ ...routine, ...updatedRoutine })
+            : routine,
+        );
+      }, options),
+    [persistRoutines],
+  );
 
-  const reorderRoutines = useCallback((fromIndex, toIndex) => {
-    setRoutines((prev) => {
-      if (
-        fromIndex === toIndex ||
-        fromIndex < 0 ||
-        toIndex < 0 ||
-        fromIndex >= prev.length ||
-        toIndex >= prev.length
-      ) {
-        return prev;
-      }
-      const next = [...prev];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
-      return next;
-    });
-  }, []);
+  const reorderRoutines = useCallback(
+    (fromIndex, toIndex) => {
+      return persistRoutines((prev) => {
+        if (
+          fromIndex === toIndex ||
+          fromIndex < 0 ||
+          toIndex < 0 ||
+          fromIndex >= prev.length ||
+          toIndex >= prev.length
+        ) {
+          return prev;
+        }
+        const next = [...prev];
+        const [moved] = next.splice(fromIndex, 1);
+        next.splice(toIndex, 0, moved);
+        return next;
+      }).catch(() => false);
+    },
+    [persistRoutines],
+  );
 
-  const deleteRoutine = useCallback((id) => {
-    setRoutines((prev) => prev.filter((routine) => routine.id !== id));
-  }, []);
+  const deleteRoutine = useCallback(
+    (id) =>
+      persistRoutines((prev) => prev.filter((routine) => routine.id !== id)).catch(() => false),
+    [persistRoutines],
+  );
 
   const addCompletedRoutine = useCallback((routine) => {
     setCompletedRoutines((prev) => {
@@ -157,14 +222,15 @@ export const RoutineProvider = ({ children }) => {
   // Reset all routine data back to factory defaults. Used by Logout / "wipe
   // everything" so the next user starts from a clean slate.
   const resetRoutinesToDefaults = useCallback(() => {
-    setRoutines(storage.userId ? [] : defaultRoutines);
     setCompletedRoutines([]);
-  }, []);
+    return persistRoutines(() => (storage.userId ? [] : defaultRoutines)).catch(() => false);
+  }, [storage, persistRoutines]);
 
   const value = useMemo(
     () => ({
-      routines,
-      isLoaded: isLoaded && completedHydrated,
+      saveOwner: ownerRef.current,
+      routines: ownerRef.current.ready ? routines : storage.userId ? [] : defaultRoutines,
+      isLoaded: ownerRef.current.ready && isLoaded && completedHydrated,
       addRoutine,
       updateRoutine,
       reorderRoutines,
@@ -176,6 +242,7 @@ export const RoutineProvider = ({ children }) => {
       resetRoutinesToDefaults,
     }),
     [
+      storage,
       isLoaded,
       completedHydrated,
       routines,
