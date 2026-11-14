@@ -834,3 +834,121 @@ test('an already-open native form drains while held and unsafe release cannot st
   assert.equal(calls.filter((call) => call === 'form').length, 1);
   assert.equal(calls.includes('init'), false);
 });
+
+test('cached consent and completed SDK preparation restore readiness only under a hold and safe placement', async () => {
+  const { controller, calls, getLoadCount } = setup();
+  controller.setGate(free);
+  const releaseIdle = controller.acquirePlacement();
+  await settle();
+  assert.equal(controller.hasReusableConsentAndSdk(), true);
+  const releaseSession = controller.holdPreparation();
+  releaseIdle();
+  controller.setGate({ ...free, eligible: false, blocked: true });
+  assert.equal(controller.getState().ready, false);
+  assert.equal(
+    controller.hasReusableConsentAndSdk(),
+    true,
+    'Music owns a blocker, not device consent',
+  );
+  const before = JSON.stringify(calls);
+  assert.equal(controller.restoreReadyFromCache(), false);
+  controller.setGate({ ...free, blocked: false });
+  const releaseBoundary = controller.acquirePlacement();
+  assert.equal(
+    controller.restoreReadyFromCache(() => false),
+    false,
+  );
+  assert.equal(
+    controller.restoreReadyFromCache(() => {
+      throw new Error('retired caller');
+    }),
+    false,
+  );
+  assert.equal(
+    controller.restoreReadyFromCache(() => true),
+    true,
+  );
+  assert.equal(controller.getState().ready, true);
+  assert.equal(controller.getState().canRequestAds, true);
+  assert.equal(JSON.stringify(calls), before);
+  assert.equal(getLoadCount(), 1);
+  releaseBoundary();
+  assert.equal(controller.getState().ready, false);
+  assert.equal(
+    await controller.requestPrivacyOptions(),
+    false,
+    'Caller session hold survives boundary cleanup',
+  );
+  releaseBoundary();
+  releaseSession();
+  assert.equal(controller.restoreReadyFromCache(), false, 'No unheld cache restoration');
+});
+
+test('cache probes and restoration never load SDK for cold, denied, configuring or initializing states', async () => {
+  const cold = setup();
+  const releaseColdHold = cold.controller.holdPreparation();
+  cold.controller.setGate(free);
+  cold.controller.acquirePlacement();
+  assert.equal(cold.controller.hasReusableConsentAndSdk(), false);
+  assert.equal(cold.controller.restoreReadyFromCache(), false);
+  assert.equal(cold.getLoadCount(), 0);
+  assert.deepEqual(cold.calls, []);
+  cold.controller.dispose();
+  releaseColdHold();
+  const denied = setup({
+    consent: { loadAndShowConsentFormIfRequired: async () => ({ ...info, canRequestAds: false }) },
+  });
+  denied.controller.setGate(free);
+  denied.controller.acquirePlacement();
+  await settle();
+  assert.equal(denied.controller.hasReusableConsentAndSdk(), false);
+  for (const method of ['setRequestConfiguration', 'initialize']) {
+    const pending = deferred();
+    const app = setup({ mobileAds: { [method]: () => pending.promise } });
+    app.controller.setGate(free);
+    app.controller.acquirePlacement();
+    await settle();
+    assert.equal(app.controller.hasReusableConsentAndSdk(), false, method);
+    const release = app.controller.holdPreparation();
+    assert.equal(app.controller.restoreReadyFromCache(), false, method);
+    app.controller.dispose();
+    pending.resolve();
+    await settle();
+    release();
+  }
+});
+
+test('cache restore checks the latest identity, eligibility and foreground before publishing ready', async () => {
+  let latest = free;
+  const { controller, calls } = setup({ controller: { getCurrentGate: () => latest } });
+  controller.setGate(free);
+  controller.acquirePlacement();
+  await settle();
+  const release = controller.holdPreparation();
+  const before = calls.length;
+  for (const changed of [
+    { identity: 'account-b' },
+    { eligible: false },
+    { appActive: false },
+    { blocked: true },
+  ]) {
+    latest = { ...free, ...changed };
+    assert.equal(
+      controller.restoreReadyFromCache(() => true),
+      false,
+    );
+  }
+  assert.equal(calls.length, before);
+  latest = free;
+  assert.equal(
+    controller.restoreReadyFromCache(() => true),
+    true,
+  );
+  controller.dispose();
+  assert.equal(controller.hasReusableConsentAndSdk(), false);
+  assert.equal(
+    controller.restoreReadyFromCache(() => true),
+    false,
+  );
+  release();
+});

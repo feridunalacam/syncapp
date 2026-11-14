@@ -22,11 +22,13 @@ export function createInterstitialController({
   let actionsSinceShown = 0;
   const actions = new Set();
   const attempts = new Set();
+  const readinessWaiters = new Set();
   let retryAt = -Infinity;
   let state = { loaded: false, loading: false, presenting: false };
   const emit = (patch) => {
     state = { ...state, ...patch };
     if (!disposed) onChange(state);
+    for (const notify of [...readinessWaiters]) notify();
   };
   const latest = () => getCurrentGate?.() || gate;
   const callerSafe = (check) => {
@@ -104,9 +106,107 @@ export function createInterstitialController({
     emit({ presenting: false, loaded: false, loading: false });
     record.resolve({ shown: record.opened || reason === 'closed', reason });
   };
-  return {
+  const presentReady = (isEligible, beforePresent, identity) => {
+    if (presentation) return presentation.promise;
+    if (!allowed(isEligible, identity)) {
+      discard();
+      return Promise.resolve({ shown: false, reason: 'ineligible' });
+    }
+    const record = cached;
+    if (!record || record.loadedAt === null)
+      return Promise.resolve({ shown: false, reason: 'not-ready' });
+    if (!currentRecord(record)) {
+      discard(record);
+      return Promise.resolve({ shown: false, reason: 'ineligible' });
+    }
+    if (now() - record.loadedAt >= maxAgeMs) {
+      discard(record);
+      return Promise.resolve({ shown: false, reason: 'expired' });
+    }
+    cached = null;
+    presentation = record;
+    record.promise = new Promise((resolve) => {
+      record.resolve = resolve;
+    });
+    emit({ loaded: false, loading: false, presenting: true });
+    // React listeners may have changed the account or boundary during emit.
+    if (!allowed(isEligible, record.identity)) {
+      finish(record, 'ineligible');
+      return record.promise;
+    }
+    const present = () => {
+      if (presentation !== record) return;
+      if (!allowed(isEligible, record.identity)) {
+        finish(record, 'ineligible');
+        return;
+      }
+      try {
+        // show() resolves when the presentation request succeeds, not when
+        // the ad closes. Only native CLOSED/ERROR releases this barrier.
+        const showing = record.ad.show();
+        showing?.catch?.(() => {
+          if (presentation === record && !record.opened) finish(record, 'error');
+        });
+      } catch {
+        finish(record, 'error');
+      }
+    };
+    if (typeof beforePresent === 'function') {
+      try {
+        const accepted = beforePresent();
+        if (accepted === true) present();
+        else {
+          accepted?.catch?.(() => {});
+          finish(record, 'cancelled');
+        }
+      } catch {
+        finish(record, 'cancelled');
+      }
+    } else present();
+    return record.promise;
+  };
+  let api;
+  let preparation = null;
+  return (api = {
     getState: () => state,
     recordAction,
+    waitUntilReady({ isEligible = () => true, timeoutMs = 1500 } = {}) {
+      const identity = gate.identity;
+      const ticket = version;
+      const ready = () => cached?.loadedAt !== null && !!cached && currentRecord(cached);
+      if (!allowed(isEligible, identity)) return Promise.resolve(false);
+      if (ready()) return Promise.resolve(true);
+      if (!state.loading) return Promise.resolve(false);
+      return new Promise((resolve) => {
+        let timer = null;
+        let finished = false;
+        const finishWaiting = (value) => {
+          if (finished) return;
+          finished = true;
+          readinessWaiters.delete(check);
+          if (timer !== null) clearTimer(timer);
+          resolve(value);
+        };
+        const check = () => {
+          if (version !== ticket || !allowed(isEligible, identity)) finishWaiting(false);
+          else if (ready()) finishWaiting(true);
+          else if (!state.loading) finishWaiting(false);
+        };
+        readinessWaiters.add(check);
+        const loadingRecord = cached;
+        timer = setTimer(
+          () => {
+            finishWaiting(false);
+            if (cached === loadingRecord && loadingRecord?.loadedAt === null) {
+              retryAt = now() + retryDelayMs;
+              discard(loadingRecord);
+            }
+          },
+          Math.min(1500, Math.max(0, timeoutMs)),
+        );
+        check();
+      });
+    },
     setGate(next) {
       if (
         ['identity', 'eligible', 'appActive', 'ready', 'blocked'].every(
@@ -197,10 +297,16 @@ export function createInterstitialController({
         return false;
       }
     },
-    showIfReady({ opportunityId, isEligible = () => true } = {}) {
+    showIfReady({
+      opportunityId,
+      isEligible = () => true,
+      beforePresent,
+      readinessTimeoutMs = 0,
+    } = {}) {
       // Every concurrent caller waits for the same native presentation barrier.
       // Returning a quick "skipped" here could start a workout behind the ad.
       if (presentation) return presentation.promise;
+      if (preparation) return preparation;
       recordAction({ opportunityId, isEligible });
       if (!allowed(isEligible)) {
         discard();
@@ -214,40 +320,28 @@ export function createInterstitialController({
       if (now() - lastShownAt < cooldownMs)
         return Promise.resolve({ shown: false, reason: 'cooldown' });
       if (actionsSinceShown < 2) return Promise.resolve({ shown: false, reason: 'spacing' });
-      const record = cached;
-      if (!record || record.loadedAt === null)
-        return Promise.resolve({ shown: false, reason: 'not-ready' });
-      if (!currentRecord(record)) {
-        discard(record);
-        return Promise.resolve({ shown: false, reason: 'ineligible' });
+      if (readinessTimeoutMs > 0) {
+        const identity = gate.identity;
+        const deadline = now() + Math.min(1500, readinessTimeoutMs);
+        if (!api.preload(isEligible)) return Promise.resolve({ shown: false, reason: 'not-ready' });
+        const record = cached;
+        const ticket = version;
+        const pending = api
+          .waitUntilReady({ isEligible, timeoutMs: Math.max(0, deadline - now()) })
+          .then((loaded) =>
+            loaded && record === cached && ticket === version && record.loadedAt <= deadline
+              ? presentReady(isEligible, beforePresent, identity)
+              : { shown: false, reason: 'not-ready' },
+          );
+        preparation = pending;
+        pending
+          .finally(() => {
+            if (preparation === pending) preparation = null;
+          })
+          .catch(() => {});
+        return pending;
       }
-      if (now() - record.loadedAt >= maxAgeMs) {
-        discard(record);
-        return Promise.resolve({ shown: false, reason: 'expired' });
-      }
-      cached = null;
-      presentation = record;
-      record.promise = new Promise((resolve) => {
-        record.resolve = resolve;
-      });
-      emit({ loaded: false, loading: false, presenting: true });
-      // React listeners may have changed the account or boundary during emit.
-      if (!allowed(isEligible, record.identity)) {
-        finish(record, 'ineligible');
-        return record.promise;
-      }
-      try {
-        // show() resolves when the presentation request succeeds, not when the
-        // ad closes. Only native CLOSED/ERROR releases this barrier. There is no
-        // generic presentation timeout or background/Pro early resolution.
-        const showing = record.ad.show();
-        showing?.catch?.(() => {
-          if (presentation === record && !record.opened) finish(record, 'error');
-        });
-      } catch {
-        finish(record, 'error');
-      }
-      return record.promise;
+      return presentReady(isEligible, beforePresent, gate.identity);
     },
     invalidate() {
       version++;
@@ -258,5 +352,5 @@ export function createInterstitialController({
       version++;
       discard();
     },
-  };
+  });
 }

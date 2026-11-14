@@ -78,6 +78,7 @@ export function AdsProvider({ children, blocked = false }) {
     });
   const fullscreen = useRef(null);
   const presentation = useRef(null);
+  const startBoundary = useRef(null);
   const fullscreenGate = () => ({
     ...gate.current,
     ready:
@@ -179,6 +180,79 @@ export function AdsProvider({ children, blocked = false }) {
       prepared.canRequestAds
     );
   }, []);
+  const canPrepareMusicStartAd = useCallback(() => {
+    const current = eligibility.current;
+    // Qualification happens while the caller still owns its music blocker.
+    // Actual loading/showing below requires every normal blocker to be gone.
+    return !!(
+      current.baseAccountEligible &&
+      current.appActive &&
+      !current.blocked &&
+      config.enabled &&
+      config.interstitialEnabled &&
+      controller.current.hasReusableConsentAndSdk() &&
+      runtime.hasInterstitialSupport()
+    );
+  }, []);
+  const showStartInterstitial = useCallback(
+    ({ opportunityId, isEligible = () => true, beforePresent } = {}) => {
+      if (startBoundary.current) return startBoundary.current;
+      const identity = eligibility.current.identity;
+      let active = true;
+      const current = () => {
+        const account = eligibility.current;
+        const normal = gate.current;
+        try {
+          return (
+            active &&
+            account.identity === identity &&
+            account.baseAccountEligible &&
+            account.appActive &&
+            !account.blocked &&
+            normal.identity === identity &&
+            normal.eligible &&
+            normal.appActive &&
+            !normal.blocked &&
+            isEligible() === true
+          );
+        } catch {
+          return false;
+        }
+      };
+      if (!canPrepareMusicStartAd() || !current())
+        return Promise.resolve({ shown: false, reason: 'ineligible' });
+      // The caller also holds preparation for the entire Session action. This
+      // nested hold and placement belong only to this cached Start boundary.
+      const releaseHold = controller.current.holdPreparation();
+      controller.current.setGate(gate.current);
+      const releasePlacement = controller.current.acquirePlacement(current);
+      const pending = (async () => {
+        try {
+          if (!controller.current.restoreReadyFromCache(current))
+            return { shown: false, reason: 'not-ready' };
+          return await showInterstitial({
+            opportunityId,
+            isEligible: current,
+            beforePresent,
+            readinessTimeoutMs: 1500,
+          });
+        } finally {
+          active = false;
+          releasePlacement();
+          fullscreen.current.setGate(fullscreenGate());
+          releaseHold();
+        }
+      })();
+      startBoundary.current = pending;
+      pending
+        .finally(() => {
+          if (startBoundary.current === pending) startBoundary.current = null;
+        })
+        .catch(() => {});
+      return pending;
+    },
+    [canPrepareMusicStartAd, showInterstitial],
+  );
   const safe = accountEligible && appActive;
   return (
     <AdsContext.Provider
@@ -205,6 +279,8 @@ export function AdsProvider({ children, blocked = false }) {
         holdAdPreparation,
         acquirePresentationBlocker,
         canPresentAds,
+        canPrepareMusicStartAd,
+        showStartInterstitial,
         acquirePlacement,
         requestPrivacyOptions,
       }}

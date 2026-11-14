@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "status": "source-verified-awaiting-independent-review-and-native-host-overlay-QA",
+  "testFlight10ContainsTheseChanges": false,
+  "behavior": [
+    "Only an explicit idle-timer Start can create this music/ad handoff. Music browsing, choosing, saving and explicit Play remain independent of Sync accounts and advertising.",
+    "Verified Pro, unknown entitlement, missing reusable consent or incomplete native SDK preparation do not enter a new music pause, consent, SDK initialization or ad request through this path.",
+    "The exact owned music queue acknowledges native pause before only its own ad blocker is yielded. Queue ownership, cue silence and other features’ blockers remain held.",
+    "Cached consent/SDK readiness is restored under the existing preparation hold. No fresh UMP form or native SDK initialization is started at this boundary.",
+    "At most one creative readiness wait lasts up to 1500 ms. Existing two-action spacing, 120-second cooldown, retries and creative age remain unchanged. A late load never presents after the Start opportunity.",
+    "A native show request resolving does not count as dismissal. Existing native CLOSED or terminal ERROR is required before music or timer continuation.",
+    "The music blocker is restored before conditional resume. Only the original current account/queue/user intent can resume; an originally paused queue stays paused.",
+    "Expected ad-related iOS inactive is distinguished from real background. Pause, Stop, Next, new queue, account/routine changes, blur and disposal cancel stale Start/resume continuation.",
+    "A checked failed or cancelled restore is carried into the Session action result and cannot silently start the session.",
+    "Active, paused or Rest-session toggles and Finish retain their existing paths. Music metadata and artwork are not passed to native ad request options."
+  ],
+  "validation": {
+    "passed": 1077,
+    "failed": 0,
+    "skipped": 0,
+    "node": "22.23.4",
+    "isolatedPinnedPGliteEnabled": true,
+    "logSHA256": "d5801ac0621c34d83e4d5409c93c8fd2c581ed4d2bc6a9181e58df589856da1c"
+  },
+  "sourceFreezeSHA256": "18b0e6406c23c7eb322bdfe307b6d12fb34f9dc72659278865cf6f9c7a659679",
+  "runtimeSourceSHA256": {
+    "src/context/AdsContext.js": "abcd0b68e5d46e0e24b1063b52bea9bb367fae493fdaffa19814b7bce41f8469",
+    "src/context/AppleMusicConnectionContext.js": "190cce4a8bf7437ea15ac06c2529bf576c6b19f47f0bab100051669b1710fee6",
+    "src/hooks/useSessionAds.js": "bee151e4deedf03442ec163fc040175a48907841b4349dc0267b8c1ad7c79b35",
+    "src/services/ads/controller.js": "cb04d14028b1230d7327e4ab5c1239050459e970e6451359bbd19e8a2570cdb1",
+    "src/services/ads/interstitials.js": "0ed407eda9b55becd9bb547e298ebabec9e4521fef78bdbdeab534e4cabebcf5",
+    "src/services/ads/sessionActions.js": "3c2e4c34e21b821998a18af2087189350fdcdcbc81746f33784f2bafdc9646c3",
+    "src/services/ads/startMusicBoundary.js": "253eb4bfff65bab91ff9d986a0f58e52db443c9926c9503dc4e181a1a33c2277",
+    "src/services/appleMusic/companion.js": "5f027f60319674bcfd37d4f3c1542dc84ec03e7dd8bf5a967260b6400a71965c"
+  },
+  "officialIOSReference": "https://developers.google.com/admob/ios/interstitial",
+  "scopeLimits": [
+    "Native outputs in automated integration tests are controlled fakes; no live ad, physical iPhone MusicKit or new native-boundary delivery is claimed.",
+    "Actual ad availability, prior consent, account eligibility and existing cadence can skip an ad; this is not a guarantee of an ad on every Start.",
+    "No native files, dependencies, capabilities, release flags, backend schemas or storage keys changed.",
+    "The prior d7a22d1 simulator validation is separate from this new JS delta, which still requires its own overlay/UI check."
+  ]
+}

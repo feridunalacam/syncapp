@@ -14,6 +14,8 @@ export function createAdsController({ runtime, config, onChange = () => {}, getC
   let attemptedEpoch = -1;
   let consentInfo = null;
   let consentUpdated = false;
+  let configurationFinished = false;
+  let initializationFinished = false;
   const placements = new Set();
   let state = {
     ready: false,
@@ -59,6 +61,22 @@ export function createAdsController({ runtime, config, onChange = () => {}, getC
     );
   };
   const current = (version) => version === epoch && allowed();
+  const callerSafe = (predicate) => {
+    try {
+      return predicate() === true;
+    } catch {
+      return false;
+    }
+  };
+  const hasReusableConsentAndSdk = () =>
+    !disposed &&
+    config.enabled === true &&
+    consentUpdated &&
+    consentInfo?.canRequestAds === true &&
+    configurationFinished &&
+    initializationFinished &&
+    !operation &&
+    !privacyPromise;
   const invalidate = () => {
     epoch += 1;
     emit({ ready: false, canRequestAds: false, consentReady: false });
@@ -113,8 +131,10 @@ export function createAdsController({ runtime, config, onChange = () => {}, getC
         if (!consentInfo?.canRequestAds || !current(version)) return;
         emit({ consentReady: true });
         await runtime.configure(config.requestConfiguration);
+        configurationFinished = true;
         if (!current(version)) return;
         await runtime.initialize();
+        initializationFinished = true;
         if (!current(version)) return;
         emit({ initialized: true, ready: true, canRequestAds: true, error: null });
       } catch {
@@ -130,6 +150,25 @@ export function createAdsController({ runtime, config, onChange = () => {}, getC
   };
   return {
     getState: () => state,
+    hasReusableConsentAndSdk,
+    restoreReadyFromCache(predicate = () => true) {
+      // A Start boundary can reuse only completed device preparation. Its own
+      // placement still needs every normal gate after music has yielded.
+      if (!preparationHolds || !hasReusableConsentAndSdk() || !allowed() || !callerSafe(predicate))
+        return false;
+      emit({
+        initialized: true,
+        consentReady: true,
+        ready: true,
+        canRequestAds: true,
+        error: null,
+      });
+      if (!allowed() || !callerSafe(predicate)) {
+        invalidate();
+        return false;
+      }
+      return true;
+    },
     holdPreparation() {
       if (disposed) return () => {};
       preparationHolds += 1;

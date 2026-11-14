@@ -6,6 +6,8 @@ import { useAds } from '../context/AdsContext';
 import { canPrepareAds } from '../services/ads/eligibility';
 import { createSessionAdActions } from '../services/ads/sessionActions';
 import { stopCuePreview, stopWorkoutCues } from '../services/alerts/player';
+import { useAppleMusicConnection } from '../context/AppleMusicConnectionContext';
+import { showStartMusicOpportunity } from '../services/ads/startMusicBoundary';
 
 // A native full-screen dismissal can arrive just before iOS becomes active.
 // This bounded wait never releases an ad itself or starts a background workout.
@@ -28,13 +30,16 @@ function waitForForeground() {
 export default function useSessionAds({ workout, blocked, sessionKey, onFinish }) {
   const ads = useAds();
   const auth = useAuth();
+  const apple = useAppleMusicConnection();
   const focused = useIsFocused();
   const [busy, setBusy] = useState(false);
   const actionSequence = useRef(0);
   const hold = useRef(null);
+  const musicBoundaryPreparing = useRef(false);
   const latest = useRef(null);
-  latest.current = { workout, ads, auth, focused, blocked, sessionKey, onFinish };
+  latest.current = { workout, ads, auth, apple, focused, blocked, sessionKey, onFinish };
   const prepare =
+    !musicBoundaryPreparing.current &&
     !!workout.selectedRoutine &&
     ads.interstitialEnabled &&
     canPrepareAds({
@@ -62,7 +67,10 @@ export default function useSessionAds({ workout, blocked, sessionKey, onFinish }
           focused: current.focused,
           appActive: AppState.currentState === 'active',
           blocked:
-            !!current.blocked || !!current.auth.recoveryMode || !!current.ads.presenterBlocked,
+            !!current.blocked ||
+            !!current.auth.recoveryMode ||
+            !!current.ads.presenterBlocked ||
+            !!current.apple.player?.visible,
           musicPlaying: current.workout.isMusicPlaying,
           audioSyncing: current.workout.isAudioSyncing,
         };
@@ -73,6 +81,18 @@ export default function useSessionAds({ workout, blocked, sessionKey, onFinish }
       },
       waitForAdsIdle: () => latest.current.ads.waitForAdPresenters(),
       showAd: (options) => latest.current.ads.showInterstitial(options),
+      showStartAd: (options) =>
+        showStartMusicOpportunity({
+          ...options,
+          ads: latest.current.ads,
+          player: latest.current.apple.player,
+          getAppState: () => AppState.currentState,
+          waitForForeground,
+          onPreparing: (preparing) => {
+            musicBoundaryPreparing.current = preparing;
+            if (preparing) prepareRef.current = false;
+          },
+        }),
       waitForForeground,
       startSession: () => {
         // Block the placement synchronously before timer.start commits audio.
@@ -109,7 +129,8 @@ export default function useSessionAds({ workout, blocked, sessionKey, onFinish }
   );
   return {
     busy,
-    adSupported: ads.accountEligible && ads.interstitialEnabled,
+    adSupported:
+      ads.interstitialEnabled && (ads.accountEligible || ads.canPrepareMusicStartAd?.() === true),
     startOrToggle() {
       if (latest.current.workout.isWorkoutRunning) return latest.current.workout.toggle();
       const opportunityId = `start:${Date.now()}:${++actionSequence.current}`;

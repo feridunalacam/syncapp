@@ -75,6 +75,12 @@ export function createAppleMusicCompanionController({
   let cueResume = Promise.resolve();
   let cueIntent = 0;
   let cueStateRevision = 0;
+  let adBoundary = null;
+  let adBoundaryEpoch = 0;
+  let adPause = Promise.resolve();
+  let adResume = Promise.resolve();
+  let cueSuspensions = 0;
+  const cueTickets = new Set();
   const startsInFlight = new Set();
   const controlVersions = new Map();
   const owns = () => !!entry && owners.get(service) === entry;
@@ -92,8 +98,10 @@ export function createAppleMusicCompanionController({
       ownsQueue: owns(),
       previousOwnerPending: !!retiredOwner(),
     };
+    const yielded = adBoundary?.yielded && adBoundary.isCurrent();
     const held =
-      state.visible || state.busy || state.ownsQueue || (!disposed && state.previousOwnerPending);
+      !yielded &&
+      (state.visible || state.busy || state.ownsQueue || (!disposed && state.previousOwnerPending));
     if (held && !releaseBlocker) {
       const lease = acquireBlocker();
       releaseBlocker = typeof lease === 'function' ? lease : () => lease?.release?.();
@@ -104,12 +112,21 @@ export function createAppleMusicCompanionController({
     }
     onChange(snapshot());
   };
+  const cancelAdBoundary = () => {
+    if (!adBoundary) return;
+    adBoundary.cancelled = true;
+    adBoundary.yielded = false;
+    adBoundary = null;
+    // publish restores only this controller's private lease, according to its
+    // current queue/UI ownership. It never releases or replaces another owner.
+    publish();
+  };
   const clearTimer = () => {
     clearTimeout(timer);
     timer = null;
   };
   const schedule = () => {
-    if (disposed || !appActive || !owns() || timer || read) return;
+    if (disposed || !appActive || !owns() || adBoundary || timer || read) return;
     timer = setTimeout(
       () => {
         timer = null;
@@ -120,7 +137,7 @@ export function createAppleMusicCompanionController({
     timer.unref?.();
   };
   const refresh = () => {
-    if (disposed || !appActive || !owns()) return Promise.resolve(cancelled());
+    if (disposed || !appActive || !owns() || adBoundary) return Promise.resolve(cancelled());
     if (read) return read;
     clearTimer();
     const current = entry;
@@ -155,7 +172,15 @@ export function createAppleMusicCompanionController({
         return playback;
       })
       .catch((error) => {
-        if (!disposed && entry === current && owns() && generation === ticket)
+        if (
+          !disposed &&
+          appActive &&
+          !adBoundary &&
+          entry === current &&
+          owns() &&
+          generation === ticket &&
+          cueTicket === cueStateRevision
+        )
           publish({ error: failureMessage(error) });
         return { success: false, error: failureMessage(error) };
       })
@@ -168,6 +193,7 @@ export function createAppleMusicCompanionController({
   const revoke = () => {
     generation++;
     entry = null;
+    cancelAdBoundary();
     clearTimer();
     publish({ playing: false, track: null, progress: 0 });
   };
@@ -175,6 +201,11 @@ export function createAppleMusicCompanionController({
     if (!current || owners.get(service) !== current) return Promise.resolve(cancelled());
     if (current.stopping) return current.stopping;
     current.stopping = (async () => {
+      // Retired-owner recovery can call this directly from another controller.
+      // Keep ownership until every previously dispatched ad transport settles.
+      await current.adPause;
+      await current.adResume;
+      if (owners.get(service) !== current) return cancelled();
       check(await service.cleanup());
       if (owners.get(service) === current) owners.delete(service);
       if (entry === current) {
@@ -195,9 +226,11 @@ export function createAppleMusicCompanionController({
     return current.stopping;
   };
   const start = async (kind, selection, shuffle = false) => {
-    if (disposed || !appActive || (kind === 'resume' && !owns())) return cancelled();
+    if (disposed) return cancelled();
+    cancelAdBoundary();
     cueIntent++;
     const ticket = ++generation;
+    if (!appActive || (kind === 'resume' && !owns())) return cancelled();
     const epoch = startEpoch;
     const request = {};
     requests.set(service, request);
@@ -215,6 +248,10 @@ export function createAppleMusicCompanionController({
       if (stale()) return cancelled();
       check(await beforePlay());
       if (stale()) return cancelled();
+      await adPause;
+      if (stale()) return cancelled();
+      await adResume;
+      if (stale()) return cancelled();
       await cuePause;
       if (stale()) return cancelled();
       await cueResume;
@@ -222,6 +259,10 @@ export function createAppleMusicCompanionController({
       await stopping;
       if (stale()) return cancelled();
       const prior = owners.get(service);
+      if (prior?.adPause) await prior.adPause;
+      if (stale()) return cancelled();
+      if (prior?.adResume) await prior.adResume;
+      if (stale()) return cancelled();
       if (prior?.stopping) await prior.stopping;
       if (stale()) return cancelled();
       if (owners.get(service)?.retired())
@@ -235,6 +276,12 @@ export function createAppleMusicCompanionController({
       let previousOwner;
       while (true) {
         const previous = owners.get(service);
+        if (previous?.adPause || previous?.adResume) {
+          await previous.adPause;
+          await previous.adResume;
+          if (stale()) return cancelled();
+          continue;
+        }
         if (previous?.stopping) {
           await previous.stopping;
           if (stale()) return cancelled();
@@ -312,12 +359,15 @@ export function createAppleMusicCompanionController({
   };
   const control = async (method, args = [], patch = {}, invalidatesStart = false) => {
     if (disposed) return cancelled();
+    cancelAdBoundary();
     const transport = ['pause', 'next', 'previous'].includes(method);
     if (transport) cueIntent++;
     if (invalidatesStart) generation++;
+    if ((method === 'next' || method === 'previous') && !appActive) return cancelled();
     if (!owns()) return cancelled();
     const current = entry;
     const ticket = generation;
+    const epoch = startEpoch;
     const version = (controlVersions.get(method) || 0) + 1;
     controlVersions.set(method, version);
     const relevant = () =>
@@ -325,12 +375,19 @@ export function createAppleMusicCompanionController({
       entry === current &&
       owns() &&
       generation === ticket &&
+      (!(method === 'next' || method === 'previous') || (appActive && epoch === startEpoch)) &&
       controlVersions.get(method) === version;
     actions++;
     publish({ error: null });
     try {
-      if (method === 'next' || method === 'previous') check(await beforePlay());
+      if (method === 'next' || method === 'previous') {
+        await waitForPresenters();
+        if (!relevant()) return cancelled();
+        check(await beforePlay());
+      }
       if (transport) {
+        await adPause;
+        await adResume;
         await cuePause;
         await cueResume;
       }
@@ -350,12 +407,15 @@ export function createAppleMusicCompanionController({
     }
   };
   const clear = async (recoverPrevious = true) => {
+    cancelAdBoundary();
     cueIntent++;
     generation++;
     clearTimer();
     actions++;
     publish({ error: null });
     try {
+      await adPause;
+      await adResume;
       await cuePause;
       await cueResume;
       if (owns()) return await stopOwned(entry);
@@ -384,68 +444,277 @@ export function createAppleMusicCompanionController({
     pending.finally(() => startsInFlight.delete(pending)).catch(() => {});
     return pending;
   };
-  const suspendForCue = async ({ isCancelled = () => false } = {}) => {
-    await Promise.all([...startsInFlight]);
-    await cueResume;
-    if (disposed || !appActive || isCancelled()) return null;
-    if (retiredOwner())
-      throw new Error('Clear the previous Apple Music queue before playing cues.');
-    if (!owns()) return null;
-    const current = entry;
-    const ticket = generation;
-    const intent = cueIntent;
-    const wasPlaying = state.playing;
-    const relevant = () =>
-      !disposed &&
-      appActive &&
-      entry === current &&
-      owns() &&
-      generation === ticket &&
-      cueIntent === intent;
-    const pending = cuePause.then(async () => {
-      if (!relevant() || isCancelled()) return null;
-      cueStateRevision++;
-      try {
-        check(await service.pause('native:appleMusic'));
-      } finally {
-        cueStateRevision++;
-      }
-      if (relevant()) publish({ playing: false });
-      return {
-        resume: () => {
-          const pending = (async () => {
-            if (!wasPlaying || !relevant()) return cancelled();
-            cueStateRevision++;
-            let result;
-            try {
-              result = check(
-                await service.play('native:appleMusic', 'appleMusic', {
-                  isCancelled: () => !relevant(),
-                }),
-              );
-            } catch (error) {
-              if (relevant()) publish({ playing: false, error: failureMessage(error) });
-              throw error;
-            } finally {
-              cueStateRevision++;
-            }
-            if (result?.cancelled || !relevant()) return cancelled();
-            publish({ playing: true, error: null });
-            return result ?? { success: true };
-          })();
-          cueResume = pending.then(
-            () => undefined,
-            () => undefined,
-          );
-          return pending;
-        },
-      };
-    });
-    cuePause = pending.then(
+  const trackAdWork = (kind, pending, owner) => {
+    const barrier = pending.then(
       () => undefined,
       () => undefined,
     );
+    if (kind === 'adPause') adPause = barrier;
+    else adResume = barrier;
+    owner[kind] = barrier;
+    barrier
+      .finally(() => {
+        if (owner[kind] === barrier) owner[kind] = null;
+      })
+      .catch(() => {});
     return pending;
+  };
+  const beginStartAdBoundary = async ({ isCurrent = () => true } = {}) => {
+    if (
+      disposed ||
+      !appActive ||
+      !owns() ||
+      state.visible ||
+      starts ||
+      actions ||
+      permissions ||
+      cueSuspensions ||
+      cueTickets.size ||
+      retiredOwner() ||
+      adBoundary ||
+      entry.stopping ||
+      entry.adPause ||
+      entry.adResume ||
+      !releaseBlocker
+    )
+      return null;
+    const owner = entry;
+    const ticket = generation;
+    const intent = cueIntent;
+    const epoch = startEpoch;
+    const request = requests.get(service);
+    const boundaryEpoch = ++adBoundaryEpoch;
+    const boundary = {
+      owner,
+      wasPlaying: state.playing,
+      cancelled: false,
+      yielded: false,
+      expectedInactive: false,
+      presentationRequested: false,
+      finished: false,
+      finishing: null,
+      isCurrent: () => {
+        try {
+          return (
+            !boundary.cancelled &&
+            !disposed &&
+            entry === owner &&
+            owns() &&
+            generation === ticket &&
+            cueIntent === intent &&
+            startEpoch === epoch &&
+            boundaryEpoch === adBoundaryEpoch &&
+            requests.get(service) === request &&
+            isCurrent() === true
+          );
+        } catch {
+          return false;
+        }
+      },
+    };
+    adBoundary = boundary;
+    clearTimer();
+    const stable = () =>
+      boundary.isCurrent() &&
+      adBoundary === boundary &&
+      !state.visible &&
+      !starts &&
+      !actions &&
+      !permissions &&
+      !cueSuspensions &&
+      !cueTickets.size &&
+      !retiredOwner();
+    const result = {
+      isCurrent: boundary.isCurrent,
+      beforePresent: () => {
+        if (
+          !appActive ||
+          !stable() ||
+          !boundary.yielded ||
+          boundary.finished ||
+          boundary.presentationRequested
+        )
+          return false;
+        boundary.presentationRequested = true;
+        boundary.expectedInactive = true;
+        return true;
+      },
+      finish: ({ resume = false } = {}) => {
+        if (boundary.finishing) return boundary.finishing;
+        boundary.finished = true;
+        boundary.yielded = false;
+        if (adBoundary === boundary) adBoundary = null;
+        // Reacquire our own queue/UI blocker before any potentially audible work.
+        // Finishing itself does not invalidate the captured Start lineage.
+        publish();
+        const pending = (async () => {
+          if (!boundary.isCurrent()) return cancelled();
+          if (resume !== true || !boundary.wasPlaying) return { success: true, resumed: false };
+          if (!appActive) {
+            boundary.cancelled = true;
+            return cancelled();
+          }
+          try {
+            await waitForPresenters();
+            if (!boundary.isCurrent() || !appActive) return cancelled();
+            cueStateRevision++;
+            let resumed;
+            try {
+              resumed = check(
+                await service.play('native:appleMusic', 'appleMusic', {
+                  isCancelled: () => !boundary.isCurrent() || !appActive,
+                }),
+              );
+            } finally {
+              cueStateRevision++;
+            }
+            if (resumed?.cancelled) {
+              boundary.cancelled = true;
+              return cancelled();
+            }
+            if (!boundary.isCurrent() || !appActive) return cancelled();
+            publish({ playing: true, error: null });
+            return { ...(resumed || { success: true }), resumed: true };
+          } catch (error) {
+            boundary.cancelled = true;
+            if (entry === owner && owns())
+              publish({ playing: false, error: failureMessage(error) });
+            return { success: false, error: failureMessage(error) };
+          } finally {
+            schedule();
+          }
+        })();
+        // Paused and cancelled finishes also return ownership to ordinary
+        // metadata observation, without ever starting native playback.
+        boundary.finishing = trackAdWork('adResume', pending.finally(schedule), owner);
+        return boundary.finishing;
+      },
+    };
+    const pending = (async () => {
+      try {
+        await cuePause;
+        await cueResume;
+        if (!appActive || !stable()) return null;
+        cueStateRevision++;
+        try {
+          const paused = check(await service.pause('native:appleMusic'));
+          if (paused?.cancelled) throw new Error('Apple Music did not acknowledge pause.');
+        } finally {
+          cueStateRevision++;
+        }
+        if (!stable()) return null;
+        publish({ playing: false });
+        boundary.yielded = true;
+        publish();
+        return result;
+      } catch (error) {
+        boundary.cancelled = true;
+        if (entry === owner && owns()) publish({ error: failureMessage(error) });
+        return { success: false, error: failureMessage(error) };
+      } finally {
+        if (!boundary.yielded && adBoundary === boundary) {
+          boundary.cancelled = true;
+          adBoundary = null;
+          publish();
+          schedule();
+        }
+      }
+    })();
+    return trackAdWork('adPause', pending, owner);
+  };
+  const suspendForCue = async ({ isCancelled = () => false } = {}) => {
+    if (adBoundary) return null;
+    cueSuspensions++;
+    try {
+      await waitForPresenters();
+      if (disposed || !appActive || adBoundary || isCancelled()) return null;
+      await Promise.all([...startsInFlight]);
+      await adResume;
+      await cueResume;
+      if (disposed || !appActive || adBoundary || isCancelled()) return null;
+      if (retiredOwner())
+        throw new Error('Clear the previous Apple Music queue before playing cues.');
+      if (!owns()) return null;
+      const current = entry;
+      const ticket = generation;
+      const intent = cueIntent;
+      const wasPlaying = state.playing;
+      const relevant = () =>
+        !disposed &&
+        appActive &&
+        entry === current &&
+        owns() &&
+        generation === ticket &&
+        cueIntent === intent;
+      const pending = cuePause.then(async () => {
+        if (!relevant() || adBoundary || isCancelled()) return null;
+        cueStateRevision++;
+        try {
+          check(await service.pause('native:appleMusic'));
+        } finally {
+          cueStateRevision++;
+        }
+        if (relevant()) publish({ playing: false });
+        const cueTicket = {};
+        cueTickets.add(cueTicket);
+        const release = () => cueTickets.delete(cueTicket);
+        return {
+          release,
+          resume: () => {
+            const pending = (async () => {
+              if (!wasPlaying || !relevant()) return cancelled();
+              await waitForPresenters();
+              if (!relevant() || adBoundary) return cancelled();
+              cueStateRevision++;
+              let result;
+              try {
+                result = check(
+                  await service.play('native:appleMusic', 'appleMusic', {
+                    isCancelled: () => !relevant(),
+                  }),
+                );
+              } catch (error) {
+                if (relevant()) publish({ playing: false, error: failureMessage(error) });
+                throw error;
+              } finally {
+                cueStateRevision++;
+              }
+              if (result?.cancelled || !relevant()) return cancelled();
+              publish({ playing: true, error: null });
+              return result ?? { success: true };
+            })();
+            pending.finally(release).catch(() => {});
+            cueResume = pending.then(
+              () => undefined,
+              () => undefined,
+            );
+            return pending;
+          },
+        };
+      });
+      cuePause = pending.then(
+        () => undefined,
+        () => undefined,
+      );
+      return await pending;
+    } finally {
+      cueSuspensions--;
+    }
+  };
+  const setAppState = (status) => {
+    if (disposed) return;
+    const expectedInactive =
+      status === 'inactive' && adBoundary?.expectedInactive && adBoundary.isCurrent();
+    appActive = status === 'active';
+    if (!appActive) {
+      if (!expectedInactive) {
+        // True background and unrelated inactive events always retire Start intent.
+        startEpoch++;
+        cueIntent++;
+        cancelAdBoundary();
+      }
+      clearTimer();
+    } else void refresh(); // Observe only; returning to the app never starts playback.
   };
   const serviceListeners = listeners.get(service) || new Set();
   listeners.set(service, serviceListeners);
@@ -455,20 +724,14 @@ export function createAppleMusicCompanionController({
     isActive: () => starts > 0 || owns() || !!retiredOwner(),
     setVisible(visible) {
       if (disposed) return;
+      if (visible) cancelAdBoundary();
       publish({ visible: !!visible });
     },
-    setAppActive(active) {
-      if (disposed) return;
-      appActive = !!active;
-      if (!appActive) {
-        // Retire pending explicit starts without stopping an already owned queue.
-        startEpoch++;
-        cueIntent++;
-        clearTimer();
-      } else void refresh(); // Observe only; returning to the app never starts playback.
-    },
+    setAppState,
+    setAppActive: (active) => setAppState(active ? 'active' : 'background'),
     async runPermission(operation = () => service.authorize()) {
       if (disposed) return cancelled();
+      cancelAdBoundary();
       const ticket = generation;
       permissions++;
       publish({ error: null });
@@ -491,7 +754,9 @@ export function createAppleMusicCompanionController({
     pause: () => control('pause', [], { playing: false }, true),
     resume: () => startTracked('resume', state.track),
     suspendForCue,
+    beginStartAdBoundary,
     cancelCueResume: () => {
+      cancelAdBoundary();
       cueIntent++;
     },
     next: () => control('next'),

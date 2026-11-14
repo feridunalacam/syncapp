@@ -64,9 +64,9 @@ export function AppleMusicConnectionProvider({ children }) {
     });
   useEffect(() => {
     alive.current = true;
-    controller.current.setAppActive(AppState.currentState === 'active');
+    controller.current.setAppState(AppState.currentState);
     const listener = AppState.addEventListener('change', (state) => {
-      controller.current.setAppActive(state === 'active');
+      controller.current.setAppState(state);
     });
     return () => {
       alive.current = false;
@@ -279,6 +279,27 @@ export function AppleMusicConnectionProvider({ children }) {
       return selection.kind === 'playlist'
         ? controller.current.playPlaylist(item, selection.shuffle)
         : controller.current.playTrack(item);
+    },
+    beginStartAdBoundary: ({ isCurrent = () => true } = {}) => {
+      if (
+        !alive.current ||
+        !latest.current.ready ||
+        !latest.current.connected ||
+        pending.current ||
+        selector.current
+      )
+        return Promise.resolve(null);
+      const revision = catalogRevision.current;
+      return controller.current.beginStartAdBoundary({
+        isCurrent: () =>
+          alive.current &&
+          latest.current.ready &&
+          latest.current.connected &&
+          !pending.current &&
+          !selector.current &&
+          revision === catalogRevision.current &&
+          isCurrent(),
+      });
     },
     pause: () => controller.current.pause(),
     resume: () => controller.current.resume(),
