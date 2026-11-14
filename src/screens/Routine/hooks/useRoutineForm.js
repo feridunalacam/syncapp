@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Alert } from 'react-native';
 import { validateRoutine, normalizeRoutine } from '../../../domain/routines';
 import { normalizeAlertConfig } from '../../../domain/alerts';
+import { normalizeRoutineSoundtrack } from '../../../domain/routineSoundtrack';
 
 const ROUTINE_NAME_MAX_LENGTH = 60;
 
@@ -29,15 +30,61 @@ const validateRoutineName = (rawName) => {
  * @param {Function} params.updateRoutine - Context function to update existing routine
  * @param {Function} params.onSave - Callback after successful save
  */
-export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onSave }) => {
-  const playlistStateRef = useRef({ work: {}, rest: {} });
-  const templateRoutineIdRef = useRef(templateRoutine?.id);
+export const useRoutineForm = ({
+  templateRoutine,
+  addRoutine,
+  updateRoutine,
+  onSave,
+  saveOwner,
+  isCurrent = () => true,
+}) => {
+  const saveLifetime = useRef({
+    active: true,
+    generation: 0,
+    owner: saveOwner,
+    identity: templateRoutine?.id || templateRoutine || null,
+  });
+  const editorIdentity = templateRoutine?.id || templateRoutine || null;
+  if (saveLifetime.current.owner !== saveOwner || saveLifetime.current.identity !== editorIdentity)
+    saveLifetime.current = {
+      active: true,
+      generation: saveLifetime.current.generation + 1,
+      owner: saveOwner,
+      identity: editorIdentity,
+    };
+  const currentEditor = useRef(isCurrent);
+  currentEditor.current = isCurrent;
+  const pendingSave = useRef(null);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const invalidateSave = useCallback(() => {
+    saveLifetime.current = {
+      ...saveLifetime.current,
+      generation: saveLifetime.current.generation + 1,
+    };
+    pendingSave.current = null;
+    setSaving(false);
+  }, []);
+  useEffect(() => {
+    saveLifetime.current.active = true;
+    return () => {
+      saveLifetime.current.active = false;
+    };
+  }, []);
+  useEffect(() => {
+    pendingSave.current = null;
+    setSaving(false);
+    setSaveError(null);
+  }, [saveOwner, editorIdentity]);
+  const templateRoutineIdRef = useRef(templateRoutine?.id || templateRoutine || null);
+  const templateOwnerRef = useRef(saveOwner);
 
   // Initialize values from template
   const initialValues = useMemo(() => {
     if (!templateRoutine) {
       return {
         name: '',
+        soundtrack: null,
         numberOfRounds: '1',
         roundsOrder: [1],
         workSec: '60',
@@ -59,33 +106,40 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     const workPlaylists = {};
     const restPlaylists = {};
 
-    if (templateRoutine.roundsData && Array.isArray(templateRoutine.roundsData)) {
-      templateRoutine.roundsData.forEach((round) => {
+    // Make legacy routine-wide playlists visible on each affected round. Saving
+    // uses only these explicit assignments, so removing music really silences it.
+    const normalized = normalizeRoutine(templateRoutine);
+    const fallbackWorkPlaylist =
+      normalized.roundAudioOnly === true ? null : normalized.workoutPlaylistId;
+    const fallbackRestPlaylist =
+      normalized.roundAudioOnly === true ? null : normalized.restPlaylistId;
+    if (Array.isArray(normalized.roundsData)) {
+      normalized.roundsData.forEach((round) => {
         const roundNum = round.roundNumber;
 
         // Work music: Song has priority over playlist
         if (round.workSong) {
           workSongs[roundNum] = round.workSong;
-        } else if (round.workPlaylistId) {
+        } else if (round.workPlaylistId || fallbackWorkPlaylist) {
           workPlaylists[roundNum] = {
-            id: round.workPlaylistId,
-            name: round.workPlaylistName || 'Playlist',
+            id: round.workPlaylistId || fallbackWorkPlaylist,
+            name: round.workPlaylistName || normalized.spotifyPlaylist || 'Playlist',
             image: round.workPlaylistImage || null,
             tracksCount: round.workPlaylistTracksCount || 0,
-            platform: round.workPlaylistPlatform || null,
+            platform: round.workPlaylistPlatform || normalized.platform || null,
           };
         }
 
         // Rest music: Song has priority over playlist
         if (round.restSong) {
           restSongs[roundNum] = round.restSong;
-        } else if (round.restPlaylistId) {
+        } else if (round.restPlaylistId || fallbackRestPlaylist) {
           restPlaylists[roundNum] = {
-            id: round.restPlaylistId,
+            id: round.restPlaylistId || fallbackRestPlaylist,
             name: round.restPlaylistName || 'Playlist',
             image: round.restPlaylistImage || null,
             tracksCount: round.restPlaylistTracksCount || 0,
-            platform: round.restPlaylistPlatform || null,
+            platform: round.restPlaylistPlatform || normalized.platform || null,
           };
         }
 
@@ -94,7 +148,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
       });
     }
 
-    const numRounds = templateRoutine.rounds || 1;
+    const numRounds = normalized.rounds;
     const roundsOrder = Array.from({ length: numRounds }, (_, i) => i + 1);
 
     // If templateRoutine has an ID, it means we're editing an existing routine
@@ -107,6 +161,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
 
     return {
       name: routineName,
+      soundtrack: normalized.soundtrack,
       numberOfRounds: String(numRounds),
       roundsOrder,
       workSec: String(templateRoutine.workSec ?? 60),
@@ -126,6 +181,16 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
   // Core routine state
   const [name, setNameRaw] = useState(initialValues.name);
   const [nameError, setNameError] = useState(null);
+  const [soundtrack, setSoundtrackRaw] = useState(initialValues.soundtrack);
+  const setSoundtrack = useCallback((value) => {
+    setSoundtrackRaw(normalizeRoutineSoundtrack(value));
+  }, []);
+  const setSoundtrackShuffle = useCallback((value) => {
+    setSoundtrackRaw((current) =>
+      current ? normalizeRoutineSoundtrack({ ...current, shuffle: value }) : null,
+    );
+  }, []);
+  const removeSoundtrack = useCallback(() => setSoundtrackRaw(null), []);
 
   // Wrap the name setter so the inline error clears as soon as the user
   // starts fixing the input.
@@ -151,8 +216,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
   const [roundWorkPlaylists, setRoundWorkPlaylists] = useState(initialValues.roundWorkPlaylists);
   const [roundRestPlaylists, setRoundRestPlaylists] = useState(initialValues.roundRestPlaylists);
 
-  // Playlist IDs for shuffle. Hydrate from template so editing an existing
-  // routine doesn't silently drop its attached playlists.
+  // Keep legacy playlist metadata while playback uses the explicit assignments.
   const [workoutPlaylistId, setWorkoutPlaylistId] = useState(
     templateRoutine?.workoutPlaylistId ?? null,
   );
@@ -177,21 +241,15 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
   const [endWorkSound, setEndWorkSound] = useState(templateRoutine?.endWorkSound ?? null);
   const [endRestSound, setEndRestSound] = useState(templateRoutine?.endRestSound ?? null);
 
-  // Track playlist state changes
-  useEffect(() => {
-    playlistStateRef.current.work = roundWorkPlaylists;
-  }, [roundWorkPlaylists]);
-
-  useEffect(() => {
-    playlistStateRef.current.rest = roundRestPlaylists;
-  }, [roundRestPlaylists]);
-
   // A reused editor must load the entire newly selected routine.
   useEffect(() => {
-    if (templateRoutineIdRef.current === templateRoutine?.id) return;
-    templateRoutineIdRef.current = templateRoutine?.id;
+    const identity = templateRoutine?.id || templateRoutine || null;
+    if (templateRoutineIdRef.current === identity && templateOwnerRef.current === saveOwner) return;
+    templateRoutineIdRef.current = identity;
+    templateOwnerRef.current = saveOwner;
     setNameRaw(initialValues.name);
     setNameError(null);
+    setSoundtrackRaw(initialValues.soundtrack);
     setNumberOfRounds(initialValues.numberOfRounds);
     setRoundsOrder(initialValues.roundsOrder);
     setWorkSec(initialValues.workSec);
@@ -213,7 +271,7 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     setCountdownBeforeStartSound(templateRoutine?.countdownBeforeStartSound ?? null);
     setEndWorkSound(templateRoutine?.endWorkSound ?? null);
     setEndRestSound(templateRoutine?.endRestSound ?? null);
-  }, [templateRoutine, initialValues]);
+  }, [templateRoutine, initialValues, saveOwner]);
 
   const setGlobalWorkSec = useCallback((value) => {
     setWorkSec(value);
@@ -295,13 +353,21 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
   const handleShuffleForWork = useCallback((playlist, roundSongs) => {
     if (!roundSongs) return;
     setRoundWorkSongs((prev) => ({ ...prev, ...roundSongs }));
-    setWorkoutPlaylistId(playlist.id);
+    setRoundWorkPlaylists((prev) => {
+      const next = { ...prev };
+      Object.keys(roundSongs).forEach((round) => delete next[round]);
+      return next;
+    });
   }, []);
 
   const handleShuffleForRest = useCallback((playlist, roundSongs) => {
     if (!roundSongs) return;
     setRoundRestSongs((prev) => ({ ...prev, ...roundSongs }));
-    setRestPlaylistId(playlist.id);
+    setRoundRestPlaylists((prev) => {
+      const next = { ...prev };
+      Object.keys(roundSongs).forEach((round) => delete next[round]);
+      return next;
+    });
   }, []);
 
   const handleRemoveRound = useCallback(
@@ -369,7 +435,8 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     });
   }, []);
 
-  const handleSaveRoutine = useCallback(() => {
+  const handleSaveRoutine = useCallback(async () => {
+    if (pendingSave.current || !currentEditor.current()) return false;
     const nameValidation = validateRoutineName(name);
     if (nameValidation) {
       setNameError(nameValidation);
@@ -415,12 +482,14 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
 
     const routineData = {
       name: trimmedName,
+      soundtrack,
       rounds,
       workSec: parseInt(workSec),
       restSec: parseInt(restSec),
       targetDurationMin: totalDurationMin ? parseInt(totalDurationMin) : null,
       workoutPlaylistId: workoutPlaylistId || null,
       restPlaylistId: restPlaylistId || null,
+      roundAudioOnly: true,
       restVolume: restVolume,
       preparationVolume,
       workVolume,
@@ -442,18 +511,44 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
       return;
     }
 
-    if (templateRoutine?.id) {
-      updateRoutine({
-        ...normalizeRoutine({ ...templateRoutine, ...routineData }),
-        id: templateRoutine.id,
-      });
-    } else {
-      addRoutine(normalizeRoutine(routineData));
+    const lifetime = saveLifetime.current;
+    const operation = {};
+    const current = () =>
+      saveLifetime.current === lifetime && lifetime.active && currentEditor.current();
+    pendingSave.current = operation;
+    setSaveError(null);
+    setSaving(true);
+    try {
+      const saved = templateRoutine?.id
+        ? await updateRoutine(
+            {
+              ...normalizeRoutine({ ...templateRoutine, ...routineData }),
+              id: templateRoutine.id,
+            },
+            { isCurrent: current },
+          )
+        : await addRoutine(normalizeRoutine(routineData), { isCurrent: current });
+      if (saved === false)
+        throw new Error(
+          'Could not save this routine on your device. Your draft is still here. Try Save again.',
+        );
+      if (!current()) return false;
+      onSave?.();
+      return true;
+    } catch (error) {
+      if (current())
+        setSaveError(
+          error?.message ||
+            'Could not save this routine. Your draft is still here. Try Save again.',
+        );
+      return false;
+    } finally {
+      if (pendingSave.current === operation) pendingSave.current = null;
+      if (saveLifetime.current === lifetime && lifetime.active) setSaving(false);
     }
-
-    if (onSave) onSave();
   }, [
     name,
+    soundtrack,
     numberOfRounds,
     roundsOrder,
     workSec,
@@ -479,14 +574,22 @@ export const useRoutineForm = ({ templateRoutine, addRoutine, updateRoutine, onS
     addRoutine,
     updateRoutine,
     onSave,
+    saveOwner,
   ]);
 
   return {
     // Core state
     name,
     setName,
+    soundtrack,
+    setSoundtrack,
+    setSoundtrackShuffle,
+    removeSoundtrack,
     nameError,
     setNameError,
+    saving,
+    saveError,
+    invalidateSave,
     numberOfRounds,
     setNumberOfRounds,
     roundsOrder,

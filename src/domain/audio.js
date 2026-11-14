@@ -1,3 +1,5 @@
+import { buildTimeline } from './routines.js';
+
 /** Select one source per interval. A track overrides a playlist for that round. */
 export const resolveRoundAudio = (routine, phase, roundNumber, selectedPlatform) => {
   if (!routine || !['beforeStart', 'work', 'rest'].includes(phase)) return null;
@@ -8,9 +10,17 @@ export const resolveRoundAudio = (routine, phase, roundNumber, selectedPlatform)
   const round = routine.roundsData?.[roundNumber - 1] || {};
   const work = phase === 'work';
   const song = work ? round.workSong : round.restSong;
+  // Edited routines have complete, visible round assignments. Retain legacy
+  // playlist metadata without reviving music the user removed from a round.
+  const fallbackPlaylist =
+    routine.roundAudioOnly === true
+      ? null
+      : work
+        ? routine.workoutPlaylistId
+        : routine.restPlaylistId;
   const playlistId = work
-    ? round.workPlaylistId || routine.workoutPlaylistId
-    : round.restPlaylistId || routine.restPlaylistId;
+    ? round.workPlaylistId || fallbackPlaylist
+    : round.restPlaylistId || fallbackPlaylist;
   if (!song && !playlistId) return null;
   const source = song || {
     id: playlistId,
@@ -20,11 +30,13 @@ export const resolveRoundAudio = (routine, phase, roundNumber, selectedPlatform)
   };
   const platform = source.uri?.startsWith('spotify:')
     ? 'spotify'
-    : source.uri?.startsWith('voices:')
-      ? 'voices'
-      : source.platform === 'url' || source.platform === 'browser'
-        ? 'device'
-        : source.platform || (song ? 'device' : selectedPlatform || 'spotify');
+    : source.uri?.startsWith('apple-music:')
+      ? 'appleMusic'
+      : source.uri?.startsWith('voices:')
+        ? 'voices'
+        : source.platform === 'url' || source.platform === 'browser'
+          ? 'device'
+          : source.platform || (song ? 'device' : selectedPlatform || 'spotify');
   return { source, platform, kind: song ? 'track' : 'playlist', playlistId };
 };
 
@@ -46,3 +58,13 @@ export const sameAudioSource = (a, b) =>
   a.platform === b.platform &&
   a.kind === b.kind &&
   (a.kind === 'track' ? a.source?.uri === b.source?.uri : a.playlistId === b.playlistId);
+
+export const resolveNextRoundAudio = (routine, phase, roundNumber, selectedPlatform) => {
+  const timeline = buildTimeline(routine);
+  const index = timeline.findIndex(
+    (item) => item.phase === phase && (phase === 'beforeStart' || item.round === roundNumber),
+  );
+  // Preparation already owns the first Work track; that boundary does not reload it.
+  const next = index >= 0 ? timeline[index + (phase === 'beforeStart' ? 2 : 1)] : null;
+  return next ? resolveRoundAudio(routine, next.phase, next.round, selectedPlatform) : null;
+};

@@ -1,4 +1,4 @@
-import { adminClient, json, preflight, subscriptionConfig, syncEntitlement } from '../_shared/server.ts';
+import { accountBillingScope, adminClient, json, preflight, subscriptionConfig, syncEntitlement } from '../_shared/server.ts';
 import { secureEqual, validateWebhook, webhookUsers } from '../_shared/subscriptions.js';
 
 Deno.serve(async (req: Request) => {
@@ -14,13 +14,17 @@ Deno.serve(async (req: Request) => {
     if (!validateWebhook(payload)) return json({ error: 'invalid_event' }, 400);
     const { event } = payload;
     const { environment } = subscriptionConfig();
-    if (event.environment !== environment) return json({ ignored: 'different_environment' });
+    // RevenueCat may omit environment on TRANSFER. In that case refresh both
+    // owners canonically; canonicalEntitlement still rejects sandbox receipts.
+    if (event.environment != null && event.environment !== environment) return json({ ignored: 'different_environment' });
     const admin = adminClient();
     for (const userId of webhookUsers(event)) {
       const { data, error } = await admin.auth.admin.getUserById(userId);
       // Ignore former/deleted accounts. An upstream auth outage should be retried.
       if (error && error.status !== 404) throw error;
       if (!data?.user) continue;
+      const scope = await accountBillingScope(admin, userId);
+      if (scope.lane !== 'production') continue;
       const result = await syncEntitlement(admin, userId, event.id);
       if (!result.applied && !result.duplicate) return json({ error: 'refresh_superseded_retry' }, 409);
     }

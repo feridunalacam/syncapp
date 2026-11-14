@@ -11,8 +11,89 @@ import { SPOTIFY_CLIENT_ID } from './config';
 
 const NETWORK_RETRY_ATTEMPTS = 2;
 const NETWORK_RETRY_BASE_DELAY_MS = 400;
+const REQUEST_TIMEOUT_MS = 6000;
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const wait = (ms, signal) =>
+  new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal?.addEventListener('abort', done, { once: true });
+    if (signal?.aborted) done();
+  });
+
+const transportError = (cancelled) =>
+  Object.assign(
+    new Error(
+      cancelled
+        ? 'Spotify playback request was cancelled.'
+        : 'Spotify request timed out. Check your connection and try again.',
+    ),
+    { code: cancelled ? 'SPOTIFY_CANCELLED' : 'SPOTIFY_TIMEOUT' },
+  );
+
+// Abort the actual fetch and body read, and settle even if a transport ignores
+// abort. Retired work cannot continue into a refresh, retry or verification.
+const boundedRequest = (work, signal) =>
+  new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const abort = (cancelled) => {
+      controller.abort();
+      finish(transportError(cancelled));
+    };
+    const cancel = () => abort(true);
+    const timer = setTimeout(() => abort(false), REQUEST_TIMEOUT_MS);
+    signal?.addEventListener('abort', cancel, { once: true });
+    if (signal?.aborted) cancel();
+    Promise.resolve()
+      .then(() => {
+        if (controller.signal.aborted) throw transportError(true);
+        return work(controller.signal);
+      })
+      .then(
+        (value) => finish(null, value),
+        (error) => finish(error),
+      );
+  });
+
+const transportFailure = (error) => ({
+  success: false,
+  code: error.code,
+  error: error.message,
+  ...(error.code === 'SPOTIFY_CANCELLED' ? { cancelled: true } : {}),
+});
+
+const playbackReadError = (status, data) => ({
+  success: false,
+  code: status,
+  error:
+    data?.error?.message || data?.message || `Spotify playback request failed (HTTP ${status}).`,
+});
+const readResponseError = async (response) => {
+  let data;
+  try {
+    data = JSON.parse(await response.text());
+  } catch {
+    // Never display an unstructured upstream response body.
+  }
+  return playbackReadError(response.status, data);
+};
+const isAuthorizationReadError = (result) =>
+  result?.success === false && [401, 403].includes(result.code);
+const isTransportFailure = (result) =>
+  result?.success === false && ['SPOTIFY_CANCELLED', 'SPOTIFY_TIMEOUT'].includes(result.code);
 
 const isTransientNetworkError = (error) => {
   if (!error) {
@@ -29,6 +110,30 @@ const isTransientNetworkError = (error) => {
 
 // Spotify API Helper Functions
 export const spotifyAPI = {
+  request(input, options = {}) {
+    return boundedRequest(async (signal) => {
+      const response = await fetch(input, { ...options, signal });
+      if (signal.aborted) throw transportError(true);
+      const text = await response.text();
+      if (signal.aborted) throw transportError(true);
+      return {
+        status: response.status,
+        ok: response.ok,
+        headers: response.headers,
+        text: async () => text,
+        json: async () => JSON.parse(text),
+      };
+    }, this.requestSignal);
+  },
+  refresh(refreshCallback) {
+    return boundedRequest(() => refreshCallback(), this.requestSignal);
+  },
+  wait(ms) {
+    return wait(ms, this.requestSignal);
+  },
+  isCancelled(options = {}) {
+    return this.requestSignal?.aborted === true || options.isCancelled?.() === true;
+  },
   async getAccessToken(refreshToken) {
     try {
       // Validate inputs
@@ -53,7 +158,7 @@ export const spotifyAPI = {
       params.append('client_id', SPOTIFY_CLIENT_ID.trim());
 
       // For mobile apps, we don't send client_secret (public client)
-      const response = await fetch('https://accounts.spotify.com/api/token', {
+      const response = await this.request('https://accounts.spotify.com/api/token', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -108,7 +213,14 @@ export const spotifyAPI = {
     }
   },
 
-  async makeRequest(endpoint, method, accessToken, body = null, refreshCallback = null) {
+  async makeRequest(
+    endpoint,
+    method,
+    accessToken,
+    body = null,
+    refreshCallback = null,
+    readOptions = {},
+  ) {
     try {
       const options = {
         method,
@@ -120,7 +232,7 @@ export const spotifyAPI = {
       if (body) {
         options.body = JSON.stringify(body);
       }
-      const response = await fetch(`https://api.spotify.com/v1${endpoint}`, options);
+      const response = await this.request(`https://api.spotify.com/v1${endpoint}`, options);
 
       // Handle non-OK responses
       if (!response.ok) {
@@ -147,7 +259,7 @@ export const spotifyAPI = {
         // Handle 401 Unauthorized - token expired, try to refresh
         if (response.status === 401 && refreshCallback) {
           try {
-            const newAccessToken = await refreshCallback();
+            const newAccessToken = await this.refresh(refreshCallback);
             if (newAccessToken) {
               // Retry the request with the new token
               const retryOptions = {
@@ -160,7 +272,7 @@ export const spotifyAPI = {
               if (body) {
                 retryOptions.body = JSON.stringify(body);
               }
-              const retryResponse = await fetch(
+              const retryResponse = await this.request(
                 `https://api.spotify.com/v1${endpoint}`,
                 retryOptions,
               );
@@ -180,11 +292,20 @@ export const spotifyAPI = {
                 }
                 return JSON.parse(text);
               }
+              if (readOptions.reportErrors) return readResponseError(retryResponse);
             }
           } catch (refreshError) {
+            if (
+              refreshError.code === 'SPOTIFY_CANCELLED' ||
+              refreshError.code === 'SPOTIFY_TIMEOUT'
+            )
+              throw refreshError;
             console.error('Error refreshing token and retrying:', refreshError);
           }
         }
+
+        if (readOptions.reportErrors && response.status === 401)
+          return playbackReadError(response.status, errorData);
 
         // Handle 403 "Restriction violated" errors gracefully (no active device, no Premium, etc.)
         if (response.status === 403) {
@@ -242,6 +363,8 @@ export const spotifyAPI = {
 
       return JSON.parse(text);
     } catch (error) {
+      if (error.code === 'SPOTIFY_CANCELLED' || error.code === 'SPOTIFY_TIMEOUT')
+        return transportFailure(error);
       // Build a normalized message string from every available source so we can
       // reliably detect known benign errors (like "no active device") before logging.
       const parts = [
@@ -278,14 +401,17 @@ export const spotifyAPI = {
   },
 
   async play(accessToken, deviceId = null, options = {}) {
+    if (this.isCancelled(options)) return { success: true, cancelled: true };
     const target = deviceId || (await this.getActiveDevice(accessToken, options.refreshCallback));
+    if (target?.success === false) return target;
     if (!target)
       return { success: false, error: 'Open Spotify on the device you want to use, then resume.' };
     return runVerifiedCommand({
       deviceId: target,
       followDeviceChanges: true,
       skipIfAlreadyApplied: true,
-      isCancelled: options.isCancelled,
+      isCancelled: () => this.isCancelled(options),
+      wait: (ms) => this.wait(ms),
       send: (activeTarget) =>
         this.makeRequest(
           `/me/player/play?device_id=${encodeURIComponent(activeTarget)}`,
@@ -318,7 +444,8 @@ export const spotifyAPI = {
         deviceId,
         positionMs:
           Number.isFinite(options.positionMs) && options.positionMs > 0 ? options.positionMs : 0,
-        isCancelled: options.isCancelled,
+        isCancelled: () => this.isCancelled(options),
+        wait: (ms) => this.wait(ms),
         preferContext: options.preferContext || contextPlaybackDevices.has(deviceId),
         previousDeviceId: options.previousDeviceId,
         send: (body) =>
@@ -361,11 +488,14 @@ export const spotifyAPI = {
 
   async pause(accessToken, refreshCallback = null, deviceId = null) {
     const target = deviceId || (await this.getActiveDevice(accessToken, refreshCallback));
+    if (target?.success === false) return target;
     if (!target) return { success: false, error: 'No controllable Spotify device is available.' };
     return runVerifiedCommand({
       deviceId: target,
       followDeviceChanges: true,
       skipIfAlreadyApplied: true,
+      isCancelled: () => this.isCancelled(),
+      wait: (ms) => this.wait(ms),
       send: (activeTarget) =>
         this.makeRequest(
           `/me/player/pause?device_id=${encodeURIComponent(activeTarget)}`,
@@ -403,53 +533,31 @@ export const spotifyAPI = {
     return result || { success: true };
   },
 
-  async setShuffle(accessToken, shuffle, deviceId = null) {
-    try {
-      const endpoint = deviceId
-        ? `/me/player/shuffle?state=${shuffle}&device_id=${deviceId}`
-        : `/me/player/shuffle?state=${shuffle}`;
-
-      const response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-
-      return response.status === 204 || response.ok;
-    } catch (error) {
-      console.error('Error setting shuffle:', error);
-      return false;
-    }
+  async setShuffle(accessToken, shuffle, deviceId = null, options = {}) {
+    const endpoint = `/me/player/shuffle?state=${shuffle === true}${deviceId ? `&device_id=${encodeURIComponent(deviceId)}` : ''}`;
+    return this.makeRequest(endpoint, 'PUT', accessToken, null, options.refreshCallback);
   },
 
   async setRepeat(accessToken, repeatMode, deviceId = null) {
-    try {
-      // repeatMode can be: 'off', 'context' (playlist/album), 'track' (single song)
-      const validModes = ['off', 'context', 'track'];
-      const mode = validModes.includes(repeatMode) ? repeatMode : 'off';
+    // repeatMode can be: 'off', 'context' (playlist/album), 'track' (single song)
+    const validModes = ['off', 'context', 'track'];
+    const mode = validModes.includes(repeatMode) ? repeatMode : 'off';
 
-      const endpoint = deviceId
-        ? `/me/player/repeat?state=${mode}&device_id=${deviceId}`
-        : `/me/player/repeat?state=${mode}`;
+    const endpoint = deviceId
+      ? `/me/player/repeat?state=${mode}&device_id=${deviceId}`
+      : `/me/player/repeat?state=${mode}`;
 
-      const response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-
-      return response.status === 204 || response.ok;
-    } catch (error) {
-      console.error('Error setting repeat:', error);
-      return false;
-    }
+    return this.makeRequest(endpoint, 'PUT', accessToken);
   },
 
-  async getCurrentPlayback(accessToken, refreshCallback = null, retryAttempt = 0) {
+  async getCurrentPlayback(
+    accessToken,
+    refreshCallback = null,
+    retryAttempt = 0,
+    readOptions = {},
+  ) {
     try {
-      const response = await fetch('https://api.spotify.com/v1/me/player', {
+      const response = await this.request('https://api.spotify.com/v1/me/player', {
         method: 'GET',
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -473,10 +581,10 @@ export const spotifyAPI = {
         // Handle 401 Unauthorized - token expired, try to refresh
         if (response.status === 401 && refreshCallback) {
           try {
-            const newAccessToken = await refreshCallback();
+            const newAccessToken = await this.refresh(refreshCallback);
             if (newAccessToken) {
               // Retry the request with the new token
-              const retryResponse = await fetch('https://api.spotify.com/v1/me/player', {
+              const retryResponse = await this.request('https://api.spotify.com/v1/me/player', {
                 method: 'GET',
                 headers: {
                   Authorization: `Bearer ${newAccessToken}`,
@@ -494,11 +602,24 @@ export const spotifyAPI = {
                 }
                 return JSON.parse(text);
               }
+              if (readOptions.reportErrors && [401, 403].includes(retryResponse.status))
+                return readResponseError(retryResponse);
+              // A refreshed request with no playback remains absence, not the
+              // original token error, even when diagnostics are requested.
+              if (readOptions.reportErrors) return null;
             }
           } catch (refreshError) {
+            if (
+              refreshError.code === 'SPOTIFY_CANCELLED' ||
+              refreshError.code === 'SPOTIFY_TIMEOUT'
+            )
+              throw refreshError;
             console.error('Error refreshing token and retrying playback:', refreshError);
           }
         }
+
+        if (readOptions.reportErrors && [401, 403].includes(response.status))
+          return playbackReadError(response.status, errorData);
 
         // Don't log 401 errors as they're handled above, or if refresh isn't available
         if (response.status !== 401) {
@@ -514,11 +635,18 @@ export const spotifyAPI = {
 
       return JSON.parse(text);
     } catch (error) {
+      if (error.code === 'SPOTIFY_CANCELLED' || error.code === 'SPOTIFY_TIMEOUT')
+        return readOptions.reportErrors ? transportFailure(error) : null;
       if (isTransientNetworkError(error)) {
         if (retryAttempt < NETWORK_RETRY_ATTEMPTS) {
           const delay = NETWORK_RETRY_BASE_DELAY_MS * (retryAttempt + 1);
-          await wait(delay);
-          return this.getCurrentPlayback(accessToken, refreshCallback, retryAttempt + 1);
+          await this.wait(delay);
+          return this.getCurrentPlayback(
+            accessToken,
+            refreshCallback,
+            retryAttempt + 1,
+            readOptions,
+          );
         }
         console.warn(
           'Spotify playback request failed due to a network issue. Will retry on next poll.',
@@ -531,13 +659,14 @@ export const spotifyAPI = {
     }
   },
 
-  async getDevices(accessToken, refreshCallback = null) {
+  async getDevices(accessToken, refreshCallback = null, readOptions = {}) {
     const result = await this.makeRequest(
       '/me/player/devices',
       'GET',
       accessToken,
       null,
       refreshCallback,
+      readOptions,
     );
     playbackDevices.clear();
     for (const device of result?.devices || [])
@@ -545,7 +674,7 @@ export const spotifyAPI = {
     return result;
   },
 
-  async getActiveDevice(accessToken, refreshCallback = null) {
+  async getActiveDevice(accessToken, refreshCallback = null, readOptions = {}) {
     try {
       const playback = await this.makeRequest(
         '/me/player',
@@ -553,17 +682,41 @@ export const spotifyAPI = {
         accessToken,
         null,
         refreshCallback,
+        readOptions,
       );
+      if (
+        isTransportFailure(playback) ||
+        (readOptions.reportErrors && isAuthorizationReadError(playback))
+      )
+        return playback;
       if (playback?.device?.id) {
         playbackDevices.set(playback.device.id, playback.device);
         return canControlDevice(playback.device) ? playback.device.id : null;
       }
-      const devicesResult = await this.getDevices(accessToken, refreshCallback);
-      return await resolvePlaybackDevice(devicesResult?.devices, async (deviceId) => {
-        const result = await this.transferPlayback(accessToken, deviceId, false);
-        if (result?.success) await wait(300);
+      const devicesResult = await this.getDevices(accessToken, refreshCallback, readOptions);
+      if (
+        isTransportFailure(devicesResult) ||
+        (readOptions.reportErrors && isAuthorizationReadError(devicesResult))
+      )
+        return devicesResult;
+      let activationError = null;
+      const deviceId = await resolvePlaybackDevice(devicesResult?.devices, async (deviceId) => {
+        const result = await this.transferPlayback(
+          accessToken,
+          deviceId,
+          false,
+          readOptions.reportErrors ? refreshCallback : null,
+          readOptions,
+        );
+        if (
+          isTransportFailure(result) ||
+          (readOptions.reportErrors && isAuthorizationReadError(result))
+        )
+          activationError = result;
+        if (result?.success) await this.wait(300);
         return result;
       });
+      return activationError || deviceId;
     } catch (error) {
       console.error('Error getting active device:', error);
       return null;
@@ -572,11 +725,13 @@ export const spotifyAPI = {
 
   async selectPlaybackDevice(accessToken, deviceId, refreshCallback = null) {
     const devices = await this.getDevices(accessToken, refreshCallback);
+    if (devices?.success === false) return devices;
     const selected = devices?.devices?.find((device) => device?.id === deviceId);
     if (!canControlDevice(selected))
       return { success: false, error: 'This Spotify device is not available for control.' };
     return transferVerifiedPlayback({
       deviceId,
+      wait: (ms) => this.wait(ms),
       read: () => this.makeRequest('/me/player', 'GET', accessToken, null, refreshCallback),
       transfer: (playing) => this.transferPlayback(accessToken, deviceId, playing, refreshCallback),
       restore: (uri, positionMs, previousDeviceId) =>
@@ -590,7 +745,13 @@ export const spotifyAPI = {
     });
   },
 
-  async transferPlayback(accessToken, deviceId, play = false, refreshCallback = null) {
+  async transferPlayback(
+    accessToken,
+    deviceId,
+    play = false,
+    refreshCallback = null,
+    readOptions = {},
+  ) {
     return this.makeRequest(
       '/me/player',
       'PUT',
@@ -600,6 +761,7 @@ export const spotifyAPI = {
         play,
       },
       refreshCallback,
+      readOptions,
     );
   },
 
@@ -607,6 +769,7 @@ export const spotifyAPI = {
     const playlists = await readSpotifyPages(
       `https://api.spotify.com/v1/me/playlists?limit=${Math.min(50, limit)}`,
       accessToken,
+      this.request.bind(this),
     );
     return playlists.filter(Boolean).map((playlist) => ({
       id: playlist.id,
@@ -621,13 +784,19 @@ export const spotifyAPI = {
   async playPlaylist(accessToken, playlistId, deviceId = null, shuffle = false, options = {}) {
     if (!deviceId) return { success: false, error: 'Open Spotify on a playback device first.' };
     const contextUri = `spotify:playlist:${playlistId}`;
-    if (shuffle) await this.setShuffle(accessToken, true, deviceId);
     return runVerifiedCommand({
       deviceId,
       followDeviceChanges: true,
-      isCancelled: options.isCancelled,
-      send: (activeTarget) =>
-        this.makeRequest(
+      isCancelled: () => this.isCancelled(options),
+      wait: (ms) => this.wait(ms),
+      send: async (activeTarget) => {
+        const applied = await this.setShuffle(accessToken, shuffle, activeTarget, options);
+        if (applied?.success === false || applied === false)
+          return applied === false
+            ? { success: false, error: 'Spotify shuffle could not be set. Try again.' }
+            : applied;
+        if (this.isCancelled(options)) return { success: true, cancelled: true };
+        return this.makeRequest(
           `/me/player/play?device_id=${encodeURIComponent(activeTarget)}`,
           'PUT',
           accessToken,
@@ -639,7 +808,8 @@ export const spotifyAPI = {
                 : 0,
           },
           options.refreshCallback,
-        ),
+        );
+      },
       read: () => this.makeRequest('/me/player', 'GET', accessToken, null, options.refreshCallback),
       matches: (state) =>
         state.is_playing === true && !!state.item && state.context?.uri === contextUri,
@@ -649,30 +819,18 @@ export const spotifyAPI = {
   async setVolume(accessToken, volumePercent, deviceId = null) {
     const device = playbackDevices.get(deviceId);
     if (device && !canControlVolume(device)) return { success: true, skipped: true };
-    try {
-      const volume = Math.max(0, Math.min(100, volumePercent));
-      const endpoint = deviceId
-        ? `/me/player/volume?volume_percent=${volume}&device_id=${deviceId}`
-        : `/me/player/volume?volume_percent=${volume}`;
+    const volume = Math.max(0, Math.min(100, volumePercent));
+    const endpoint = deviceId
+      ? `/me/player/volume?volume_percent=${volume}&device_id=${deviceId}`
+      : `/me/player/volume?volume_percent=${volume}`;
 
-      const response = await fetch(`https://api.spotify.com/v1${endpoint}`, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-
-      return response.status === 204 || response.ok;
-    } catch (error) {
-      console.error('Error setting volume:', error);
-      return false;
-    }
+    return this.makeRequest(endpoint, 'PUT', accessToken);
   },
 
   async searchTracks(accessToken, query, limit = 20) {
     try {
       const encodedQuery = encodeURIComponent(query);
-      const response = await fetch(
+      const response = await this.request(
         `https://api.spotify.com/v1/search?q=${encodedQuery}&type=track&limit=${limit}`,
         {
           headers: {
@@ -707,7 +865,7 @@ export const spotifyAPI = {
   async searchPlaylists(accessToken, query, limit = 20) {
     try {
       const encodedQuery = encodeURIComponent(query);
-      const response = await fetch(
+      const response = await this.request(
         `https://api.spotify.com/v1/search?q=${encodedQuery}&type=playlist&limit=${limit}`,
         {
           headers: {
@@ -742,7 +900,7 @@ export const spotifyAPI = {
     try {
       const encodedQuery = encodeURIComponent(query);
       const typesParam = Array.isArray(types) ? types.join(',') : types;
-      const response = await fetch(
+      const response = await this.request(
         `https://api.spotify.com/v1/search?q=${encodedQuery}&type=${typesParam}&limit=${Math.min(10, limit)}`,
         {
           headers: {
@@ -859,7 +1017,7 @@ export const spotifyAPI = {
 
   async getPlaylistById(accessToken, playlistId, refreshCallback = null) {
     try {
-      const response = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}`, {
+      const response = await this.request(`https://api.spotify.com/v1/playlists/${playlistId}`, {
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },
@@ -869,9 +1027,9 @@ export const spotifyAPI = {
         // Handle 401 Unauthorized - token expired, try to refresh
         if (response.status === 401 && refreshCallback) {
           try {
-            const newAccessToken = await refreshCallback();
+            const newAccessToken = await this.refresh(refreshCallback);
             if (newAccessToken) {
-              const retryResponse = await fetch(
+              const retryResponse = await this.request(
                 `https://api.spotify.com/v1/playlists/${playlistId}`,
                 {
                   headers: {
@@ -917,6 +1075,7 @@ export const spotifyAPI = {
     const items = await readSpotifyPages(
       `https://api.spotify.com/v1/playlists/${encodeURIComponent(playlistId)}/items?limit=50`,
       accessToken,
+      this.request.bind(this),
     );
     return items
       .map((item) => ({ ...item, track: item?.item || item?.track }))

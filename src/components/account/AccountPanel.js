@@ -13,8 +13,24 @@ import * as Linking from 'expo-linking';
 import Sheet from '../common/Sheet';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { recoverySessionIdentity } from '../../lib/authRecoveryState';
+import AppleSignInButton from './AppleSignInButton';
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const showAppleRevocationInstructions = (result) => {
+  if (result?.apple_revocation?.status !== 'manual_required') return;
+  Alert.alert(
+    'Account deleted',
+    'To also stop Sign in with Apple, open Settings, tap your name, Sign in with Apple, then Sync, and delete its connection.',
+    [
+      { text: 'Done', style: 'cancel' },
+      {
+        text: 'Apple instructions',
+        onPress: () => Linking.openURL('https://support.apple.com/102571'),
+      },
+    ],
+  );
+};
 
 export default function AccountPanel({ visible, onClose, onManageSubscription }) {
   const { theme } = useTheme();
@@ -28,6 +44,19 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const running = useRef(false);
+  const current = useRef({ visible, auth, version: 0 });
+  current.current = {
+    visible,
+    auth,
+    version: current.current.version + (current.current.visible === visible ? 0 : 1),
+  };
+
+  useEffect(() => {
+    current.current.visible = visible;
+    return () => {
+      current.current.visible = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!visible) {
@@ -45,7 +74,7 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
     setError('');
   }, [visible, auth.user?.id, auth.recoveryMode]);
 
-  const available = auth.ready && auth.configured && !busy;
+  const available = auth.ready && auth.configured && !busy && !auth.socialProvider;
   const inputStyle = [styles.input, { color: theme.text, backgroundColor: theme.inputBackground }];
   const changeMode = (next) => {
     setMode(next);
@@ -61,10 +90,26 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
     setBusy(true);
     setError('');
     setMessage('');
+    const target = recoverySessionIdentity(auth.session);
+    const targetUserId = auth.user?.id;
+    const presentation = current.current.version;
+    const canFinish = () => {
+      const latest = current.current;
+      if (!latest?.visible || latest.version !== presentation) return false;
+      if (!latest.auth.recoveryMode) return true;
+      if (mode !== 'recovery') return false;
+      const next = recoverySessionIdentity(latest.auth.session);
+      return target
+        ? target.userId === next?.userId && target.sessionId === next?.sessionId
+        : targetUserId === latest.auth.user?.id;
+    };
     try {
-      await action();
+      await action(canFinish);
     } catch (failure) {
-      setError(failure?.message || 'Something went wrong. Please try again.');
+      if (canFinish()) {
+        setError(failure?.message || 'Something went wrong. Please try again.');
+        showAppleRevocationInstructions(failure);
+      }
     } finally {
       running.current = false;
       setBusy(false);
@@ -87,13 +132,14 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
       setError('Your passwords do not match.');
       return;
     }
-    run(async () => {
+    run(async (canFinish) => {
       const address = email.trim();
       if (mode === 'signin') {
         await auth.signIn(address, password);
-        onClose();
+        if (canFinish()) onClose();
       } else if (mode === 'signup') {
         const result = await auth.signUp(address, password);
+        if (!canFinish()) return;
         setPassword('');
         setConfirmation('');
         if (result?.requiresConfirmation) {
@@ -103,10 +149,14 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
           onClose();
         }
       } else if (mode === 'reset') {
-        await auth.sendPasswordReset(address);
-        setMessage('If an account uses this email, you will receive a password reset link.');
+        const result = await auth.sendPasswordReset(address);
+        if (!result?.cancelled && canFinish())
+          setMessage(
+            'If an account uses this email, you will receive a password reset link. Open it on the device that requested it.',
+          );
       } else {
         await auth.updatePassword(password);
+        if (!canFinish()) return;
         setPassword('');
         setConfirmation('');
         setMode('account');
@@ -114,6 +164,11 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
       }
     });
   };
+  const socialSignIn = (provider) =>
+    run(async (canFinish) => {
+      const result = await auth.signInWithOAuth(provider);
+      if (!result?.cancelled && canFinish()) onClose();
+    });
   const button = (label, action, { secondary = false, danger = false, disabled = false } = {}) => (
     <Pressable
       accessibilityRole="button"
@@ -156,7 +211,11 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
   }[mode];
 
   return (
-    <Sheet visible={visible} title={title} onClose={busy ? () => {} : onClose}>
+    <Sheet
+      visible={visible}
+      title={title}
+      onClose={busy || auth.socialProvider ? () => {} : onClose}
+    >
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
         {!auth.configured && (
           <Text style={[styles.prose, { color: theme.textSecondary }]}>
@@ -187,9 +246,9 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
                         {
                           text: 'Sign out',
                           onPress: () =>
-                            run(async () => {
+                            run(async (canFinish) => {
                               await auth.signOut();
-                              onClose();
+                              if (canFinish()) onClose();
                             }),
                         },
                       ],
@@ -220,9 +279,12 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
                 {button(
                   'Permanently delete account',
                   () =>
-                    run(async () => {
-                      await auth.deleteAccount();
-                      onClose();
+                    run(async (canFinish) => {
+                      const result = await auth.deleteAccount();
+                      if (canFinish()) {
+                        onClose();
+                        showAppleRevocationInstructions(result);
+                      }
                     }),
                   { danger: true, disabled: deleteText !== 'DELETE' },
                 )}
@@ -240,6 +302,25 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
                   ? 'Set a new password for your Sync account.'
                   : 'Keep your account across devices. Your timer, music and local routines are always free.'}
             </Text>
+            {(mode === 'signin' || mode === 'signup') && (
+              <>
+                <AppleSignInButton onPress={() => socialSignIn('apple')} disabled={!available} />
+                {button('Continue with Google', () => socialSignIn('google'), { secondary: true })}
+                <Text
+                  style={[
+                    styles.prose,
+                    { color: theme.textSecondary, textAlign: 'center', marginTop: 20 },
+                  ]}
+                >
+                  or use email
+                </Text>
+              </>
+            )}
+            {mode === 'reset' && (
+              <Text style={[styles.prose, { color: theme.textSecondary }]}>
+                Request a link here, then open the newest reset email on this device.
+              </Text>
+            )}
             {mode !== 'recovery' && (
               <>
                 {label('Email')}
@@ -305,14 +386,7 @@ export default function AccountPanel({ visible, onClose, onManageSubscription })
               <>
                 {link('Create an account', () => changeMode('signup'))}
                 {link('Forgot password?', () => changeMode('reset'))}
-                {process.env.EXPO_PUBLIC_AUTH_APPLE_ENABLED === 'true' &&
-                  button('Continue with Apple', () => run(() => auth.signInWithOAuth('apple')), {
-                    secondary: true,
-                  })}
-                {process.env.EXPO_PUBLIC_AUTH_GOOGLE_ENABLED === 'true' &&
-                  button('Continue with Google', () => run(() => auth.signInWithOAuth('google')), {
-                    secondary: true,
-                  })}
+                {link('Continue without an account', onClose)}
               </>
             )}
             {(mode === 'signup' || mode === 'reset') &&

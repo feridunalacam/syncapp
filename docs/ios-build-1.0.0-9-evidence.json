@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "recordType": "Historical exact TestFlight delivery receipt; later public-review status is separate",
+  "verifiedAtUTC": "2026-11-13T09:56:35.935Z",
+  "platform": "ios",
+  "version": "1.0.0",
+  "buildNumber": "9",
+  "profile": "production",
+  "sourceCommit": "bdc7d22bbbc7754f6990b60c0f982fb30af8fcd2",
+  "runtimeNativeAndEASFreeze": "8047c7a5372e1c3fc06368d4594044f71266de38",
+  "easBuildID": "a888ce17-7595-4994-9038-709385c72249",
+  "ascBuildID": "5a90f190-12dc-4c3e-99c4-a8575bad7e35",
+  "ipaSHA256": "154d0f001bd303de6349c864ba46b82069017322c077090ab43a1f6f169ad7a0",
+  "ipaBytes": 22992466,
+  "actualHBCSHA256": "6a0b11ae9b1a17709eb04bb403e01dffd190bab5a89b1866331e03dcfbfe0642",
+  "localProductionHBCSHA256": "403cae733719375815b2342a707e98839d38fbacea6c4d47fa22c544f0fa4146",
+  "rawHBCByteEquality": false,
+  "nativeAuditChecks": {
+    "passed": 43,
+    "total": 44,
+    "onlyFalse": "hermesMatchesApprovedProductionExport",
+    "historicalResultPreserved": true
+  },
+  "strictSemanticReplacement": {
+    "passed": true,
+    "allByteDifferencesAccountedFor": true,
+    "executableBytesExact": true,
+    "codeStringAssetFlagNormalizationApplied": false,
+    "secondIndependentAdversarialReplayPassed": true,
+    "rootAdditionalSourceBoundaryAndSHA1CheckPassed": true
+  },
+  "officialAppleValidation": {
+    "passed": true,
+    "attempts": 1,
+    "verifiedAtUTC": "2026-11-13T09:35:51.362Z"
+  },
+  "officialAppleUpload": {
+    "passed": true,
+    "attempts": 1,
+    "deliveryID": "5a90f190-12dc-4c3e-99c4-a8575bad7e35",
+    "completedAtUTC": "2026-11-13T09:47:56.405Z",
+    "easSubmitUsed": false
+  },
+  "appleProcessingState": "VALID",
+  "internalBetaState": "IN_BETA_TESTING",
+  "group": {
+    "name": "Sync Internal QA",
+    "testerCount": 1,
+    "buildCount": 6,
+    "allPriorBuildsRetained": true,
+    "preservationChecks": {
+      "ownerOnlyConfirmed": true,
+      "groupSettingsUnchanged": true,
+      "testerMembershipUnchanged": true,
+      "allPriorBuildsPreserved": true,
+      "onlyExpectedBuildAdded": true,
+      "store9Associated": true,
+      "appleValid": true,
+      "testing": true
+    }
+  },
+  "productionFlags": {
+    "adsEnabled": true,
+    "adsTestMode": false,
+    "standardAppleMusicCompanion": true,
+    "timedAppleMusic": false,
+    "spotifyAccountPlayback": false,
+    "webMediaAcquisition": false
+  },
+  "completeLicenseTextsPresent": 62,
+  "originalCueAssetsPresent": 8,
+  "uncertainCoachAssetsExcluded": 14,
+  "nativeAssetsVerified": 22,
+  "all15PrivacyFilesRawAndParsedEqualApproved8": true,
+  "nativeSDKVersions": {
+    "Google-Mobile-Ads-SDK": [
+      "13.6.0"
+    ],
+    "GoogleUserMessagingPlatform": [
+      "3.1.0"
+    ],
+    "RevenueCat": [
+      "5.101.0"
+    ],
+    "PurchasesHybridCommon": [
+      "20.4.0"
+    ]
+  },
+  "distributionCredentialsReusedWithoutChanges": true,
+  "noPackagedCredentialFilesOrPrivatePEMBlocks": true,
+  "physicalMusicProAdsAndFreshAppleTokenRegistrationVerifiedAtReceipt": false,
+  "publicAppReviewSubmittedAtReceipt": false,
+  "publicReleasePerformedAtReceipt": false,
+  "safeLocalReceiptDirectory": "../artifacts/app-store/testflight-1.0.0-9/",
+  "noCredentialValuesOrPrivateOwnerSnapshotsIncluded": true
+}

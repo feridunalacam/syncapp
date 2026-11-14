@@ -6,7 +6,15 @@ const SECURE_KEY = 'syncapp.music.credentials';
 const writeQueues = new Map();
 const closedAccounts = new Set();
 let webCredentials = {};
-const secureKeyFor = (accountId) => (accountId ? `${SECURE_KEY}.${accountId}` : SECURE_KEY);
+// SecureStore permits only letters, digits, '.', '-' and '_'. Preserve every
+// legacy UUID key; encode review/unresolved namespaces without ':' or collisions.
+const secureKeyFor = (accountId) => {
+  if (!accountId) return SECURE_KEY;
+  const suffix = accountId.includes(':')
+    ? `scope.${Array.from(accountId, (char) => char.charCodeAt(0).toString(16).padStart(4, '0')).join('')}`
+    : accountId;
+  return `${SECURE_KEY}.${suffix}`;
+};
 const ensureAccountOpen = (accountId) => {
   if (accountId && closedAccounts.has(accountId))
     throw new Error('This account has been deleted from this device.');
@@ -42,7 +50,8 @@ const splitPlatforms = (platforms) => {
   Object.entries(platforms || {}).forEach(([id, value]) => {
     const { accessToken, refreshToken, ...info } = value;
     metadata[id] = info;
-    if (id !== 'device') credentials[id] = { accessToken, refreshToken };
+    if (id !== 'device' && info.authentication !== 'native')
+      credentials[id] = { accessToken, refreshToken };
   });
   return { metadata, credentials };
 };
@@ -78,7 +87,8 @@ export const loadPlatforms = async (options = {}) => {
   const result = {};
   Object.entries(metadata || {}).forEach(([id, info]) => {
     result[id] = { ...info, ...credentials[id] };
-    if (id !== 'device' && !result[id].accessToken && !result[id].refreshToken)
+    const nativeMusic = id === 'appleMusic' && info.authentication === 'native';
+    if (id !== 'device' && !nativeMusic && !result[id].accessToken && !result[id].refreshToken)
       result[id].connected = false;
   });
   result.device = { connected: true, accessToken: 'device' };

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "observedAtUTC": "2026-11-12T15:31:28.075Z",
+  "testKind": "Read-only native StoreKit and RevenueCat catalog integration probe",
+  "platform": "iOS 26.1 Simulator",
+  "storefrontEvidence": "Returned USD prices; Turkish storefront/localized price not verified",
+  "bundleIdentifier": "com.feridun.syncapp",
+  "nativeReference": "Clone of the previously signed 585b64b CNG Release simulator app with only its embedded JavaScript replaced, then ad-hoc re-signed and strict/deep verified; not Store4 or the new review client",
+  "sdkPackage": "react-native-purchases 11.0.1; same compiled RevenueCat native bridge as the preserved simulator reference",
+  "probeEntrySHA256": "d0de56389e05483e1d8d15e61969f1608bcf00b6f9954bc1d8781b17b0941216",
+  "probeBundleSHA256": "e295d7bc60f41ca50aae5b8e9ee1be0f5fd62f12cf449ccadd8360ee1debc22d",
+  "approvedPublicSdkKeyMatchesRevenueCatAppDashboard": true,
+  "rcApp": "Sync iOS / app01f44beac3",
+  "iapCredentialStatus": "Valid credentials",
+  "trackNewPurchasesFromServerNotifications": false,
+  "productResult": [
+    {
+      "identifier": "com.feridun.syncapp.pro.monthly",
+      "priceString": "$2.99",
+      "currencyCode": "USD"
+    },
+    {
+      "identifier": "com.feridun.syncapp.pro.yearly",
+      "priceString": "$18.00",
+      "currencyCode": "USD"
+    }
+  ],
+  "currentOffering": "default",
+  "packages": [
+    {
+      "identifier": "$rc_monthly",
+      "productIdentifier": "com.feridun.syncapp.pro.monthly",
+      "priceString": "$2.99"
+    },
+    {
+      "identifier": "$rc_annual",
+      "productIdentifier": "com.feridun.syncapp.pro.yearly",
+      "priceString": "$18.00"
+    }
+  ],
+  "operations": [
+    "Purchases.configure with the approved public App Store key",
+    "getProducts for the exact two subscription IDs",
+    "getOfferings"
+  ],
+  "scopeLimits": [
+    "No Auth/Supabase imports or Sync account; no purchase, restore, receipt sync or entitlement grant APIs invoked.",
+    "No physical Store4 installation/runtime, Turkish localized pricing, transaction, renewal, refund, transfer or Pro unlock established.",
+    "Financial activation and app pricing/availability changes preceded this success; the probe does not isolate a sole causal fix.",
+    "The standalone probe entry is outside tracked source and its workspace staging path is excluded by both Git and EAS."
+  ],
+  "screenshots": [
+    "storekit-live-catalog-two-products.png"
+  ],
+  "precedingStoreDraftChanges": {
+    "baseCountry": "United States (USD)",
+    "appDownloadPriceUSD": "0.00",
+    "pricedCountryCount": 175,
+    "appAvailabilityCountryCount": 175,
+    "availabilityStatus": "Available on App Release",
+    "futureCountriesAutomaticallyAvailable": false,
+    "appleSiliconMacAvailability": false,
+    "visionPro": "Existing option unchanged; current version explicitly incompatible/not available",
+    "persistedAfterReload": true,
+    "screenshots": [
+      "app-pricing-availability-175-saved.png"
+    ],
+    "appReviewSubmitted": false,
+    "publicAppReleased": false
+  }
+}

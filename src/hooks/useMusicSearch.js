@@ -58,16 +58,30 @@ export const useMusicSearch = ({
     async (platform, operation) => {
       const connection = connectedPlatforms?.[platform];
       const service = services?.[platform];
-      if (!connection?.connected || !connection.accessToken || !service) {
+      const name =
+        platform === 'appleMusic'
+          ? 'Apple Music'
+          : platform === 'spotify'
+            ? 'Spotify'
+            : 'your music source';
+      if (
+        !connection?.connected ||
+        (!connection.accessToken && connection.authentication !== 'native') ||
+        !service
+      ) {
         const error = new Error('Not connected');
-        error.userMessage = 'Connect Spotify to load your music.';
+        error.userMessage = `Connect ${name} to load your music.`;
         throw error;
       }
       try {
         const token = getValidAccessToken
           ? await getValidAccessToken(platform)
           : connection.accessToken;
-        if (!token) throw new Error('Reconnect Spotify to continue.');
+        if (!token) {
+          const error = new Error(`Reconnect ${name} to continue.`);
+          error.userMessage = error.message;
+          throw error;
+        }
         return await operation(service, token);
       } catch (error) {
         if (error.status === 401 && refreshToken) {
@@ -108,7 +122,7 @@ export const useMusicSearch = ({
     (platform, options) =>
       library.run(
         async () => {
-          if (platform !== 'spotify') return [];
+          if (!services?.[platform]?.getUserPlaylists) return [];
           return (
             await remote(platform, (service, token) => service.getUserPlaylists(token, 50))
           ).map((item) => ({ ...item, type: 'playlist', platform }));
@@ -116,7 +130,7 @@ export const useMusicSearch = ({
         'Could not load playlists. Try again.',
         options,
       ),
-    [library.run, remote],
+    [library.run, remote, services],
   );
   const loadPlaylistTracks = useCallback(
     (id, platform) => {

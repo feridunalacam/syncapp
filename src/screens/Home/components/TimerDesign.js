@@ -36,7 +36,8 @@ export const TimerDesign = ({
           </Text>
         </View>
         <Text style={{ color: theme.textSecondary, fontSize: 12, fontVariant: ['tabular-nums'] }}>
-          {currentRound} / {selectedRoutine?.rounds || 1} rounds
+          {currentRound} / {selectedRoutine?.rounds || 1} round
+          {(selectedRoutine?.rounds || 1) === 1 ? '' : 's'}
         </Text>
       </View>
       <Text

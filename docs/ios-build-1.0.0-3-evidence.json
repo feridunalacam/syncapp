@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "platform": "iOS",
+  "version": "1.0.0",
+  "buildNumber": "3",
+  "bundleIdentifier": "com.feridun.syncapp",
+  "sourceCommit": "a9b403e252e661e0cdae56b0d7f0fc6476389205",
+  "runtimeSourceRevision": "d918565",
+  "easBuildId": "fe9f4602-dfa6-4b76-b569-b6964a48101c",
+  "requestedAtUTC": "2026-11-12T12:23:52.850Z",
+  "lastObservedStatus": "FINISHED; delivery HOLD after subsequent MusicKit service change invalidated the signing profile",
+  "distribution": "STORE",
+  "buildProfile": "production",
+  "paidPlanActivated": false,
+  "sourceChecks": {
+    "testsPassed": 576,
+    "iOSHermesExportPassed": true,
+    "androidHermesExportPassed": true,
+    "nativeAndOwnerSpotifyQASource": "585b64b; see music-auth-qa-evidence.json"
+  },
+  "signingPreparation": {
+    "appleProfileId": "99FY234H79",
+    "newProfileUUID": "88cf2fa6-3bce-4602-a329-6942d273de6a",
+    "profileSHA256": "a4828572d4703f53367f1ae52a32fc48e53aff1724207f54059ad1d7524f8c8c",
+    "certificateUnchanged": true,
+    "sameEASProfileAndStoreBindingPreserved": true,
+    "appleSignInDefaultPresentInImportedProfile": true,
+    "archiveSignatureAndEntitlementsVerified": true,
+    "embeddedProfileSupersededAfterMusicKit": true
+  },
+  "delivery": {
+    "buildFinished": true,
+    "submittedToAppStoreConnect": false,
+    "testFlightReady": false,
+    "externalBetaReviewSubmitted": false,
+    "appReviewSubmitted": false,
+    "publicRelease": false,
+    "readyToSubmit": false
+  },
+  "limitations": [
+    "Apple invalidated this profile when MusicKit was subsequently enabled. A final regenerated profile and replacement build are pending; this archive was not submitted.",
+    "The delivered TestFlight build remains 1.0.0 (2).",
+    "Google owner login, cold restart and local sign-out were verified separately in the d918565 Debug client.",
+    "MusicKit service is enabled; real Apple sign-in on device and subscriber playback remain unverified.",
+    "Real Apple subscription lifecycle remains unverified; production receipt filtering excludes sandbox and isolated review configuration is unimplemented."
+  ],
+  "completedAtUTC": "2026-11-12T12:28:26.421Z",
+  "artifact": {
+    "bytes": 23567744,
+    "sha256": "85e5f5d96a9cbeb5f7596fdaef4dcdde3c789b3a9007da5e1244fdf5fecfc3ac"
+  },
+  "archiveVerification": {
+    "zipEntryCount": 140,
+    "zipCRCAndPathsPassed": true,
+    "strictDeepCodesignPassed": true,
+    "packageChecksPassed": 20,
+    "actualSignerCertificateMatches": true,
+    "bothAppleNativeModulesPresent": true,
+    "productionPublicRuntimeMatchesApprovedPriorStoreBuild": true,
+    "syntheticQAFixturesAbsent": true,
+    "privacyManifestCount": 15,
+    "privacyCollectionDeclarations": 11,
+    "distinctPrivacyCategories": 8,
+    "officialXcodeAggregate": false
+  }
+}

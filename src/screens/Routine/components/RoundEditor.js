@@ -4,6 +4,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../../context/ThemeContext';
 import DurationField from './DurationField';
+import MusicArtwork from '../../../components/common/MusicArtwork';
 
 export const RoundEditor = ({
   roundNum,
@@ -63,7 +64,15 @@ export const RoundEditor = ({
             accessibilityLabel={`Choose round ${roundNum} ${label.toLowerCase()} audio`}
             style={styles.audioPress}
           >
-            {!source && <Ionicons name="add" size={16} color={theme.textSecondary} />}
+            {source ? (
+              <MusicArtwork
+                item={source}
+                size={28}
+                icon={playlist ? 'albums-outline' : 'musical-note'}
+              />
+            ) : (
+              <Ionicons name="add" size={16} color={theme.textSecondary} />
+            )}
             <Text
               numberOfLines={2}
               style={{

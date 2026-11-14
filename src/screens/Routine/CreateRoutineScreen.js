@@ -14,6 +14,8 @@ import { useTheme } from '../../context/ThemeContext';
 import ScreenWrapper from '../../components/common/ScreenWrapper';
 import GlassSurface from '../../components/common/GlassSurface';
 import FormFieldError from '../../components/common/FormFieldError';
+import AppleMusicWorkoutControl from '../../components/common/AppleMusicWorkoutControl';
+import RoutineSoundtrackControl from '../../components/common/RoutineSoundtrackControl';
 import { MusicSearchModal } from './components/MusicSearchModal';
 import { RoundEditor } from './components/RoundEditor';
 import { RoundConfiguration } from './components/RoundConfiguration';
@@ -23,12 +25,14 @@ import { getRoutineDuration } from '../../domain/routines';
 import { normalizeAlertConfig } from '../../domain/alerts';
 import useAlertPreview from '../../hooks/useAlertPreview';
 import useSpotifyConnection from '../Profile/hooks/useSpotifyConnection';
+import { useAppleMusicConnection } from '../../context/AppleMusicConnectionContext';
 import { useRoutineForm } from './hooks/useRoutineForm';
 
 export default function CreateRoutineScreen({ navigation, route }) {
-  const { addRoutine, updateRoutine } = useRoutineContext();
+  const { addRoutine, updateRoutine, saveOwner } = useRoutineContext();
   const { theme } = useTheme();
   const spotify = useSpotifyConnection();
+  const apple = useAppleMusicConnection();
   const { previewCue, stopPreview, previewing } = useAlertPreview();
 
   const templateRoutine = route?.params?.templateRoutine || null;
@@ -38,8 +42,15 @@ export default function CreateRoutineScreen({ navigation, route }) {
     templateRoutine,
     addRoutine,
     updateRoutine,
+    saveOwner,
+    isCurrent: () => navigation.isFocused?.() !== false,
     onSave: () => navigation.goBack(),
   });
+
+  useEffect(
+    () => navigation.addListener?.('blur', form.invalidateSave),
+    [navigation, form.invalidateSave],
+  );
 
   // Check if any advanced settings were modified (for auto-expanding)
   const hasAdvancedSettingsModified =
@@ -58,11 +69,18 @@ export default function CreateRoutineScreen({ navigation, route }) {
   const [showSongPicker, setShowSongPicker] = useState(false);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(hasAdvancedSettingsModified);
   const [showSoundPicker, setShowSoundPicker] = useState(null);
-  const editorRoutineId = useRef(templateRoutine?.id);
+  const editorIdentity = templateRoutine?.id || templateRoutine || null;
+  const editorRoutineId = useRef(editorIdentity);
+  const editorGeneration = useRef({ identity: editorIdentity, value: 0 });
+  if (editorGeneration.current.identity !== editorIdentity)
+    editorGeneration.current = {
+      identity: editorIdentity,
+      value: editorGeneration.current.value + 1,
+    };
 
   useEffect(() => {
-    if (editorRoutineId.current === templateRoutine?.id) return;
-    editorRoutineId.current = templateRoutine?.id;
+    if (editorRoutineId.current === editorIdentity) return;
+    editorRoutineId.current = editorIdentity;
     stopPreview();
     setShowSoundPicker(null);
     setShowSongPicker(false);
@@ -76,7 +94,7 @@ export default function CreateRoutineScreen({ navigation, route }) {
         templateRoutine?.endWorkSound != null ||
         templateRoutine?.endRestSound != null,
     );
-  }, [templateRoutine, stopPreview]);
+  }, [templateRoutine, editorIdentity, stopPreview]);
 
   const handleAudioAlertsChange = (config) => {
     stopPreview();
@@ -197,6 +215,8 @@ export default function CreateRoutineScreen({ navigation, route }) {
         />
         <Pressable
           onPress={handleSave}
+          disabled={form.saving}
+          accessibilityState={{ disabled: form.saving, busy: form.saving }}
           accessibilityRole="button"
           accessibilityLabel={templateRoutine?.id ? 'Update routine' : 'Save routine'}
         >
@@ -210,7 +230,9 @@ export default function CreateRoutineScreen({ navigation, route }) {
               justifyContent: 'center',
             }}
           >
-            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.accent }}>Save</Text>
+            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.accent }}>
+              {form.saving ? 'Saving…' : 'Save'}
+            </Text>
           </GlassSurface>
         </Pressable>
       </View>
@@ -220,12 +242,26 @@ export default function CreateRoutineScreen({ navigation, route }) {
         </View>
       ) : null}
 
+      {form.saveError ? (
+        <View style={{ paddingHorizontal: theme.spacing.xl, paddingTop: theme.spacing.xs }}>
+          <FormFieldError message={form.saveError} />
+        </View>
+      ) : null}
       <ScrollView
         style={styles.fill}
         contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
       >
         <View>
+          <RoutineSoundtrackControl
+            key={editorGeneration.current.value}
+            soundtrack={form.soundtrack}
+            routineName={form.name}
+            editable
+            onChange={(item, shuffle) => form.setSoundtrack(item ? { ...item, shuffle } : null)}
+            style={styles.appleMusic}
+          />
+          {apple.player?.isActive?.() && <AppleMusicWorkoutControl style={styles.appleMusic} />}
           {/* Round Configuration */}
           <RoundConfiguration
             totalDurationSec={getRoutineDuration({
@@ -260,13 +296,25 @@ export default function CreateRoutineScreen({ navigation, route }) {
             }}
           />
 
-          <PlaylistCard
-            roundsOrder={form.roundsOrder}
-            onShuffleForWork={form.handleShuffleForWork}
-            onShuffleForRest={form.handleShuffleForRest}
-            onConnect={spotify.connect}
-            connecting={spotify.connecting}
-          />
+          {spotify.available && (
+            <PlaylistCard
+              roundsOrder={form.roundsOrder}
+              onShuffleForWork={form.handleShuffleForWork}
+              onShuffleForRest={form.handleShuffleForRest}
+              onConnect={spotify.connect}
+              connecting={spotify.connecting}
+            />
+          )}
+          {apple.timedAvailable && (
+            <PlaylistCard
+              platformId="appleMusic"
+              roundsOrder={form.roundsOrder}
+              onShuffleForWork={form.handleShuffleForWork}
+              onShuffleForRest={form.handleShuffleForRest}
+              onConnect={apple.connect}
+              connecting={apple.connecting}
+            />
+          )}
           <View
             style={{
               flexDirection: 'row',
@@ -419,6 +467,10 @@ export default function CreateRoutineScreen({ navigation, route }) {
         attachPlaylistToRound={handleAttachPlaylist}
         selectedRoundForSong={selectedRoundForSong}
         songType={songType}
+        routineName={form.name}
+        routineId={editorGeneration.current.value}
+        routineSoundtrack={form.soundtrack}
+        onSelectRoutineSoundtrack={form.setSoundtrack}
         roundWorkSongs={form.roundWorkSongs}
         roundRestSongs={form.roundRestSongs}
         roundWorkPlaylists={form.roundWorkPlaylists}
@@ -428,4 +480,7 @@ export default function CreateRoutineScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({ fill: { flex: 1 } });
+const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  appleMusic: { marginBottom: 16 },
+});

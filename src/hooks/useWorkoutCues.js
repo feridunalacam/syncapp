@@ -3,12 +3,19 @@ import { planSessionCues } from '../domain/alerts';
 import { playWorkoutCue, stopWorkoutCues } from '../services/alerts/player';
 
 /** Session time is the source of truth; audio never advances the workout clock. */
-export default function useWorkoutCues(session) {
+export default function useWorkoutCues(session, localCuesAllowed = true) {
   const previous = useRef(null);
   const played = useRef(new Set());
   const revision = useRef(0);
   const [alertError, setAlertError] = useState(null);
   useEffect(() => {
+    if (!localCuesAllowed) {
+      revision.current++;
+      stopWorkoutCues().catch(() => {});
+    }
+  }, [localCuesAllowed]);
+  useEffect(() => {
+    if (!localCuesAllowed) return;
     const before = previous.current;
     previous.current = session;
     const newRun =
@@ -37,7 +44,11 @@ export default function useWorkoutCues(session) {
       // Never begin a sound loaded after its useful timing window.
       const remainingInSecond = session.remainingMs % 1000 || 1000;
       const expiresAt = session.updatedAt + (event.kind === 'count' ? remainingInSecond : 1000);
-      playWorkoutCue({ ...event, expiresAt })
+      playWorkoutCue({
+        ...event,
+        expiresAt,
+        resumeMusic: session.status === 'running' || session.status === 'completed',
+      })
         .then(() => {
           if (version === revision.current) setAlertError(null);
         })
@@ -46,7 +57,7 @@ export default function useWorkoutCues(session) {
             setAlertError(error.message || 'An alert could not be played.');
         });
     }
-  }, [session]);
+  }, [session, localCuesAllowed]);
   useEffect(
     () => () => {
       revision.current++;

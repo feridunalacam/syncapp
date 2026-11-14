@@ -38,7 +38,8 @@ export function createMusicConnections({ initial, save, onChange, services, now 
     if (refreshes.has(id)) return refreshes.get(id);
     const current = state[id];
     const version = revisions[id] || 0;
-    if (!current?.connected || !current.refreshToken) return Promise.resolve(null);
+    if (!current?.connected || !current.refreshToken || !services[id]?.getAccessToken)
+      return Promise.resolve(null);
     const job = (async () => {
       const result = await services[id].getAccessToken(current.refreshToken);
       if (disposed || version !== (revisions[id] || 0)) return null;

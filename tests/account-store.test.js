@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { transformSync } from '@babel/core';
-import { createAccountStore, clearAccountStore, sanitizeBackup } from '../src/lib/accountStore.js';
+import {
+  createAccountStore,
+  clearAccountStore,
+  discoverAccountNamespaces,
+  sanitizeBackup,
+} from '../src/lib/accountStore.js';
 
 function memoryStorage(initial = {}, hooks = {}) {
   const values = new Map(Object.entries(initial));
@@ -69,6 +74,36 @@ test('queued writes keep snapshot and dirty counter consistent', async () => {
   assert.equal(snapshot.meta.dirty, true);
   await account.setString('profileBio', 'Latest bio');
   assert.equal((await account.snapshot()).meta.counter, 3);
+});
+
+test('damaged local JSON fails closed while missing and valid null records keep their fallback semantics', async () => {
+  for (const userId of [null, 'a']) {
+    const key = userId ? scopedKey(userId, 'routines') : 'routines';
+    const raw = '[{"id":"recoverable"},';
+    const base = memoryStorage({ [key]: raw });
+    const before = new Map(base.values);
+    const storage = createAccountStore(base, userId);
+    await assert.rejects(storage.prepare(), /Saved records could not be read/);
+    await assert.rejects(storage.getJSON('routines', []), /Saved records could not be read/);
+    assert.deepEqual(base.values, before);
+    base.values.set(key, 'null');
+    await storage.prepare();
+    assert.equal(await storage.getJSON('routines', []), null);
+    base.values.delete(key);
+    assert.deepEqual(await storage.getJSON('routines', []), []);
+  }
+});
+
+test('damaged guest or account JSON cannot be reserved, imported or removed', async () => {
+  for (const key of ['routines', 'posts', 'profileSocialLinks', scopedKey('a', 'routines')]) {
+    const base = memoryStorage({ routines: '[{"id":"guest"}]', [key]: '{recoverable' });
+    const before = new Map(base.values);
+    await assert.rejects(
+      createAccountStore(base, 'a').importGuestData(),
+      /Saved records could not be read/,
+    );
+    assert.deepEqual(base.values, before);
+  }
 });
 
 test('guest import preserves account edits, merges identities, and imports only once', async () => {
@@ -466,6 +501,280 @@ test('valid restore keeps a recoverable device copy and rejects malformed format
     /invalid routines/,
   );
   assert.deepEqual(await account.getJSON('routines'), [{ id: 'cloud-copy' }]);
+});
+
+test('the TestFlight 11 recovery copy restores Phone11Check alongside Nns without changing guest or cloud copies', async () => {
+  const legacy = JSON.stringify({
+    payload: payload({
+      routines: [{ id: 'phone', name: 'Phone11Check' }],
+      profileBio: 'Earlier bio',
+    }),
+    meta: { revision: 2, counter: 4, dirty: true },
+  });
+  const base = memoryStorage({
+    routines: '[{"id":"guest-private"}]',
+    '@syncapp_guest_import_cleanup': '{"userId":"other-account","entries":[]}',
+    [scopedKey('a', 'routines')]: '[{"id":"nns","name":"Nns"}]',
+    [scopedKey('a', 'profileBio')]: 'Current bio',
+    [scopedKey('a', '@syncmeta')]: '{"revision":3,"counter":5,"dirty":false}',
+    [scopedKey('a', '@before-cloud-restore')]: legacy,
+  });
+  let notifications = 0;
+  const account = createAccountStore(base, 'a', () => notifications++);
+  const before = new Map(base.values);
+  const preview = await account.getRecoveryPreview();
+  assert.equal(preview.routineCount, 1);
+  assert.deepEqual(preview.routineNames, ['Phone11Check']);
+  assert.equal(preview.updatedAt, null, 'Legacy copies do not invent a capture time');
+  assert.deepEqual(base.values, before, 'Review and cancellation are read-only');
+  assert.equal(await account.recoverDeviceCopy(preview.intent), true);
+  assert.deepEqual(
+    (await account.getJSON('routines')).map((row) => row.name),
+    ['Nns', 'Phone11Check'],
+  );
+  assert.equal(await account.getString('profileBio'), 'Current bio');
+  assert.equal(base.values.get(scopedKey('a', '@before-cloud-restore')), legacy);
+  assert.equal(base.values.get('routines'), before.get('routines'));
+  assert.equal(
+    base.values.get('@syncapp_guest_import_cleanup'),
+    before.get('@syncapp_guest_import_cleanup'),
+  );
+  assert.equal(notifications, 0, 'Recovery itself never schedules an upload');
+  assert.equal((await account.snapshot()).meta.recoveryPending, true);
+  assert.equal((await account.snapshot()).meta.revision, 3);
+});
+
+test('bounded recovery keeps the original and latest successful device copies with exact local audio', async () => {
+  const base = memoryStorage();
+  const account = createAccountStore(base, 'a');
+  await account.replaceFromCloud(payload({ routines: [{ id: 'nns', name: 'Nns' }] }), 1, 0);
+  const original = base.values.get(scopedKey('a', '@before-cloud-restore'));
+  const phone = {
+    id: 'phone',
+    name: 'Phone11Check',
+    workSong: { id: 'audio', uri: 'file:///phone.mp3' },
+  };
+  await account.setJSON('routines', [phone]);
+  const before = await account.snapshot();
+  await account.replaceFromCloud(
+    payload({ routines: [{ id: 'nns', name: 'Nns' }] }),
+    3,
+    before.meta.counter,
+  );
+  assert.equal(base.values.get(scopedKey('a', '@before-cloud-restore')), original);
+  const preview = await account.getRecoveryPreview();
+  assert.deepEqual(preview.routineNames, ['Phone11Check']);
+  assert.equal(Number.isFinite(Date.parse(preview.updatedAt)), true);
+  const latest = base.values.get(scopedKey('a', '@latest-before-cloud-restore'));
+  const repeatedRestore = await account.snapshot();
+  await account.replaceFromCloud(
+    payload({ routines: [{ id: 'nns', name: 'Nns' }] }),
+    4,
+    repeatedRestore.meta.counter,
+  );
+  assert.equal(
+    base.values.get(scopedKey('a', '@latest-before-cloud-restore')),
+    latest,
+    'Repeating the same restore must not discard the only Phone11Check copy',
+  );
+  const refreshedPreview = await account.getRecoveryPreview();
+  assert.deepEqual(refreshedPreview.routineNames, ['Phone11Check']);
+  assert.equal(await account.recoverDeviceCopy(refreshedPreview.intent), true);
+  assert.deepEqual(await account.getJSON('routines'), [{ id: 'nns', name: 'Nns' }, phone]);
+  assert.equal(base.values.get(scopedKey('a', '@latest-before-cloud-restore')), latest);
+  assert.equal((await account.snapshot()).payload.data.routines[1].workSong.uri, null);
+  assert.equal(
+    [...base.values.keys()].filter((key) => key.endsWith('before-cloud-restore')).length,
+    2,
+  );
+});
+
+test('keep-both recovery preserves same-ID variants and repeated recovery does not add copies', async () => {
+  const base = memoryStorage({
+    [scopedKey('a', 'routines')]: '[{"id":"same","name":"Current"}]',
+    [scopedKey('a', '@before-cloud-restore')]: JSON.stringify({
+      payload: payload({
+        routines: [{ id: 'same', name: 'Phone11Check' }],
+        completedRoutines: [{ sessionId: 'saved-session', id: 'same', completedAt: 'yesterday' }],
+      }),
+    }),
+  });
+  const account = createAccountStore(base, 'a');
+  const preview = await account.getRecoveryPreview();
+  await account.recoverDeviceCopy(preview.intent);
+  const first = await account.getJSON('routines');
+  assert.equal(first[0].id, 'same');
+  assert.deepEqual(
+    first.map((row) => row.name),
+    ['Current', 'Phone11Check'],
+  );
+  assert.notEqual(first[1].id, 'same');
+  await account.recoverDeviceCopy((await account.getRecoveryPreview()).intent);
+  assert.deepEqual(await account.getJSON('routines'), first);
+  assert.equal((await account.getJSON('completedRoutines')).length, 1);
+});
+
+test('recovery reattaches exact saved audio to unchanged identities without duplicating reordered properties', async () => {
+  const saved = {
+    id: 'phone',
+    name: 'Phone11Check',
+    workSong: { id: 'song', uri: 'content://original-file' },
+  };
+  const base = memoryStorage();
+  const account = createAccountStore(base, 'a');
+  await account.setJSON('routines', [saved]);
+  await account.replaceFromCloud(
+    payload({
+      routines: [{ name: 'Phone11Check', id: 'phone', workSong: { uri: null, id: 'song' } }],
+    }),
+    3,
+    1,
+  );
+  // Simulate an earlier restore that lost the local link, while the recovery
+  // record still contains the exact original native URI.
+  await account.setJSON('routines', [
+    { name: 'Phone11Check', id: 'phone', workSong: { uri: null, id: 'song' } },
+  ]);
+  const review = await account.getRecoveryPreview();
+  await account.recoverDeviceCopy(review.intent);
+  const recovered = await account.getJSON('routines');
+  assert.equal(recovered.length, 1);
+  assert.equal(recovered[0].workSong.uri, 'content://original-file');
+  assert.equal((await account.snapshot()).payload.data.routines[0].workSong.uri, null);
+});
+
+test('failed or cancelled latest-copy commits roll back current records and both saved copies', async () => {
+  for (const mode of ['failure', 'workout']) {
+    let active = false;
+    let allowed = true;
+    const base = memoryStorage(
+      {},
+      {
+        beforeSet: (key) => {
+          if (!active || key !== scopedKey('a', '@latest-before-cloud-restore')) return;
+          active = false;
+          if (mode === 'failure') throw new Error('Recovery storage unavailable');
+          allowed = false;
+        },
+      },
+    );
+    const account = createAccountStore(base, 'a');
+    await account.setJSON('routines', [{ id: 'phone', name: 'Phone11Check' }]);
+    let before = await account.snapshot();
+    await account.replaceFromCloud(
+      payload({ routines: [{ id: 'nns', name: 'Nns' }] }),
+      3,
+      before.meta.counter,
+    );
+    await account.setString('profileBio', 'Latest local bio');
+    before = await account.snapshot();
+    const exact = new Map(base.values);
+    active = true;
+    const replacing = account.replaceFromCloud(
+      payload({ routines: [{ id: 'other' }] }),
+      4,
+      before.meta.counter,
+      () => allowed,
+    );
+    if (mode === 'failure') await assert.rejects(replacing, /Recovery storage unavailable/);
+    else assert.equal(await replacing, false);
+    assert.deepEqual(base.values, exact);
+    assert.deepEqual((await account.getRecoveryPreview()).routineNames, ['Phone11Check']);
+  }
+});
+
+test('recovery intents reject local edits, different adapters, namespaces and mismatched saved ownership', async () => {
+  const base = memoryStorage();
+  const account = createAccountStore(base, 'a');
+  await account.setJSON('routines', [{ id: 'phone' }]);
+  await account.replaceFromCloud(payload({ routines: [{ id: 'cloud' }] }), 3, 1);
+  const preview = await account.getRecoveryPreview();
+  assert.equal(await createAccountStore(base, 'a').recoverDeviceCopy(preview.intent), false);
+  assert.equal(await createAccountStore(base, 'b').getRecoveryPreview(), null);
+  await assert.rejects(
+    createAccountStore(base, null).getRecoveryPreview(),
+    /verified account namespace/,
+  );
+  await assert.rejects(
+    createAccountStore(base, null).recoverDeviceCopy(preview.intent),
+    /verified account namespace/,
+  );
+  await assert.rejects(
+    createAccountStore(base, 'a', undefined, { namespace: 'unresolved:a' }).getRecoveryPreview(),
+    /verified account namespace/,
+  );
+  assert.equal(
+    await createAccountStore(base, 'a', undefined, {
+      namespace: 'review:1:a',
+    }).getRecoveryPreview(),
+    null,
+  );
+  await account.setString('profileBio', 'Concurrent edit');
+  const exact = new Map(base.values);
+  assert.equal(await account.recoverDeviceCopy(preview.intent), false);
+  assert.deepEqual(base.values, exact);
+  const damaged = JSON.parse(base.values.get(scopedKey('a', '@before-cloud-restore')));
+  damaged.namespace = 'b';
+  base.values.set(scopedKey('a', '@before-cloud-restore'), JSON.stringify(damaged));
+  await assert.rejects(account.getRecoveryPreview(), /different account/);
+});
+
+test('a workout beginning during recovery rolls back exact records and preserves the pinned copy', async () => {
+  let allowed = true;
+  let recovering = false;
+  const base = memoryStorage(
+    {
+      [scopedKey('a', 'routines')]: '[{"id":"nns"}]',
+      [scopedKey('a', '@before-cloud-restore')]: JSON.stringify({
+        payload: payload({ routines: [{ id: 'phone' }] }),
+      }),
+    },
+    {
+      beforeSet: (key) => {
+        if (recovering && key === scopedKey('a', 'routines')) allowed = false;
+      },
+    },
+  );
+  const account = createAccountStore(base, 'a');
+  const preview = await account.getRecoveryPreview();
+  const exact = new Map(base.values);
+  recovering = true;
+  assert.equal(await account.recoverDeviceCopy(preview.intent, () => allowed), false);
+  assert.deepEqual(base.values, exact);
+});
+
+test('interrupted latest-copy rollback is retried before a new adapter can read mixed records', async () => {
+  let fail = false;
+  let rollbackUnavailable = false;
+  const base = memoryStorage(
+    {},
+    {
+      beforeSet: (key, raw) => {
+        if (!fail) return;
+        if (key === scopedKey('a', '@latest-before-cloud-restore') && !rollbackUnavailable) {
+          rollbackUnavailable = true;
+          throw new Error('Latest-copy commit failed');
+        }
+        if (rollbackUnavailable) throw new Error('Rollback unavailable');
+      },
+    },
+  );
+  const account = createAccountStore(base, 'a');
+  await account.setJSON('routines', [{ id: 'phone', name: 'Phone11Check' }]);
+  await account.replaceFromCloud(payload({ routines: [{ id: 'nns' }] }), 3, 1);
+  const exact = new Map(base.values);
+  const before = await account.snapshot();
+  fail = true;
+  await assert.rejects(
+    account.replaceFromCloud(payload({ routines: [{ id: 'new-cloud' }] }), 4, before.meta.counter),
+    /Rollback unavailable/,
+  );
+  const reopened = createAccountStore(base, 'a');
+  await assert.rejects(reopened.getRecoveryPreview(), /Rollback unavailable/);
+  fail = false;
+  await reopened.prepare();
+  assert.deepEqual(base.values, exact);
+  assert.deepEqual((await reopened.getRecoveryPreview()).routineNames, ['Phone11Check']);
 });
 
 test('a failed cloud replacement rolls back exact local media and preserves a queued edit', async () => {
@@ -875,4 +1184,212 @@ test('one account token queue never blocks another account and explicit invalida
   await Promise.all([a, later, adapter.clearAccountPlatforms('a')]);
   assert.equal(values.has('syncapp.music.credentials.a'), false);
   assert.equal(values.has('syncapp.music.credentials.b'), true);
+});
+
+test('production keeps legacy keys while review and unresolved records isolate the same account', async () => {
+  const guest = '[{"id":"guest-private"}]';
+  const legacy = '[{"id":"production-private"}]';
+  const damagedProductionJournal = '{recoverable-production-journal';
+  const base = memoryStorage({
+    routines: guest,
+    [scopedKey('a', 'routines')]: legacy,
+    [scopedKey('a', '@cloud-restore-pending')]: damagedProductionJournal,
+  });
+  const review = createAccountStore(base, 'a', undefined, { namespace: 'review:1:a' });
+  const unresolved = createAccountStore(base, 'a', undefined, { namespace: 'unresolved:a' });
+  assert.equal(review.namespace, 'review:1:a');
+  assert.equal(review.userId, 'a');
+  assert.equal(review.allowGuestImport, false);
+  await review.prepare();
+  await review.setJSON('routines', [{ id: 'review-private' }]);
+  await unresolved.setJSON('routines', [{ id: 'unresolved-private' }]);
+  assert.deepEqual(await review.getJSON('routines'), [{ id: 'review-private' }]);
+  assert.deepEqual(await unresolved.getJSON('routines'), [{ id: 'unresolved-private' }]);
+  assert.equal(base.values.get('routines'), guest);
+  assert.equal(base.values.get(scopedKey('a', 'routines')), legacy);
+  assert.equal(base.values.get(scopedKey('a', '@cloud-restore-pending')), damagedProductionJournal);
+  base.values.delete(scopedKey('a', '@cloud-restore-pending'));
+  const production = createAccountStore(base, 'a');
+  assert.equal(production.namespace, 'a');
+  assert.equal(production.allowGuestImport, true);
+  assert.deepEqual(await production.getJSON('routines'), [{ id: 'production-private' }]);
+});
+
+test('a caller cannot select another account or an unrecognized local namespace', async () => {
+  const base = memoryStorage({ routines: 'guest remains untouched' });
+  for (const namespace of ['b', 'review:1:b', 'unresolved:b', 'review:2:a', '../a', '']) {
+    assert.throws(
+      () => createAccountStore(base, 'a', undefined, { namespace }),
+      /Invalid account storage scope/,
+    );
+    await assert.rejects(
+      clearAccountStore(base, 'a', { namespace }),
+      /Invalid account storage scope/,
+    );
+  }
+  assert.throws(
+    () => createAccountStore(base, null, undefined, { namespace: 'a' }),
+    /Invalid account storage scope/,
+  );
+  assert.equal(base.values.size, 1);
+});
+
+test('review and unresolved cannot inspect, claim, import or clean guest records even when import is requested', async () => {
+  for (const namespace of ['review:1:a', 'unresolved:a']) {
+    const originals = {
+      routines: '[{"id":"guest-private"}]',
+      '@syncapp_guest_import_owner': 'a',
+      '@syncapp_guest_import_claim': 'a',
+      '@syncapp_guest_import_cleanup': JSON.stringify({
+        userId: 'a',
+        entries: [['routines', '[{"id":"guest-private"}]']],
+      }),
+    };
+    const base = memoryStorage(originals);
+    const read = base.getItem;
+    base.getItem = (key) => {
+      assert.ok(key.startsWith(scopedKey(namespace, '')), `Unexpected guest/global read: ${key}`);
+      return read(key);
+    };
+    const account = createAccountStore(base, 'a', undefined, { namespace, allowGuestImport: true });
+    assert.deepEqual(await account.guestImportState(), {
+      hasGuestData: false,
+      importComplete: false,
+    });
+    await assert.rejects(account.importGuestData(), /cannot be imported/);
+    await account.setString('profileBio', 'Only this scope');
+    await clearAccountStore(base, 'a', { namespace });
+    assert.deepEqual(base.values, new Map(Object.entries(originals)));
+  }
+});
+
+test('closing a review namespace drains and rejects stale writes without closing production or unresolved', async () => {
+  const pending = deferred();
+  const reached = deferred();
+  const namespace = 'review:1:a';
+  const base = memoryStorage(
+    {},
+    {
+      beforeSet: (key) => {
+        if (key !== scopedKey(namespace, 'profileBio')) return;
+        reached.resolve();
+        return pending.promise;
+      },
+    },
+  );
+  const review = createAccountStore(base, 'a', undefined, { namespace });
+  const production = createAccountStore(base, 'a');
+  const unresolved = createAccountStore(base, 'a', undefined, { namespace: 'unresolved:a' });
+  const oldWrite = review.setString('profileBio', 'Held review write');
+  await reached.promise;
+  const deleting = clearAccountStore(base, 'a', { namespace });
+  const lateWrite = review.setString('profileBio', 'Late review write');
+  await production.setString('profileBio', 'Production remains usable');
+  await unresolved.setString('profileBio', 'Unresolved remains separate');
+  pending.resolve();
+  await Promise.all([oldWrite, deleting]);
+  assert.equal(await lateWrite, false);
+  assert.equal(
+    await createAccountStore(base, 'a', undefined, { namespace }).setString(
+      'profileBio',
+      'Reopened',
+    ),
+    false,
+  );
+  assert.equal(await production.getString('profileBio'), 'Production remains usable');
+  assert.equal(await unresolved.getString('profileBio'), 'Unresolved remains separate');
+  assert.equal(
+    [...base.values.keys()].some((key) => key.startsWith(scopedKey(namespace, ''))),
+    false,
+  );
+});
+
+test('an in-flight review restore and its journal cannot overwrite or clear production during deletion', async () => {
+  const pending = deferred();
+  const reached = deferred();
+  const namespace = 'review:1:a';
+  let held = false;
+  const base = memoryStorage(
+    { [scopedKey('a', 'routines')]: '[{"id":"production"}]' },
+    {
+      beforeSet: (key) => {
+        if (key !== scopedKey(namespace, 'routines') || held) return;
+        held = true;
+        reached.resolve();
+        return pending.promise;
+      },
+    },
+  );
+  const review = createAccountStore(base, 'a', undefined, { namespace });
+  const restoring = review.replaceFromCloud(payload({ routines: [{ id: 'review-cloud' }] }), 2, 0);
+  await reached.promise;
+  assert.ok(base.values.has(scopedKey(namespace, '@cloud-restore-pending')));
+  const deleting = clearAccountStore(base, 'a', { namespace });
+  const production = createAccountStore(base, 'a');
+  await production.setJSON('routines', [{ id: 'new-production' }]);
+  pending.resolve();
+  await Promise.all([restoring, deleting]);
+  assert.deepEqual(await production.getJSON('routines'), [{ id: 'new-production' }]);
+  assert.equal(
+    [...base.values.keys()].some((key) => key.startsWith(scopedKey(namespace, ''))),
+    false,
+  );
+});
+
+test('deletion discovers only exact existing account namespaces using key names, without reading values', async () => {
+  const base = memoryStorage({
+    [scopedKey('a', 'profileBio')]: 'legacy production',
+    [scopedKey('review:1:a', 'routines')]: 'review',
+    [scopedKey('unresolved:a', '@syncmeta')]: 'unresolved',
+    [scopedKey('ab', 'profileBio')]: 'other account',
+    [scopedKey('review:1:ab', 'routines')]: 'other review account',
+    routines: 'guest',
+  });
+  base.getItem = () => assert.fail('Namespace discovery must not read record values');
+  assert.deepEqual(await discoverAccountNamespaces(base, 'a'), ['a', 'review:1:a', 'unresolved:a']);
+  assert.deepEqual(await discoverAccountNamespaces(base, 'missing'), []);
+});
+
+test('native music credential namespaces use valid distinct keys and deleting review preserves production and guest', async () => {
+  const values = new Map();
+  const base = memoryStorage();
+  const adapter = platformStorageWith({
+    setItemAsync: async (key, value) => {
+      assert.match(key, /^[A-Za-z0-9._-]+$/);
+      values.set(key, value);
+    },
+    getItemAsync: async (key) => values.get(key) ?? null,
+    deleteItemAsync: async (key) => values.delete(key),
+  });
+  const scopes = [undefined, 'a', 'review:1:a', 'unresolved:a'];
+  const optionsFor = (accountId) => ({
+    accountId,
+    storage: createAccountStore(base, accountId ? 'a' : null, undefined, {
+      namespace: accountId,
+    }),
+  });
+  for (const accountId of scopes) {
+    await adapter.savePlatforms(
+      { spotify: { connected: true, accessToken: accountId || 'guest' } },
+      optionsFor(accountId),
+    );
+  }
+  assert.equal(values.size, 4);
+  assert.ok(values.has('syncapp.music.credentials'));
+  assert.ok(values.has('syncapp.music.credentials.a'));
+  for (const accountId of scopes) {
+    assert.equal(
+      (await adapter.loadPlatforms(optionsFor(accountId))).spotify.accessToken,
+      accountId || 'guest',
+    );
+  }
+  await adapter.clearAccountPlatforms('review:1:a');
+  assert.equal(values.size, 3);
+  await assert.rejects(adapter.savePlatforms({}, optionsFor('review:1:a')), /deleted/);
+  assert.equal((await adapter.loadPlatforms(optionsFor('a'))).spotify.accessToken, 'a');
+  assert.equal((await adapter.loadPlatforms(optionsFor(undefined))).spotify.accessToken, 'guest');
+  assert.equal(
+    (await adapter.loadPlatforms(optionsFor('unresolved:a'))).spotify.accessToken,
+    'unresolved:a',
+  );
 });

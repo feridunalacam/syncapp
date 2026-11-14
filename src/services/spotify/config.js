@@ -1,4 +1,11 @@
 import Constants, { ExecutionEnvironment } from 'expo-constants';
+import { spotifyAvailable } from './availability';
+
+export const SPOTIFY_AVAILABLE = spotifyAvailable({
+  dev: typeof __DEV__ !== 'undefined' && __DEV__,
+  profile: process.env.EXPO_PUBLIC_BUILD_PROFILE,
+  enabled: process.env.EXPO_PUBLIC_SPOTIFY_ENABLED,
+});
 
 // Public OAuth client identifier, not a client secret. Must belong to the app owner.
 export const SPOTIFY_CLIENT_ID =

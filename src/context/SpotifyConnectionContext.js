@@ -7,7 +7,9 @@ import {
   SPOTIFY_CLIENT_ID,
   SPOTIFY_REDIRECT_URI,
   SPOTIFY_SCOPES,
+  SPOTIFY_AVAILABLE,
 } from '../services/spotify/config';
+import { SPOTIFY_UNAVAILABLE_MESSAGE } from '../services/spotify/availability';
 import { computeAccessTokenExpiresAt } from '../services/spotify/auth';
 
 const Context = createContext(null);
@@ -24,6 +26,10 @@ export function SpotifyConnectionProvider({ children }) {
   const connect = useCallback(async () => {
     if (pending.current || !ready) return;
     setError(null);
+    if (!SPOTIFY_AVAILABLE) {
+      setError(SPOTIFY_UNAVAILABLE_MESSAGE);
+      return;
+    }
     if (IS_EXPO_GO) {
       setError('Open the SyncApp development build to connect Spotify.');
       Alert.alert(
@@ -123,6 +129,7 @@ export function SpotifyConnectionProvider({ children }) {
   return (
     <Context.Provider
       value={{
+        available: SPOTIFY_AVAILABLE,
         connected: !!connectedPlatforms.spotify?.connected,
         connecting,
         error: error || connectionError,

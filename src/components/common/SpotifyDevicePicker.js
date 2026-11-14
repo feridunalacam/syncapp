@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { View, Text, Pressable, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, Pressable, ScrollView, ActivityIndicator, AppState } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useTheme } from '../../context/ThemeContext';
@@ -19,48 +19,99 @@ export default function SpotifyDevicePicker() {
   const [message, setMessage] = useState(null);
   const revision = useRef(0);
   const focused = useRef(false);
+  const foreground = useRef(AppState.currentState === 'active');
+  const connectedRef = useRef(connected);
+  connectedRef.current = connected;
+  const inFlight = useRef(null);
   const refresh = useCallback(
     async (includeDevices) => {
-      const version = ++revision.current;
-      try {
-        const token = await getValidAccessToken('spotify');
-        if (!token) return;
-        const renew = () => refreshToken('spotify');
-        const [player, list] = await Promise.all([
-          services.spotify.getCurrentPlayback(token, renew),
-          includeDevices ? services.spotify.getDevices(token, renew) : Promise.resolve(null),
-        ]);
-        if (!focused.current || version !== revision.current) return;
-        setActive(player?.device || null);
-        if (includeDevices) {
-          if (list?.success === false) setMessage(list.error || 'Could not load Spotify devices.');
-          else {
-            setDevices(list?.devices || []);
-          }
-        }
-      } catch {
-        if (focused.current && version === revision.current)
-          setMessage('Could not refresh devices. Try again.');
-      } finally {
-        if (focused.current && version === revision.current) setLoading(false);
+      const available = () => focused.current && foreground.current && connectedRef.current;
+      if (!available()) return;
+      const previous = inFlight.current;
+      if (previous) {
+        await previous.promise;
+        // Opening the list during a status read requests devices after that read
+        // settles. Focus changes similarly retire the old read before retrying.
+        if (
+          available() &&
+          (previous.version !== revision.current || (includeDevices && !previous.includeDevices))
+        )
+          return refresh(includeDevices);
+        return;
       }
+      const version = revision.current;
+      const current = { version, includeDevices, promise: null };
+      inFlight.current = current;
+      current.promise = (async () => {
+        try {
+          const token = await getValidAccessToken('spotify');
+          if (!available() || version !== revision.current) return;
+          if (!token) {
+            setMessage('Reconnect Spotify to load your devices.');
+            return;
+          }
+          const renew = () => refreshToken('spotify');
+          const [player, list] = await Promise.all([
+            services.spotify.getCurrentPlayback(token, renew),
+            includeDevices ? services.spotify.getDevices(token, renew) : Promise.resolve(null),
+          ]);
+          if (!available() || version !== revision.current) return;
+          setActive(player?.device || null);
+          if (includeDevices) {
+            if (list?.success === false)
+              setMessage(list.error || 'Could not load Spotify devices.');
+            else setDevices(list?.devices || []);
+          }
+        } catch {
+          if (available() && version === revision.current)
+            setMessage('Could not refresh devices. Try again.');
+        } finally {
+          if (available() && version === revision.current) setLoading(false);
+          if (inFlight.current === current) inFlight.current = null;
+        }
+      })();
+      return current.promise;
     },
     [getValidAccessToken, refreshToken, services],
   );
   useFocusEffect(
     useCallback(() => {
       focused.current = true;
-      if (!connected)
-        return () => {
-          focused.current = false;
-        };
-      if (visible) setLoading(true);
-      refresh(visible);
-      const timer = setInterval(() => refresh(visible), 5000);
+      setBusy(null);
+      if (!connected) {
+        setDevices([]);
+        setActive(null);
+        setVisible(false);
+        setLoading(false);
+        setMessage(null);
+      }
+      let timer;
+      let retired = false;
+      let pollVersion = 0;
+      const poll = async () => {
+        const version = pollVersion;
+        await refresh(visible);
+        if (!retired && version === pollVersion && foreground.current && connectedRef.current)
+          timer = setTimeout(poll, 5000);
+      };
+      const activity = (state) => {
+        foreground.current = state === 'active';
+        pollVersion++;
+        revision.current++;
+        clearTimeout(timer);
+        if (!foreground.current || !connected) return;
+        setBusy(null);
+        if (visible) setLoading(true);
+        void poll();
+      };
+      activity(AppState.currentState);
+      const subscription = AppState.addEventListener('change', activity);
       return () => {
+        retired = true;
         focused.current = false;
         revision.current++;
-        clearInterval(timer);
+        clearTimeout(timer);
+        subscription.remove();
       };
     }, [connected, visible, refresh]),
   );
@@ -73,13 +124,17 @@ export default function SpotifyDevicePicker() {
     }
     setBusy(device.id);
     setMessage(null);
+    const version = revision.current;
+    const current = () =>
+      focused.current && foreground.current && connectedRef.current && version === revision.current;
     try {
       const token = await getValidAccessToken('spotify');
+      if (!current()) return;
       if (!token) throw new Error('Reconnect Spotify to choose a device.');
       const result = await services.spotify.selectPlaybackDevice(token, device.id, () =>
         refreshToken('spotify'),
       );
-      if (!focused.current) return;
+      if (!current()) return;
       if (result?.success === false) {
         setMessage(result.error);
         return;
@@ -87,10 +142,10 @@ export default function SpotifyDevicePicker() {
       setActive(result?.playback?.device || device);
       setVisible(false);
     } catch {
-      if (focused.current)
+      if (current())
         setMessage('Spotify could not switch devices. Open Spotify on that device and try again.');
     } finally {
-      if (focused.current) setBusy(null);
+      if (current()) setBusy(null);
     }
   }
   if (!connected) return null;

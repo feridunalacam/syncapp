@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "preparedOn": "2026-11-12",
+  "status": "Offline source validated; no hosted review configuration or paid transaction established",
+  "deliveredStoreBuild": "1.0.0 (4) is a separate earlier artifact and contains none of this review lane",
+  "baseBeforeReviewCommit": "febdd67eed611ed4adff74d65951227e1d98b1a5",
+  "scope": {
+    "supabase": "Existing syncapp project only; no QA project created",
+    "billing": "Separate RevenueCat review project and App Store sandbox canonical verification planned; not created",
+    "production": "Existing production-only receipt boundary preserved",
+    "newServiceCredentialsAndDedicatedReviewAccounts": "Explicit concrete approvals pending; no resources/accounts created"
+  },
+  "implementation": {
+    "serverResolvedScope": "Immutable UUID/lane/namespace/epoch; no client-selected review scope or failure fallback to production",
+    "permanentRegistry": "Only UUID and production/review lane retained after account deletion; pseudonymous personal data, not anonymous",
+    "reviewWindow": "Fixed expiry, terminal revocation, no reuse or reopening of the same UUID",
+    "reviewAccess": "Canonical App Store sandbox receipt, exact supported products and entitlement; maximum five-minute server lease bounded by review reservation and store expiry",
+    "dataIsolation": "Separate review entitlement, backup, generation and webhook storage; production RLS and write triggers fence review identities",
+    "clientIsolation": "Scope-bound queues/cache; cold process restart required for SDK key changes or ambiguous identity mutations; review/unresolved identities cannot import guest data Unknown local scope blocks account-record consumers and storage preparation; a validated cached matching scope remains usable offline without cloud authorization. Stale failure-screen actions cannot affect another account.",
+    "deletion": "Confirmed remote deletion precedes account-scoped cleanup; unknown outcome preserves local data; cleanup failures are reported",
+    "releaseGuard": "iOS preview/production require a distinct valid review public SDK key; no private secret in app config",
+    "releaseMusicPolicy": {
+      "nativeTimedAppleMusic": "Requires explicit owner-development flag, development profile and __DEV__; never enabled by release/preview configuration",
+      "automaticWebMediaImport": "Same development-only boundary; release uses external library links and Files, with direct URL acquisition callbacks blocked",
+      "preservedData": "Existing media records/URLs are not rewritten, deleted or declared licensed",
+      "policyEvidence": "music-release-policy.md"
+    }
+  },
+  "validation": {
+    "wholeSuite": {
+      "command": "Node 22.23.4 --test tests/*.test.js with pinned PGlite module path",
+      "tests": 696,
+      "passed": 696,
+      "failed": 0,
+      "skipped": 0,
+      "log": "/private/tmp/syncapp-final-source-checks/full-tests.log",
+      "logSHA256": "543efecba8bb8979c66b18e6369dd1922bd6e43dfbd72dfb8b11cd4bf358e957"
+    },
+    "actualSql": {
+      "tests": 17,
+      "engine": "PGlite 0.5.16, in-memory only; no local Supabase stack or persistent database",
+      "scope": "Both existing migrations and new migration; real roles/RLS/RPC/FK/triggers and unchanged verify-membership.sql",
+      "advisoryLockFunction": "Native, not stubbed",
+      "regressions": "Old profile write fence and backfill snapshot failures reproduced before fixes",
+      "limits": [
+        "No true two-connection concurrency proof",
+        "No hosted migration, post-deployment advisor or rollback proof"
+      ]
+    },
+    "hermesExports": {
+      "sourceStable": true,
+      "runtimeFileCount": 149,
+      "runtimeManifestSHA256": "893285f59795a686a3776264b2b3d1b01aff1dec1331ce1f8f7a4f2d13bd181c",
+      "environment": "Synthetic public fixtures only; production profile; Ads/Spotify/Apple Music controls/web media extraction disabled; no dotenv; no account/store transaction",
+      "exports": [
+        {
+          "platform": "ios",
+          "exitCode": 0,
+          "hermesBundleCount": 1,
+          "bundleHashes": [
+            "cac8042993c99f53f542103e519bd72b64f05d45b04426a5afa87347447b647b"
+          ],
+          "log": "/private/tmp/syncapp-final-source-checks/export-ios.log"
+        },
+        {
+          "platform": "android",
+          "exitCode": 0,
+          "hermesBundleCount": 1,
+          "bundleHashes": [
+            "edcdfd5e88e50984e0266809187b6de65175a39c6cf01d40eb90c4524cc04428"
+          ],
+          "log": "/private/tmp/syncapp-final-source-checks/export-android.log"
+        }
+      ]
+    },
+    "swiftArtworkHelper": {
+      "result": "PASS",
+      "scope": "Real MusicKit Artwork decoding, template/concrete/missing URLs; not a whole-app native build",
+      "test": "tests/apple-music-artwork.swift"
+    },
+    "freshNativeApp": {
+      "status": "PASS: fresh isolated CNG Release simulator build, final 696-test source",
+      "evidence": "ios-review-source-native-evidence.json",
+      "inspectionSHA256": "8961b75bbedf08c193ee75174cb09702a7952ddea2c1883add6084488bbdc892",
+      "runtimeFilesMatched": 149,
+      "copiedInputsMatched": 183,
+      "runtimeManifestCanonicalSHA256": "893285f59795a686a3776264b2b3d1b01aff1dec1331ce1f8f7a4f2d13bd181c",
+      "architectures": [
+        "x86_64",
+        "arm64"
+      ],
+      "strictDeepSignatureVerified": true,
+      "rootIndependentSignatureAndExecutableBundleHashesMatched": true,
+      "signingScope": "Normal Simulator ad-hoc; not distribution signing",
+      "installedOrLaunched": false,
+      "visualRuntime": "Pending manual Mac unlock; no final native UI result",
+      "liveServices": "Synthetic public fixtures only; no live account/purchase/review setup"
+    },
+    "independentSqlReview": {
+      "result": "PASS",
+      "exactMigrationAndTestHashesMatched": true,
+      "tests": 17,
+      "passed": 17,
+      "skipped": 0,
+      "log": "/private/tmp/syncapp-review-sql-independent-final.log",
+      "scope": "Read-only independent review; no source edits or hosted operations"
+    },
+    "independentGuards": {
+      "appleMusic": {
+        "passed": 52,
+        "historicalGuardManifest": "db377a47f6992603962518486b77145082b8119791bc14b96d2625a427a7fa2e",
+        "subsequentChange": "Friendly unavailable copy and shared preflight fixtures subsequently changed with the web guard; final source hashes and 696-test suite are authoritative."
+      },
+      "webMedia": {
+        "passed": 48,
+        "sourceHashManifest": "ea58e06dda077a1f08567017d64fb0c0187d6e7445652efce15b73626e7647b2"
+      },
+      "accountLocalScope": {
+        "passed": 14,
+        "runtimeSHA256": "d2f086edc236fd9a18b0f53b94e9b75708a29c365b8806d06f78469181a683a6",
+        "scope": "Actual renderer; held first scope, cached offline access, retry/sign-out and stale captured callbacks"
+      },
+      "limits": "Offline tests; no native UI, license grant or live purchase established"
+    }
+  },
+  "sourceFileSHA256": {
+    ".env.example": "fb6da69b44fb66f40a46a196e3f7058bc1e5171f46f68663d7eaae7a535076eb",
+    "eas.json": "bf92803548d844efc8dcf40eac78b44e7c77105ec223131f1af001e8c9bd1c61",
+    "scripts/check-release-config.mjs": "4e5d4ee5bb0cad306455db95624356648c952348f8824a43ab20da9971599b3a",
+    "src/components/account/SubscriptionPanel.js": "629d64d34f26044921194d65d7ade000809050c5d1cc3d85444e29bf92a671ee",
+    "src/components/common/MusicServicesPanel.js": "b3ab4012446bfad6a4f84a689dec8f98a163b3d428590c008d285bffbdaf2966",
+    "src/context/AccountDataContext.js": "d2f086edc236fd9a18b0f53b94e9b75708a29c365b8806d06f78469181a683a6",
+    "src/context/AppleMusicConnectionContext.js": "214d09955ef9098d9c86605f2ab8b54ef62629b9c4addaadacd310ce8916e3e9",
+    "src/context/AuthContext.js": "837e5322fc3e250b41f4ae2a5a8da93d8301a0dbacbed4a1d7aef908256e2017",
+    "src/context/PlatformContext.js": "23b23de10c34fff0ab007423190cea2d6f9fd46b4dfa2bec20367e8a35276cd7",
+    "src/context/SubscriptionContext.js": "decfc1fca6940e6f39f9805a1791b6ce9be89e56222ffec87b80c7584f18e0c4",
+    "src/lib/accountBackupRemote.js": "f8391b22bfa99a4be07edfef403a9e5409c9d6cbc3f60b0190e6192947ec9bcd",
+    "src/lib/accountBillingScope.js": "ac85ca968cb2608f4aa9b3bc2b6c4d435ac82d673e743fea895c33e6eac18ccd",
+    "src/lib/accountStore.js": "eaeb2979d1684f65c95bfb2021a41160c8156fc17751989b1961c8ec9079716d",
+    "src/lib/platformStorage.js": "ab9a2c51cf5423dc86f6516e695897e95c980c5170ba75caf4bb6db82d1491bc",
+    "src/screens/Routine/components/AdvancedSettings.js": "400bdccc1fba81c234fb528a0aa9545c7ffccd0faf12228e351ab40f5fbd2d80",
+    "src/screens/Routine/components/MusicSearchModal.js": "201d629365cd6496b90a6a83df13e02645e6548acaec6bc53058732bc0549186",
+    "src/screens/Routine/components/musicSearch/BrowserAudioPanel.js": "8c808709c43f84f79ce99bbe7cf88edabc1d0c872d79b9db4d82313bf564d6a3",
+    "src/screens/Routine/components/musicSearch/LegacyBrowserAudioPanel.js": "c62ce14e83de456cace090b9eb3339b5d992c7fc159d8ad238ce9f0b4ad00d38",
+    "src/screens/Routine/components/musicSearch/useDeviceMediaPicker.js": "a9cba5cf2a8ff343050f38e5f342c35ba4baea73311274f9cc9b73695475d97f",
+    "src/services/appleMusic/adapter.js": "b957d023958b3a47d8148987dac505e50fb445db340e3ec587ed488c495467d4",
+    "src/services/appleMusic/config.js": "aa736dcae13d09e4829377395cb1053a31fa013456e08fcfbbcf44481b6a0520",
+    "src/services/appleMusic/index.js": "fe846e0f2542b92fb838503e70137584afca1e8546cb51998ab1ec37835e6b25",
+    "src/services/mediaImport/config.js": "f6e25672159bbeaa1e8b46d244506f299056168fd641f5264f310d13522fec1a",
+    "src/services/subscriptions/accountAccess.js": "0ad2417829e43f49ee92ea98f7029c0c16352fd3fdd2da0e45add27930373bda",
+    "src/services/subscriptions/config.js": "384056269146b7c282a080a91e0ae2279f6e3467364a6d86c63c2ad93f90654f",
+    "src/services/subscriptions/controller.js": "74e5f1e65228a5f30af37f9200c7b6162b4f6748bc960a3acee868f7387aceeb",
+    "supabase/config.toml": "7909c7a52fb14930e3f3f4d735d150122d5acbd7b635bd4f142350470099bf4e",
+    "supabase/functions/_shared/review-subscriptions.js": "1f10be0da80e71dba7d6b1bf1ed7955a3d8f79915df69459bb42ce000e9681ba",
+    "supabase/functions/_shared/server.ts": "36791843532ef2fa4cf835b03333d7dc79df8349253fa3062df84b1dc0f0656c",
+    "supabase/functions/revenuecat-review-webhook/index.ts": "f43030c54aa8093e0ce2c20b479b43896c72f76b27e8e8746c5cc7befd739e07",
+    "supabase/functions/revenuecat-webhook/index.ts": "2a6e8dfda5049fcbfc6f4197c906814ed1392d77d6c5badd07b1f219331e7461",
+    "supabase/functions/sync-subscription/index.ts": "b5473cac336b90e4bc0704b1effb1e166f127eaac7f7514a634c9baefe5f3b75",
+    "supabase/migrations/20261112152101_isolated_review_billing.sql": "51678bc4f48d87eaa81268be0aec51388edc4efdabbfe164dbc312fa6d27c299",
+    "tests/account-billing-scope.test.js": "255fc62d1c6f99785dc464e6adb7bb2e04843a076535cc286b862eaf709c8cd1",
+    "tests/account-data-provider.test.js": "11882abd5315dd1fe73db12fbf5c57d3c69daaf10bd6de83e5f61c9f10726695",
+    "tests/account-store.test.js": "e62b49ddadd22c3aa6de97146174d7401f11ad13a46fe7c06d1a1a52cce985ad",
+    "tests/apple-music-availability.test.js": "e617c6bfa770d6da48a48233ca7320edd85b8d0c6b9b37a58525c9dbf7ab3804",
+    "tests/auth-provider.test.js": "6b93b6bacea9987b80b653ba27367b0d3b339b822cf491e8d9946c20d5a04199",
+    "tests/backend-handlers.test.js": "6d929a3fb834bfe33647fad23a7394f17e67235f0b0f13049bd108262495c191",
+    "tests/backend-review-sql.test.js": "0c238e56548804e57cbf9651b3d4be775a087fcd946304cef331b94c280a4973",
+    "tests/backend-review-subscriptions.test.js": "1b618bc86f180d30add6125179d402cf3965fa6b7691a15c23c2dceeac10a477",
+    "tests/eas-build-preflight.test.js": "000078cf995272eca1e0f27cefd227fe429862d641a477b9d0cd4fe52cd4817c",
+    "tests/music-artwork.test.js": "a7b7ef9e0cbf6b58405142541f18eb3950925a8b30083c24028c5143723eb51f",
+    "tests/release-config.test.js": "345f44e7bcdc5296d0cd029f786796d02af6c699b74802f08e58fdc00451670f",
+    "tests/spotify-release-providers.test.js": "9218a08d0f8ae0c034f6fd52ed502d43e44953a18d420aa5727ac58fced0384d",
+    "tests/subscription-config.test.js": "92a5517b9d04ed28f6b3f986c5e21e1315de0ab39f2cbeeccef26df7102e5cfe",
+    "tests/subscription-controller.test.js": "f170fd8192dea97cb8a574d88cb344a7ee8d6ea662f6884cb5d827bb148f5d7c",
+    "tests/web-media-import-availability.test.js": "4e1b7b857e8d5093524d7029221e104ebd299dc13ec325cea5ae5422a377b969"
+  },
+  "liveCatalogEvidence": "ios-catalog-validation-evidence.json; separate read-only native probe, no purchase or Pro unlock",
+  "pendingLiveActions": [
+    "Separate Free RevenueCat review project/app/catalog, existing Apple IAP credential reuse, review server/webhook keys, public EAS key and sandbox-only Apple notification routing",
+    "Two fresh dedicated 30-day review Auth accounts, reserved before production resolution",
+    "Privacy amendment coordinated with registry rollout",
+    "Hosted migration/functions and authenticated checks",
+    "New signed Store build and physical native purchase, renewal, restore transfer, refund, expiry/revocation and data isolation checks",
+    "Final-source native visual QA after Mac unlock",
+    "Final store metadata/privacy/rating and screenshot verification"
+  ],
+  "releaseState": {
+    "appReviewSubmitted": false,
+    "publicAppReleased": false,
+    "newReviewProjectCreated": false,
+    "reviewAccountsCreated": false,
+    "hostedReviewMigrationApplied": false,
+    "purchaseToCanonicalProVerified": false
+  },
+  "validatedSourceCommit": "555a24752ec6dd899681e0f83a2674b0965f8c24"
+}

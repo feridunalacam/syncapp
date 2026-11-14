@@ -77,7 +77,8 @@ begin
 end;
 $$;
 reset role;
-update public.entitlements set expires_at = now()-interval '1 minute';
+update public.entitlements set expires_at = now()-interval '1 minute'
+where user_id in (select user_a from membership_test_context union all select user_b from membership_test_context);
 set local role authenticated;
 select set_config('request.jwt.claims', json_build_object('sub', user_a, 'role', 'authenticated')::text, true) from membership_test_context;
 do $$

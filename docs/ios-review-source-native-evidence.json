@@ -1,0 +1,85 @@
+{
+  "verifiedAtUTC": "2026-11-12T16:29:46.496300+00:00",
+  "scope": "FINAL696 shipping-source local Release Simulator; synthetic public fixtures only",
+  "runtimeManifestCanonicalSHA256": "893285f59795a686a3776264b2b3d1b01aff1dec1331ce1f8f7a4f2d13bd181c",
+  "runtimeFilesMatched": 149,
+  "allCopiedSourceFilesMatched": 183,
+  "appPath": "/private/tmp/syncapp-review-native-qa-vvk5p7ud/derived-release/Build/Products/Release-iphonesimulator/Sync.app",
+  "preservedSnapshotAppPath": "/private/tmp/syncapp-review-native-qa-vvk5p7ud/snapshot-final-893285f/Sync.app",
+  "executableSHA256": "e003b2203dff451726ede37a514e7912e2303132a90f32604017a6ac6fc656f1",
+  "hermesBundleSHA256": "ff62d6b3dbc7107c4c09cb75e6f02eadfb763ff8cfb169e364c9fce7620ac35f",
+  "appTreeCanonicalSHA256": "ac1ffef6a6d06ad732ce3ca31b3ad0e0ae852f1850139dff1934bafeb316971d",
+  "hermesMagic": "c61fbc03c103191f",
+  "embeddedSyntheticFixtures": {
+    "EXPO_PUBLIC_REVENUECAT_IOS_API_KEY": true,
+    "EXPO_PUBLIC_REVENUECAT_REVIEW_IOS_API_KEY": true,
+    "EXPO_PUBLIC_SUPABASE_URL": true,
+    "EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY": true
+  },
+  "architectures": [
+    "x86_64",
+    "arm64"
+  ],
+  "bundleIdentifier": "com.feridun.syncapp",
+  "appVersion": "1.0.0",
+  "localBuildNumber": "1",
+  "minimumOS": "15.1",
+  "appleMusicUsageDescription": "Sync uses Apple Music only when you connect it to choose and play songs and playlists for your workout rounds.",
+  "actualAdHocSignatureEntitlements": {},
+  "simulatedEntitlements": {
+    "application-identifier": "QZ894TBQ5T.com.feridun.syncapp",
+    "com.apple.developer.applesignin": [
+      "Default"
+    ]
+  },
+  "signing": [
+    "Identifier=com.feridun.syncapp",
+    "Format=app bundle with Mach-O universal (x86_64 arm64)",
+    "CodeDirectory v=20400 size=67820 flags=0x2(adhoc) hashes=2109+7 location=embedded",
+    "Signature=adhoc",
+    "TeamIdentifier=not set"
+  ],
+  "strictDeepSignatureVerified": true,
+  "nativeModuleStrings": {
+    "SyncAppleMusicModule": true,
+    "AppleMusicController": true,
+    "AppleAuthenticationModule": true,
+    "RNPurchases": true
+  },
+  "nativeSwiftCompileInputs": {
+    "arm64": true,
+    "x86_64": true
+  },
+  "linkedMusicStoreFrameworks": [
+    "/System/Library/Frameworks/MusicKit.framework/MusicKit",
+    "/System/Library/Frameworks/StoreKit.framework/StoreKit"
+  ],
+  "podVersionEntriesMatchPreviousReference": 183,
+  "nodeBinary": "/Users/feridunalacam/.nvm/versions/node/v22.23.4/bin/node",
+  "stageOnlyBundlePathCorrection": {
+    "file": "ios/.xcode.env.local",
+    "PROJECT_ROOT": "/private/tmp/syncapp-review-native-qa-vvk5p7ud",
+    "ENTRY_FILE": "/private/tmp/syncapp-review-native-qa-vvk5p7ud/index.js",
+    "firstAttemptExit": 65,
+    "retryExit": 0,
+    "reason": "Xcode /tmp alias versus Metro /private/tmp project root"
+  },
+  "installedOrLaunched": false,
+  "liveAccountMusicBillingOrReviewServicesVerified": false,
+  "finalBuildExitCode": 0,
+  "finalBuildStartedAtUTC": "2026-11-12T16:28:36.774007+00:00",
+  "finalBuildFinishedAtUTC": "2026-11-12T16:28:59.934352+00:00",
+  "rootRuntimeFilesMatched": 149,
+  "preservedSnapshotStrictDeepSignatureVerified": true,
+  "publicReleaseFlags": {
+    "EXPO_PUBLIC_BUILD_PROFILE": "production",
+    "EXPO_PUBLIC_ADS_ENABLED": "false",
+    "EXPO_PUBLIC_SPOTIFY_ENABLED": "false",
+    "EXPO_PUBLIC_APPLE_MUSIC_ENABLED": "false",
+    "EXPO_PUBLIC_WEB_MEDIA_IMPORT_ENABLED": "false"
+  },
+  "sourceProvenance": "/private/tmp/syncapp-review-native-qa-vvk5p7ud/qa-shipping-source-provenance.json",
+  "buildStatus": "/private/tmp/syncapp-review-native-qa-vvk5p7ud/release-shipping-status.json",
+  "buildLog": "/private/tmp/syncapp-review-native-qa-vvk5p7ud/release-shipping.log",
+  "firstFailureAndResolvedRetryRetained": true
+}

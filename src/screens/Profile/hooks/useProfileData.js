@@ -6,7 +6,7 @@ import { STORAGE_KEYS } from '../../../lib/storage';
 import { persistLocalMedia } from '../../../lib/localMedia';
 
 export default function useProfileData() {
-  const { storage } = useAccountData();
+  const { storage, reportLoadFailure } = useAccountData();
   const [picture, setPicture] = useState(null);
   const [bio, setBio] = useState('');
   const [links, setLinks] = useState({ instagram: '', twitter: '', tiktok: '', youtube: '' });
@@ -17,17 +17,22 @@ export default function useProfileData() {
       storage.getString(STORAGE_KEYS.PROFILE_PICTURE_URI),
       storage.getString(STORAGE_KEYS.PROFILE_BIO),
       storage.getJSON(STORAGE_KEYS.PROFILE_SOCIAL_LINKS, {}),
-    ]).then(([uri, text, social]) => {
-      if (cancelled) return;
-      setPicture(uri);
-      setBio(text || '');
-      setLinks((prev) => ({ ...prev, ...social }));
-      setReady(true);
-    });
+    ]).then(
+      ([uri, text, social]) => {
+        if (cancelled) return;
+        setPicture(uri);
+        setBio(text || '');
+        setLinks((prev) => ({ ...prev, ...social }));
+        setReady(true);
+      },
+      () => {
+        if (!cancelled) reportLoadFailure();
+      },
+    );
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [storage, reportLoadFailure]);
   const save = async () => {
     const ok =
       (await storage.setString(STORAGE_KEYS.PROFILE_BIO, bio)) &&

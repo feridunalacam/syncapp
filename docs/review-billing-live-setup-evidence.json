@@ -1,0 +1,1104 @@
+{
+  "schemaVersion": 1,
+  "recordedOn": "2026-11-12",
+  "snapshotBoundary": "Store6 first monthly Sandbox purchase owner-confirmed; hosted B canonical Pro, real review webhook and backup row verified19:47:23Z. Owner-reported cold restart/same-account Restore plus hosted revalidation19:50:38Z passed. A remains Free and production2 fingerprint unchanged; full lifecycle, transfer, yearly checkout, content restoration and secure reviewer credentials remain open.",
+  "status": "Initial monthly Sandbox purchase to server Pro verified; owner-reported same-account cold restart/Restore with hosted revalidation passed; full lifecycle and secure reviewer credentials incomplete",
+  "evidenceSources": [
+    "Root-relayed supported CUA/service observations and EAS peer readback",
+    "Core sanitized hosted migration/function/enrollment receipts; no credential, address or Auth UUID copied"
+  ],
+  "authorization": {
+    "explicitUserApprovalOn": "2026-11-12",
+    "approvedScope": [
+      "Separate RevenueCat review project and reuse of existing Apple IAP credentials",
+      "Review server/webhook secrets in existing Supabase project and public EAS configuration",
+      "Apple sandbox notification URL configuration",
+      "Two dedicated 30-day review accounts and sharing their credentials with Apple App Review"
+    ],
+    "previousTwoPendingApprovalRequestsSuperseded": true,
+    "approvalRequestsStillPendingForThisScope": 0
+  },
+  "revenueCat": {
+    "project": {
+      "name": "Sync Review",
+      "id": "c2f57b80"
+    },
+    "app": {
+      "name": "Sync Review iOS",
+      "id": "app14fea14555",
+      "bundleIdentifier": "com.feridun.syncapp"
+    },
+    "existingAppleIAPCredentialReused": true,
+    "appleIAPCredentialStatus": "Valid",
+    "reviewV1ServerKeyCreated": true,
+    "entitlement": {
+      "identifier": "sync_pro",
+      "id": "entlc9ce0587ce",
+      "realAppStoreProductsAttached": 2
+    },
+    "offering": {
+      "identifier": "default",
+      "id": "ofrngf2ee3f1a96",
+      "displayName": "Sync Pro",
+      "confirmedCurrentDefault": true,
+      "defaultConfirmation": "Authoritative Delete Default control disabled with explanatory tooltip observed by root",
+      "packagesInDisplayOrder": [
+        {
+          "identifier": "$rc_annual",
+          "productId": "prod7150f8aa7b",
+          "storeProductIdentifier": "com.feridun.syncapp.pro.yearly",
+          "appId": "app14fea14555"
+        },
+        {
+          "identifier": "$rc_monthly",
+          "productId": "prodc7259d65bb",
+          "storeProductIdentifier": "com.feridun.syncapp.pro.monthly",
+          "appId": "app14fea14555"
+        }
+      ],
+      "testStoreProductMappingPresent": false
+    },
+    "reviewWebhookConfigured": true,
+    "canonicalReviewPurchaseVerified": false,
+    "reviewWebhook": {
+      "integrationId": "whintgrc69840c3f9504f7b9d63f20ee28a7395",
+      "savedActive": true,
+      "environmentFilter": "SANDBOX only",
+      "appFilter": "Sync Review iOS App Store app only",
+      "eventSelection": "All events",
+      "bearerAuthenticationConfigured": true,
+      "bearerValueRecorded": false,
+      "sendTestEvent": {
+        "type": "TEST",
+        "httpStatus": 200,
+        "received": true,
+        "evidenceMeaning": "Authenticated transport/connectivity only; not a purchase, paid entitlement or lifecycle event"
+      }
+    },
+    "restorePolicy": {
+      "savedBehavior": "Transfer to new App User ID",
+      "differentSandboxBehaviorEnabled": false,
+      "savedStateObserved": "Save disabled after selection",
+      "actualRestoreTransferVerified": false
+    }
+  },
+  "protectedConfiguration": {
+    "newSupabaseReviewSecretCount": 2,
+    "reviewSecretSHA256ComparisonsMatched": true,
+    "existingProductionSecretDigestsUnchanged": true,
+    "reviewPublicSDKKeyMatchesAcrossEASEnvironments": [
+      "production",
+      "preview",
+      "development"
+    ],
+    "reviewPublicSDKKeyDistinctFromProduction": true,
+    "releaseErrors": [],
+    "secretOrPublicKeyValuesOrDigestsRecordedHere": false
+  },
+  "privacyPublication": {
+    "url": "https://sync-app-support.feridun.chatgpt.site/privacy",
+    "version": 7,
+    "sourceCommit": "a708a2d31da15364daf75d6188d6d952cb491655",
+    "deploymentId": "appgdep_6af5ef6f586081918f95b9937d02a6ed",
+    "deploymentStatus": "SUCCEEDED",
+    "completedAtUTC": "2026-11-12T16:55:25Z",
+    "existingPublicURLAndAudiencePreserved": true,
+    "publishedBeforeMigration": true,
+    "permanentPseudonymousAuthUUIDAndProductionReviewLaneRetentionDisclosed": true
+  },
+  "supabase": {
+    "existingProjectOnly": true,
+    "appliedMigrationVersion": "20261112165648",
+    "appliedMigrationName": "isolated_review_billing",
+    "migrationSourceSHA256": "51678bc4f48d87eaa81268be0aec51388edc4efdabbfe164dbc312fa6d27c299",
+    "migrationReturnedSuccess": true,
+    "functions": [
+      {
+        "name": "sync-subscription",
+        "version": 6,
+        "status": "ACTIVE",
+        "deployedForReviewSetup": true
+      },
+      {
+        "name": "revenuecat-webhook",
+        "version": 6,
+        "status": "ACTIVE",
+        "deployedForReviewSetup": true
+      },
+      {
+        "name": "revenuecat-review-webhook",
+        "version": 1,
+        "status": "ACTIVE",
+        "deployedForReviewSetup": true
+      },
+      {
+        "name": "delete-account",
+        "reportedMetadataVersion": 5,
+        "status": "ACTIVE",
+        "deployedForReviewSetup": false,
+        "bundleHashUnchanged": true,
+        "platformVersionChangeCauseEstablished": false
+      }
+    ],
+    "unauthenticatedPOST": {
+      "allFourExpected401": true,
+      "credentialsSent": false
+    },
+    "productionCompatibility": {
+      "unchangedVerifyMembershipSQLPassed": true,
+      "completeTransactionWithFinalRollback": true,
+      "persistentSyntheticFixtureRowsCreated": false,
+      "authUsersBeforeReviewEnrollment": 2,
+      "productionEntitlementsBeforeReviewEnrollment": 2,
+      "productionReceiptEnvironmentUnchanged": "PRODUCTION"
+    },
+    "countsAfterBothReservations": {
+      "authUsers": 4,
+      "productionRegistry": 2,
+      "productionScopes": 2,
+      "reviewRegistry": 2,
+      "reviewScopes": 2,
+      "productionEntitlements": 2,
+      "reviewEntitlements": 0,
+      "reviewBackups": 0
+    },
+    "enrollmentCountSnapshotPrecedesFirstClientLogin": true,
+    "countsAtReadOnlyFreeSync": {
+      "checkedAtUTC": "2026-11-12T17:34:21.258856+00:00",
+      "authUsers": 4,
+      "productionScopes": 2,
+      "reviewScopes": 2,
+      "productionEntitlements": 2,
+      "reviewEntitlements": 1,
+      "activeReviewEntitlements": 0,
+      "reviewBackups": 0,
+      "reviewWebhookEvents": 0
+    },
+    "countsAfterBothReviewFreeRefreshes": {
+      "checkedAtUTC": "2026-11-12T17:40:11.292588+00:00",
+      "authUsers": 4,
+      "productionScopes": 2,
+      "reviewScopes": 2,
+      "productionEntitlements": 2,
+      "reviewEntitlements": 2,
+      "activeReviewEntitlements": 0,
+      "reviewBackups": 0,
+      "reviewWebhookEvents": 0
+    }
+  },
+  "reviewAccounts": [
+    {
+      "label": "A",
+      "createdViaSupportedAuthAdminAutoConfirm": true,
+      "createdAfterMigration": true,
+      "confirmedAtReservation": true,
+      "neverSignedInAtReservation": true,
+      "reserveRPCInvocations": 1,
+      "fixedWindowDays": 30,
+      "committedValidReviewScope": true,
+      "productionClaimAbsent": true,
+      "entitlementGranted": false
+    },
+    {
+      "label": "B",
+      "createdViaSupportedAuthAdminAutoConfirm": true,
+      "createdAfterMigration": true,
+      "confirmedAtReservation": true,
+      "neverSignedInAtReservation": true,
+      "reserveRPCInvocations": 1,
+      "fixedWindowDays": 30,
+      "committedValidReviewScope": true,
+      "productionClaimAbsent": true,
+      "entitlementGranted": false
+    }
+  ],
+  "accountBoundaries": {
+    "actualAuthUUIDEmailsPasswordsOrKeyValuesIncluded": false,
+    "thirtyDaysMeansReviewAuthorizationExpiryNotAutomaticAuthDeletion": true,
+    "limitedUUIDLaneRegistryPersistsAfterAuthDeletionAsPublished": true,
+    "manualProGrantCreated": false,
+    "positiveReviewAccountLoginVerified": true,
+    "appleReviewCredentialFieldEntryVerified": false,
+    "reviewAccountLoginScope": "A and B in the owned local actual-public-config QA app; selected distribution client and Apple reviewer-field entry remain unverified",
+    "reviewerCredentialsReadyForAppleFields": false
+  },
+  "sourceAndNativeEvidence": {
+    "sourceHeadAtSetup": "577e1ff",
+    "validatedRuntimeCodeCommit": "555a24752ec6dd899681e0f83a2674b0965f8c24",
+    "testsPassed": 696,
+    "testsFailed": 0,
+    "testsSkipped": 0,
+    "actualSQLTestsPassed": 17,
+    "iosAndAndroidHermesExportsPassed": true,
+    "runtimeFileCount": 149,
+    "runtimeManifestSHA256": "893285f59795a686a3776264b2b3d1b01aff1dec1331ce1f8f7a4f2d13bd181c",
+    "offlineEvidenceFile": "review-billing-offline-evidence.json",
+    "nativeEvidenceFile": "ios-review-source-native-evidence.json",
+    "localSimulatorReleaseCompileAndStrictSignaturePassed": true,
+    "localNativeEvidenceUsesSyntheticPublicFixtures": true,
+    "positiveNativePublicReviewEnvironmentQACompleted": false,
+    "newStoreBuildStarted": true,
+    "deliveredStore4ClientUnchanged": true,
+    "store4EvidenceFile": "ios-build-1.0.0-4-evidence.json",
+    "positiveNativePublicReviewEnvironmentChecksObserved": true,
+    "newStoreBuild": {
+      "buildNumber": "5",
+      "buildId": "2bdd44f8-8b70-4840-8cf1-43420a7b3958",
+      "sourceCommit": "577e1ff26a619c0a62b1967bd0be9f1698c0cf11",
+      "operation": "BUILD ONLY",
+      "statusAtSnapshot": "FINISHED",
+      "submitStatus": "Original EAS job CANCELED; same IPA direct Apple upload succeeded, VALID and existing group Testing",
+      "owner": "Designated music/build peer only",
+      "finishedAtUTC": "2026-11-12T17:35:22Z",
+      "priorSubmitHold": {
+        "status": "HOLD",
+        "supersededAfterFinishedArchiveVerification": true
+      },
+      "archiveVerification": {
+        "checksPassed": 24,
+        "checksFailed": 0,
+        "ipaSHA256": "f8cca61e057225d9331f44dceee4f980c9490cb5ccdfb194317e1a2ec1c5b4fc",
+        "strictDeepSignaturePassed": true,
+        "actualApprovedPublicRuntimeMatches": true,
+        "syntheticFixturesAbsent": true,
+        "evidenceFile": "/private/tmp/sync-testflight-build5-verification.json"
+      },
+      "submission": {
+        "id": "2b268d9e-9643-4f20-9ec1-bff07c02b149",
+        "statusAtSnapshot": "CANCELED",
+        "cancellationObservedAtUTC": "2026-11-12T17:59:52.345Z",
+        "appleUploadPerformedByThisEASJob": false,
+        "historicalQueueEstimateMinutes": 60.7,
+        "replacementMethod": "Official Apple altool upload-package; same exact verified IPA"
+      },
+      "effectiveDeliveryMethod": "Apple altool upload-package",
+      "deliveredToExistingInternalGroup": true
+    }
+  },
+  "incompleteAtSnapshot": [
+    "Complete secure owner password handoff/Apple reviewer credential entry; owner-reported phone recovery is not credential-field readiness",
+    "Verify actual Apple sandbox notification delivery; saved URL/readback is not a delivered event",
+    "Verify dedicated reviewer login on the selected distribution client and enter approved credentials in Apple review fields",
+    "Complete yearly checkout, cross-account transfer, renewal/cancellation/refund and actual backup-content restore/isolation tests; initial monthly purchase and owner-reported same-B restore with hosted revalidation passed",
+    "Verify cross-account transfer despite the saved Transfer policy; same-account restore is owner-reported passed with hosted revalidation",
+    "Complete App Privacy and selected-binary listing checks; age/category/subtitle and product review assets are saved, while final Ads ON alignment remains"
+  ],
+  "verificationLimits": [
+    "Webhook TEST200 and saved Apple sandbox URL/readback alone do not prove Apple lifecycle delivery; one real review purchase webhook is now verified separately.",
+    "Earlier A/B inactive Free snapshots and delivery receipts are historical and do not themselves prove a purchase; monthlySandboxPurchaseMilestone separately records the first verified paid slice.",
+    "Same-account Restore passed by owner report with subsequent hosted active-state revalidation; automatic lease renewal can also advance generation, so no distinct restore-event attribution is claimed.",
+    "No independent physical capture or raw upstream receipt inspection; yearly checkout, cross-account transfer, renewal/cancellation/refund, content restoration and secure Apple reviewer credential entry remain open.",
+    "No external beta review, App Review or public release occurred; Store6 ads remain OFF with no ATT purpose claim."
+  ],
+  "sanitizedInputReceipts": [
+    {
+      "path": "/private/tmp/syncapp-review-hosted-preflight-hu6c8fs0/applied-migration-sanitized-evidence.json",
+      "sha256": "28a1d45a531516e97191dc1619d6a1f4c3abcbc8c9655f1774fa6d8d9887d977"
+    },
+    {
+      "path": "/private/tmp/syncapp-review-hosted-preflight-hu6c8fs0/deployed-functions-sanitized-evidence.json",
+      "sha256": "130adca4dd351fb0d891a3f4eb810f119784bd9ae95ee41950e133dd95926294"
+    },
+    {
+      "path": "/private/tmp/syncapp-review-hosted-preflight-hu6c8fs0/review-account-a-enrollment-sanitized.json",
+      "sha256": "60c6a0cdc6006287a1ba06488aa2a37daa40e157f2f7abf9860f83db281abea4"
+    },
+    {
+      "path": "/private/tmp/syncapp-review-hosted-preflight-hu6c8fs0/review-account-b-enrollment-sanitized.json",
+      "sha256": "ce850e92c2469bc56be51b12f72f71cddf790e8954465e042d7e8f4d2dcd323f"
+    },
+    {
+      "path": "/private/tmp/syncapp-review-hosted-preflight-hu6c8fs0/review-account-a-free-sync-sanitized.json",
+      "sha256": "d33cfa9885798e099df03cdf7313a7c40319fbeee98b0af7baf8c61f39985e26"
+    },
+    {
+      "path": "/private/tmp/syncapp-apple-review-sandbox-cutover-sanitized.json",
+      "sha256": "23b5d493a289687d2f9f002a9c73936bd8e0d632fdea4c296d2f19311d7f8f3e"
+    },
+    {
+      "path": "/private/tmp/syncapp-review-hosted-preflight-hu6c8fs0/review-account-b-refreshed-free-sync-sanitized.json",
+      "sha256": "aa36ca5ef463c9fc1f4f66cede2a608011ed7a69ccfe26c3e2722cf96207010f"
+    },
+    {
+      "path": "/private/tmp/sync-testflight-build5-verification.json",
+      "sha256": "a015fccb6e0037cee1d85899d8d874473ad041b18a44fe4b349a6b9a621e1c44"
+    }
+  ],
+  "appleSandboxNotificationURL": {
+    "cutoverComplete": true,
+    "savedValueReadbackVerified": true,
+    "ownerRevenueCatReauthenticationCompleted": true,
+    "sandboxSavedAndMatchesRevealedReviewURL": true,
+    "productionURLUnchanged": true,
+    "dialogDismissed": true,
+    "urlValuesRecorded": false,
+    "appleNotificationDeliveryVerified": false,
+    "evidenceFile": "/private/tmp/syncapp-apple-review-sandbox-cutover-sanitized.json"
+  },
+  "nativeActualPublicQA": {
+    "evidenceSource": "Root-observed native QA on its owned isolated target, not a physical Store4 result",
+    "appPath": "/private/tmp/syncapp-review-live-qa-od5k94ye/Sync.app",
+    "usesApprovedActualPublicRuntimeValues": true,
+    "accountLabel": "A",
+    "loginPassed": true,
+    "guestRoutineCountObserved": 3,
+    "accountRoutineCountObserved": 0,
+    "guestDataAutomaticallyImported": false,
+    "plansObserved": [
+      {
+        "package": "$rc_annual",
+        "displayPrice": "$18 / year",
+        "selected": true
+      },
+      {
+        "package": "$rc_monthly",
+        "displayPrice": "$2.99 / month",
+        "selected": false
+      }
+    ],
+    "refreshAccessVisibleError": false,
+    "screenshotFile": "review-client-live-prices.png",
+    "screenshotLocation": "Persistent release visualizations folder",
+    "purchaseOrProUnlockVerified": false,
+    "fullNativeQACompleted": false,
+    "physicalStore4PriceResultEstablished": false,
+    "accountLabelsObserved": [
+      "A",
+      "B"
+    ],
+    "accountB": {
+      "loginPassed": true,
+      "bothPlanPricesLoaded": true,
+      "refreshInProgressObserved": true,
+      "controlsReenabledAfterRefresh": true,
+      "visibleErrorAfterRefresh": false,
+      "purchaseOrProUnlockVerified": false
+    },
+    "runtimeScope": "Actual-public-config ad-hoc Simulator app using the same 149-file source; not physical TestFlight",
+    "runtimeFileCount": 149,
+    "sourceGeneration": "Store5-generation149-file runtime; not the future697-test owned-cue/Ads-privacy candidate"
+  },
+  "reviewFreeStateObservation": {
+    "checkedAtUTC": "2026-11-12T17:34:21.258856+00:00",
+    "evidenceFile": "/private/tmp/syncapp-review-hosted-preflight-hu6c8fs0/review-account-a-free-sync-sanitized.json",
+    "accountA": {
+      "activeReservedReviewEpoch": 1,
+      "syncGeneration": 2,
+      "lastSyncStartedAtUTC": "2026-11-12T17:31:23.672606+00:00",
+      "inactiveEntitlementUpdatedAtUTC": "2026-11-12T17:31:23.850141+00:00",
+      "inactiveReviewEntitlementRowPresent": true,
+      "expirySentinel": "1970-01-01T00:00:00Z",
+      "productIdAbsent": true,
+      "storeIsAppStore": true,
+      "environmentIsSandbox": true,
+      "activePaidLeasePresent": false,
+      "reviewBackupCount": 0,
+      "productionEntitlementCount": 0,
+      "productionSyncStateCount": 0
+    },
+    "accountB": {
+      "neverSignedIn": true,
+      "reviewEntitlementPresent": false,
+      "reviewSyncStatePresent": false
+    },
+    "productionEntitlementRows": 2,
+    "productionEnvironmentUnchanged": "PRODUCTION",
+    "totalReviewEntitlementRows": 1,
+    "activeReviewEntitlementRows": 0,
+    "reviewBackupRows": 0,
+    "sourceAttribution": "Database has no source column. The sync state and inactive row are consistent with the deployed canonical-refresh path; no raw upstream RevenueCat response was inspected and no review webhook event is recorded.",
+    "manualGrant": false,
+    "purchaseOrActiveLeaseOrBackupVerified": false,
+    "historicalSnapshotBeforeBLogin": true
+  },
+  "reviewBRefreshedFreeStateObservation": {
+    "checkedAtUTC": "2026-11-12T17:40:11.292588+00:00",
+    "evidenceFile": "/private/tmp/syncapp-review-hosted-preflight-hu6c8fs0/review-account-b-refreshed-free-sync-sanitized.json",
+    "accountB": {
+      "activeReservedReviewEpoch": 1,
+      "syncGeneration": 1,
+      "lastSyncStartedAtUTC": "2026-11-12T17:39:23.372408+00:00",
+      "inactiveEntitlementUpdatedAtUTC": "2026-11-12T17:39:23.54104+00:00",
+      "inactiveReviewEntitlementRowPresent": true,
+      "expirySentinel": "1970-01-01T00:00:00Z",
+      "productIdAbsent": true,
+      "storeIsAppStore": true,
+      "environmentIsSandbox": true,
+      "activePaidLeasePresent": false,
+      "reviewBackupCount": 0,
+      "productionEntitlementCount": 0,
+      "productionSyncStateCount": 0
+    },
+    "accountAExactlyUnchanged": true,
+    "productionEntitlementRows": 2,
+    "productionEnvironmentUnchanged": "PRODUCTION",
+    "totalReviewEntitlementRows": 2,
+    "activeReviewEntitlementRows": 0,
+    "reviewBackupRows": 0,
+    "reviewWebhookEventRows": 0,
+    "sourceAttribution": "Database has no source column. B generation1 and inactive row are consistent with deployed authenticated refresh after the UI action; no raw upstream response or logs were read.",
+    "manualGrant": false,
+    "purchaseOrActiveLeaseOrBackupVerified": false
+  },
+  "productReviewScreenshots": {
+    "prepared": true,
+    "count": 2,
+    "uploadedOrSavedInAppStoreConnect": true,
+    "captureScope": "Actual-public-config ad-hoc Simulator, Store5-generation149-file source; not physical TestFlight or the future owned-cue candidate",
+    "files": [
+      {
+        "product": "monthly",
+        "appleProductId": "6833660357",
+        "sourceFile": "subscription-review-monthly.png",
+        "sha256": "b91c5241ed7d616ab70723afc702404b5e61b686a20a94852278bf90641edd9f",
+        "width": 1206,
+        "height": 2622,
+        "savedProofFile": "appstore-monthly-review-saved.png",
+        "rootVerifiedSelectedSKUPriceAndCTA": true
+      },
+      {
+        "product": "annual",
+        "appleProductId": "6833661064",
+        "sourceFile": "subscription-review-annual.png",
+        "sha256": "f416a1cf45e3bb02a989435567a7ba24589696a1f653f7e606936b9539d598f9",
+        "width": 1206,
+        "height": 2622,
+        "savedProofFile": "appstore-annual-review-saved.png",
+        "rootVerifiedSelectedSKUPriceAndCTA": true
+      }
+    ],
+    "reviewScreenshotGateComplete": true,
+    "preparedFilesBeforeUpload": [
+      {
+        "product": "annual",
+        "path": "/private/tmp/sync-review-annual-native.png",
+        "width": 1206,
+        "height": 2622,
+        "sha256": "f416a1cf45e3bb02a989435567a7ba24589696a1f653f7e606936b9539d598f9",
+        "rootVisualCheckSKUAndCTA": true,
+        "rootVisualCheckNoFramingOrSecrets": true
+      },
+      {
+        "product": "monthly",
+        "path": "/private/tmp/sync-review-monthly-native.png",
+        "width": 1206,
+        "height": 2622,
+        "sha256": "b91c5241ed7d616ab70723afc702404b5e61b686a20a94852278bf90641edd9f",
+        "rootVisualCheckSKUAndCTA": true,
+        "rootVisualCheckNoFramingOrSecrets": true
+      }
+    ],
+    "reviewNotesSavedForBothProducts": true,
+    "currentProductStatus": "Prepare For Submission",
+    "addForReviewClicked": false,
+    "rootSaveReadback": {
+      "saveDisabled": true,
+      "noProgressRemaining": true,
+      "imageSourcePresent": true,
+      "notesMatchExpected": true
+    },
+    "notesCover": [
+      "Profile > Explore Sync Pro and Monthly/Annual selection",
+      "Restore, Refresh, Manage, Terms and Privacy on the same page",
+      "Deleting a Sync account does not cancel its Store subscription"
+    ],
+    "savedProofLocation": "Persistent release visualizations folder",
+    "priorPreparedOnlyStateSuperseded": true,
+    "purchaseOrPhysicalTestFlightProof": false
+  },
+  "futureOwnedCuesAndAdsGuardCandidate": {
+    "scope": "Historical b5d8acf149 base; current RecoveryV2 source151/0734 passes targeted119/full721/Hermes/archive150 and local native UI. Store6 and physical recovery remain pending.",
+    "includedInStore5": false,
+    "newNativeOrStoreDeliveryVerified": false,
+    "ownedBundledCues": {
+      "implementedAndSourceValidated": true,
+      "ownerCommercialLicenseEvidenceUncertain": true,
+      "unlicensedUseEstablished": false,
+      "historicalFilesPreservedByteExactly": 15,
+      "historicalWavFilesPreserved": 14,
+      "historicalCoachRegistryPreserved": true,
+      "historicalCoachAudioAndRegistryExcludedFromNewBuildArchive": true,
+      "knownStoredSpeechSettingsResolvedAtPlaybackToOriginalCues": true,
+      "automaticSavedRecordRewriteOrDeletion": false,
+      "newSpokenCueUIAndRuntimeSpeechPathRemoved": true
+    },
+    "adsPrivacyGuard": {
+      "manifestSHA256": "f3b860fd6d991c34486a5e3620e8216e4b637fb43930718ed1e3f63ae0889f86",
+      "fiveFileFreezeVerified": true,
+      "focusedTestsPassed": 47,
+      "disabledControllerReturnsBeforeSDKCacheOrStateWork": true,
+      "disabledProfileActionHidden": true,
+      "staleCapturedActionBlockedByLatestEnabledRef": true,
+      "enabledProExplicitPrivacyPathPreserved": true,
+      "claimScope": "App-initiated paths; not packet capture or proof of zero SDK/provider collection"
+    },
+    "validation": {
+      "testsPassed": 697,
+      "testsFailed": 0,
+      "testsSkipped": 0,
+      "actualSQLTestsPassedIncludingParent": 17,
+      "trueTwoConnectionConcurrencyVerified": false,
+      "fullTestLog": "/private/tmp/syncapp-final-release-tests.log",
+      "initial680TestRunWithMissingSQLModuleEnvironmentSuperseded": true,
+      "iosAndAndroidHermesExportsPassed": true,
+      "repoRuntimeFiles": 149,
+      "repoRuntimeManifestSHA256": "d826602b2517ff7036f1429c6fe202bc51dd909c79a3a7e80428cba5536e0970",
+      "exportStageRuntimeFiles": 148,
+      "unusedHistoricalCoachRegistryExcludedFromStage": true,
+      "exportAssetFilesBeforePerPlatform": 42,
+      "exportAssetFilesNowPerPlatform": 28,
+      "all14CoachHashesAbsentFromEachExport": true,
+      "all8OwnedCueHashesPresentInEachExport": true,
+      "allPriorNoncoachAssetHashesPreserved": true,
+      "original15FileBytesPreserved": true,
+      "allFourReleaseFlagsOffDuringExports": true,
+      "productionProfileSyntheticPublicFixturesOnly": true,
+      "dotenvDisabled": true,
+      "noNativeBuildOrCloudJobFromTheseChecks": true,
+      "easLocalArchive": {
+        "regularFiles": 286,
+        "coachAudioFiles": 0,
+        "ownedCueWavFiles": 8,
+        "privateEnvCredentialFilesAbsent": true,
+        "nativeProjectFilesAbsent": true,
+        "all148ShippedRuntimeFilesMatchExportSnapshot": true,
+        "networkAuthGitCloudBuildInvoked": false,
+        "sha256": "929ef38a4188acd01dd5194c4ffc7711db2560a159ab4fee80fc2ede7ae4ceb4"
+      },
+      "validatedBaseSourceCommit": "b5d8acf",
+      "validationPredatesRecoveryIsolationFix": true,
+      "sourceOrDocsFinalFreezeComplete": false
+    },
+    "advertisingReleaseIntent": {
+      "ownerTargetPublicReleaseAdsEnabled": true,
+      "store5AdsFlagEnabled": false,
+      "futureCandidateAdsFlagEnabledAtSnapshot": false,
+      "admobAccountApprovalObservedReadOnly": "APPROVED",
+      "adServingEnabledAtAccountLevel": true,
+      "storeLinkAndAppApprovalStillRequired": true,
+      "perAppReadinessCheckComplete": false,
+      "publicServingReadinessVerified": false,
+      "iOSPerAppStatusReadOnlyChecked": true,
+      "iOSActiveAdUnitCount": 2,
+      "iOSAppReviewRequired": true,
+      "iOSServingLimited": true,
+      "storeLookupReturnedNoResultsForUnpublishedAppleApp": true,
+      "storeLinkWritten": false
+    },
+    "evidenceFiles": [
+      "/private/tmp/syncapp-final-plural-release-check-rf2pwx_q/final-handoff-evidence.json",
+      "/private/tmp/syncapp-final-plural-release-check-rf2pwx_q/exports-evidence.json",
+      "/private/tmp/syncapp-final-plural-release-check-rf2pwx_q/eas-archive-evidence.json",
+      "/private/tmp/syncapp-final-plural-live-qa-rzmduzuj/qa-live-app-inspection.json",
+      "/private/tmp/syncapp-disabled-ads-privacy-freeze.json"
+    ],
+    "priorPrePluralSource": {
+      "repoRuntimeFiles": 149,
+      "runtimeManifestSHA256": "7167a4d1d8d8d7894894a28b08952acacd45348302b6e993995fc6950311a353",
+      "sourceEvidenceFiles": [
+        "/private/tmp/syncapp-owned-cues-release-check-qvuj_8br/owned-cues-source-freeze.json",
+        "/private/tmp/syncapp-owned-cues-release-check-qvuj_8br/exports-evidence.json",
+        "/private/tmp/syncapp-owned-cues-release-check-qvuj_8br/eas-archive-evidence.json",
+        "/private/tmp/syncapp-disabled-ads-privacy-freeze.json"
+      ],
+      "nativeRootQA": {
+        "accountBSessionPreserved": true,
+        "adsOffPrivacyRowAbsent": true,
+        "routinePreparationSeconds": 3,
+        "workSeconds": 5,
+        "realSessionCompletedSeconds": 8,
+        "finishReturnedToProfile": true,
+        "profileStats": {
+          "routines": 1,
+          "sessions": 1,
+          "posts": 0,
+          "access": "Free"
+        },
+        "all14CoachHashesAbsent": true,
+        "audioHeardVerified": false,
+        "networkCapturePerformed": false,
+        "screenshotFile": "owned-cues-session-complete.png"
+      }
+    },
+    "validatedBaseSourceCommit": "b5d8acf",
+    "recoveryHardeningNowInProgress": true,
+    "adHocSimulatorSignatureAndRootNativeAXObserved": true,
+    "freshNativeCompilePerformed": false,
+    "finalPluralBaseHandoff": {
+      "path": "/private/tmp/syncapp-final-plural-release-check-rf2pwx_q/final-handoff-evidence.json",
+      "sha256": "3ca9d9ba2394b7d5149e0c873d3af5d223d2905bb9d28d7f18fc799196f78e8d",
+      "exportsEvidence": "/private/tmp/syncapp-final-plural-release-check-rf2pwx_q/exports-evidence.json",
+      "archiveEvidence": "/private/tmp/syncapp-final-plural-release-check-rf2pwx_q/eas-archive-evidence.json",
+      "nativeTemplateReused": true,
+      "actualPublicSimulatorApp": "/private/tmp/syncapp-final-plural-live-qa-rzmduzuj/Sync.app",
+      "strictDeepAdHocSignaturePassed": true,
+      "coreDidNotInstallOrLaunch": true,
+      "rootInstalledAndCheckedNativeAX": true,
+      "rootObservedSingleRoundTextCorrect": true,
+      "rootObservedExistingTestDataRetained": true,
+      "newPhysicalDeviceOrStoreResult": false,
+      "audioHearingOrNetworkCaptureClaim": false
+    },
+    "recoveryIsolationSourceNowFrozen": true
+  },
+  "savedAgeRatingReceipt": {
+    "status": "Actually saved in App Store Connect after owner factual confirmation; not a draft",
+    "evidenceSource": "Root-observed saved UI, relayed 12 November 2026; visual receipt path not yet supplied at this snapshot",
+    "ownerConfirmedNoSocialChatOrParentalControls": true,
+    "ownerConfirmedGeneralContent": true,
+    "savedAnswers": {
+      "advertising": "Yes",
+      "otherCapabilityAnswersNoCount": 7,
+      "healthAndWellnessTopics": "Yes",
+      "medicalOrTreatmentInformation": "None",
+      "adultContentViolenceAndGambling": "None",
+      "kidsCategorySelected": false,
+      "manualRatingOverrideUsed": false
+    },
+    "appleCalculatedRatings": {
+      "os26AndLater": {
+        "9PlusCountryCount": 172,
+        "12PlusRegions": [
+          "Vietnam",
+          "Brazil"
+        ],
+        "allAgesRegion": "South Korea"
+      },
+      "preOS26": {
+        "global": "4+",
+        "regionalExceptionsPresent": true
+      }
+    },
+    "alignmentBoundary": "Advertising Yes matches intended future public release. Current Store5 and the future candidate flag are still Ads OFF; actual serving and final configuration/privacy alignment remain release gates.",
+    "historicalStore4UnrestrictedWebYesInferenceRetainedAsHistory": true,
+    "appPrivacyQuestionnaireSubmitted": false,
+    "appReviewOrPublicReleasePerformed": false
+  },
+  "store5TerminalDelivery": {
+    "version": "1.0.0",
+    "buildNumber": "5",
+    "sourceCommit": "577e1ff26a619c0a62b1967bd0be9f1698c0cf11",
+    "ipaSHA256": "f8cca61e057225d9331f44dceee4f980c9490cb5ccdfb194317e1a2ec1c5b4fc",
+    "archiveChecksPassed": 24,
+    "archiveChecksTotal": 24,
+    "originalEASSubmission": {
+      "id": "2b268d9e-9643-4f20-9ec1-bff07c02b149",
+      "status": "CANCELED",
+      "cancellationObservedAtUTC": "2026-11-12T17:59:52.345Z",
+      "appleUploadPerformedByThisJob": false,
+      "priorQueueEstimateMinutesHistorical": 60.7
+    },
+    "officialAppleDirectUpload": {
+      "method": "Apple altool upload-package",
+      "sameExactVerifiedIPA": true,
+      "validationPassed": true,
+      "validationObservedAtUTC": "2026-11-12T17:59:06.229Z",
+      "uploadSucceeded": true,
+      "uploadObservedAtUTC": "2026-11-12T18:03:10.712Z",
+      "productErrorsReported": false
+    },
+    "appleProcessing": {
+      "uploadedAtUTC": "2026-11-12T18:04:16Z",
+      "firstVALIDObservedAtUTC": "2026-11-12T18:06:48Z",
+      "archivedStatusObservedAtUTC": "2026-11-12T18:09:00.512Z",
+      "processingState": "VALID",
+      "internalStateBeforeGroupAssignment": "READY_FOR_BETA_TESTING",
+      "externalState": "READY_FOR_BETA_SUBMISSION",
+      "expired": false
+    },
+    "existingInternalGroup": {
+      "name": "Sync Internal QA",
+      "testerCount": 1,
+      "buildCount": 3,
+      "build5VisibleState": "Testing",
+      "displayedTestingWindowDays": 90,
+      "rootUIVerifiedAtUTC": "2026-11-12T18:11:13.504269+00:00",
+      "proofFile": "testflight-build5-testing.png"
+    },
+    "archiveDirectory": "artifacts/app-store/testflight-1.0.0-5",
+    "archiveManifestFile": "artifacts/app-store/testflight-1.0.0-5/archive-manifest.json",
+    "deliveryEvidenceFile": "artifacts/app-store/testflight-1.0.0-5/delivery-evidence.json",
+    "archiveManifestSHA256": "811905ca6f0ec08426bd1d697ed871c69ac9faf7b675f7c1d123810865c0acc4",
+    "whitelistedFilesMatchManifest": 9,
+    "ipaPlusProofFilesOnly": true,
+    "privateKeysEnvironmentValuesOrRawLogsArchived": false,
+    "physicalOwnerBuild5PriceReplyPending": false,
+    "purchaseOrProLifecycleVerified": false,
+    "externalBetaReviewSubmitted": false,
+    "appReviewSubmitted": false,
+    "publicAppRelease": false,
+    "future697OwnedCueAdsGuardCandidateIncluded": false,
+    "ownerReportedPhysicalMonthlyAndYearlyPricesCorrect": true,
+    "independentPhysicalPriceCaptureAvailable": false
+  },
+  "admobCurrentReadOnlyStatus": {
+    "evidenceSource": "Root read-only AdMob UI; no store-link write",
+    "accountStatus": "APPROVED",
+    "accountLevelAdServingEnabled": true,
+    "iOSActiveAdUnitCount": 2,
+    "iOSAppReviewRequired": true,
+    "iOSServingLimited": true,
+    "exactAppleAppIDSearch": "6833659501",
+    "storeSearchResultCount": 0,
+    "appStoreListingUnpublished": true,
+    "storeLinkWritten": false,
+    "appApprovalEstablished": false,
+    "publicServingReadinessVerified": false,
+    "finalGMATrackingAssessmentResolved": false
+  },
+  "ownerReportedPhysicalStore5Prices": {
+    "reportedOn": "2026-11-12",
+    "source": "Owner physical iPhone response, not independent capture",
+    "buildNumber": "5",
+    "monthlyAndYearlyPricesReportedCorrect": true,
+    "ownerResponse": "evet do\u011fru duruyor",
+    "exactPhoneAmountsOrCurrencyCaptured": false,
+    "independentPhysicalScreenshotOrTelemetry": false,
+    "purchaseOrProUnlockVerified": false
+  },
+  "reviewCredentialRecoveryBlocker": {
+    "status": "OWNER-REPORTED Store6 physical B recovery/new-password/cold-restart/account-check PASS; independent capture and Apple reviewer credential handoff remain open",
+    "reportedPhysicalError": "This sign-in link couldn't be used. Request a new link",
+    "sameIPhoneRequestAndOpenReported": true,
+    "reportedOpenPath": "Chrome to Sync",
+    "latestNativeResetRequestAcceptedConditionalAcknowledgement": true,
+    "rootReadOnlyHostedChecks": {
+      "resetTemplateUsesConfirmationURL": true,
+      "exactPKCEFlowIdRedirectAllowlistCorrect": true,
+      "hostedSettingsChanged": false
+    },
+    "sdkReproduction": {
+      "installedAuthJSVersion": "2.119.0",
+      "oldMainSessionRefreshFailureCanCallRemoveSessionAndClearUnrelatedRecoveryVerifier": true,
+      "reproductionScope": "Synthetic installed-SDK behavior, not a conclusive physical-device cause",
+      "physicalCauseConclusivelyAttributed": false
+    },
+    "coreFixApproach": {
+      "status": "SOURCE FROZEN; targeted119/full721/Hermes/local archive PASS; new Store6 and physical recovery pending",
+      "separateEncryptedRecoveryPKCENamespace": true,
+      "secondaryJWTMemoryOnly": true,
+      "verifiedRecoveryAdoptionViaMainSetSession": true,
+      "sourceImplementedAndFrozen": true,
+      "targetedTestsPassed": 119,
+      "independentIntegrationReview": "PASS",
+      "fullSuiteAndHermesFinalResultEstablished": true,
+      "fullTestsPassed": 721,
+      "newStore6BinaryBuildAndUploadEstablished": true,
+      "physicalPhoneRecoverySuccessEstablished": false,
+      "store6AppleProcessingAndGroupDeliveryEstablished": true
+    },
+    "credentialHandoff": {
+      "generatedReviewPasswordsWereMemoryOnly": true,
+      "lostOnCUARuntimeReset": true,
+      "secretFilesWritten": false,
+      "reviewerCredentialsReadyForAppleFields": false,
+      "ownerChoosesFreshPasswordWithoutSharingItInChat": true,
+      "phoneResetAndIdentityHandoffPending": false,
+      "supabaseAndEASServerSecretStorageUnaffected": true,
+      "ownerPasswordHandoffForAppleFieldsPending": true
+    },
+    "sourceFreezeComplete": true,
+    "recoveryTestsPassedEstablished": true,
+    "build6SuccessEstablished": true,
+    "targetedRecoveryTestsPassedEstablished": true,
+    "fullReleaseSuiteAndHermesPassedEstablished": true,
+    "reportedFailureClientBuild": "5",
+    "store6PhysicalRetestPending": false,
+    "historicalStore5Failure": {
+      "reportedPhysicalError": "This sign-in link couldn't be used. Request a new link",
+      "sameIPhoneRequestAndOpenReported": true,
+      "reportedOpenPath": "Chrome to Sync",
+      "latestNativeResetRequestAcceptedConditionalAcknowledgement": true,
+      "emailDeliveryConfirmed": false,
+      "usableRecoveryLinkConfirmed": false,
+      "newPasswordSetConfirmed": false,
+      "coldRestartBAccountConfirmed": false,
+      "reportedFailureClientBuild": "5"
+    },
+    "ownerReportedStore6RecoveryPassed": true,
+    "ownerReportedColdRestartBAccountPassed": true,
+    "physicalRecoveryIndependentlyCaptured": false
+  },
+  "savedCategoryAndSubtitleReceipt": {
+    "approvedByOwner": true,
+    "appID": "6833659501",
+    "locale": "en-US",
+    "primaryCategory": "Health & Fitness",
+    "primaryCategoryID": "HEALTH_AND_FITNESS",
+    "subtitle": "Work, rest, music and routines",
+    "subtitleLength": 30,
+    "twoAuthorizedPATCHRequestsHTTP200": true,
+    "readbackChecksPassed": 5,
+    "verifiedAtUTC": "2026-11-12T18:32:04.261Z",
+    "secondaryCategoryAndAllOtherSnapshotFieldsUnchanged": true,
+    "draftState": "PREPARE_FOR_SUBMISSION",
+    "otherWriteOrSubmissionFromTheseOperations": false,
+    "currentApprovalForTheseTwoFieldsPending": false,
+    "proofFile": "artifacts/app-store/store-metadata-2026-11-12/approved-category-subtitle-proof.json",
+    "proofSHA256": "59b9657bd9accc88afaab02a9e9120a4afc719747dfd486c4873c7464ebe8ca4",
+    "operationsFile": "artifacts/app-store/store-metadata-2026-11-12/approved-category-subtitle-operations.json"
+  },
+  "authRecoveryV2SourceEvidence": {
+    "status": "SOURCE151/0734 targeted119/full721/Hermes/archive PASS; Store6 internal delivery PASS; physical B reset/cold restart owner-reported PASS, not independent capture; reviewer credential handoff/purchase pending",
+    "sourceFreezeFile": "/private/tmp/syncapp-auth-recovery-fix-vpagjaot/auth-recovery-source-freeze-v2.json",
+    "sourceFreezeSHA256": "35a5d6da8b9f20da2dda41bccaa1b4aa5cea43464fc41f561f5256c4e5c30a19",
+    "runtimeFiles": 151,
+    "runtimeManifestCanonicalSHA256": "0734ab863cd1acd63df1f50d0832941ab8412a58525ec1dc48784a0e7b47b05f",
+    "targetedTestsPassed": 119,
+    "targetedTestsFailed": 0,
+    "targetedTestsSkipped": 0,
+    "independentIntegrationReview": "PASS",
+    "installedSDKRefreshTeardownRedToGreen": true,
+    "secondaryLockCancelAndHeldQueueImmediateCancelErrorRedToGreen": true,
+    "separateEncryptedRecoveryPKCENamespace": true,
+    "secondaryJWTMemoryOnly": true,
+    "verifiedRecoveryAdoptionViaMainSetSession": true,
+    "mainSDKLockRetained": true,
+    "secondarySerialOwnershipWithoutSDKLock": true,
+    "priorCuesAdsAndHomeSourcesUnchanged": true,
+    "sourceFrozen": true,
+    "physicalCauseConclusivelyAttributed": false,
+    "fullSuiteAndHermesFinalResultEstablished": true,
+    "fullSuiteAndHermesRunDirectory": "/private/tmp/syncapp-recovery-final-6a73bbj1",
+    "newBinaryBuiltOrUploaded": true,
+    "fullTestsPassed": 721,
+    "fullTestsFailed": 0,
+    "fullTestsSkipped": 0,
+    "fullTestsLog": "/private/tmp/syncapp-recovery-final-6a73bbj1/full-tests.log",
+    "iosAndAndroidHermesExportsPassed": true,
+    "exportAssetFilesPerPlatform": 28,
+    "all14CoachHashesAbsent": true,
+    "all8OriginalCuesPresent": true,
+    "allPriorNoncoachAssetsPreserved": true,
+    "localEAS27ArchivePassed": true,
+    "shippedRuntimeFiles": 150,
+    "archiveSHA256": "e152910a40e20ddb257d83ce5d52c79e4755930ea718c9268055271fb880ed0b",
+    "archiveCredentialsNativeProjectsAndCoachAbsent": true,
+    "preparedActualPublicOverlay": {
+      "inspectionFile": "/private/tmp/syncapp-recovery-live-qa-e_kpwprd/qa-live-app-inspection.json",
+      "runtimeFiles": 151,
+      "stagedFiles": 150,
+      "nativeCompilePerformed": false,
+      "strictAdHocSignaturePassed": true,
+      "fiveApprovedPublicFieldsPresent": true,
+      "all14CoachHashesAbsent": true,
+      "all8OriginalCuesPresent": true,
+      "installedOrUIValidated": true,
+      "rootNativeUI": {
+        "routinesRetained": 1,
+        "sessionsRetained": 1,
+        "accountSheetAndResetFormVisible": true,
+        "newSameDeviceGuidanceVisible": true,
+        "resetRequestSent": false,
+        "physicalRecoveryProven": false
+      }
+    },
+    "finalHandoffFile": "/private/tmp/syncapp-recovery-final-6a73bbj1/final-handoff-evidence.json",
+    "finalHandoffSHA256": "3d0bd6a2dcdda607d7af2be17a573540efe41582c99485d3973ea65d66133a68",
+    "sourceCommit": "18c41c0116dba0d8d3e13c0a7a97b3de8e43b17c",
+    "ownerReportedPhysicalSameDeviceRecoverySuccess": true,
+    "independentPhysicalRecoveryCaptureAvailable": false
+  },
+  "store6BuildAndUpload": {
+    "version": "1.0.0",
+    "buildNumber": "6",
+    "sourceCommit": "18c41c0116dba0d8d3e13c0a7a97b3de8e43b17c",
+    "runtimeFiles": 151,
+    "runtimeManifestCanonicalSHA256": "0734ab863cd1acd63df1f50d0832941ab8412a58525ec1dc48784a0e7b47b05f",
+    "fullTestsPassed": 721,
+    "targetedAuthTestsPassed": 119,
+    "easBuildID": "baab63bd-221a-48dd-b9fd-aab34191e9fb",
+    "easBuildStatus": "FINISHED",
+    "easFinishedAtUTC": "2026-11-12T19:21:55Z",
+    "ipaSHA256": "438d5bd8fa100de4a30406ece734eae88288af3fb9314f831ccadba45d5b0af1",
+    "hermesSHA256": "15a2963a38d51cac0b1f14654d2226656cb9ce891d3d7b6ff1d9bc5a622c88c5",
+    "checksPassed": 30,
+    "checksTotal": 30,
+    "rootIndependentReviewPassed": true,
+    "actualApprovedPublicFieldsMatched": 5,
+    "recoveryMarkersMatched": 3,
+    "historicalCoachRecordingsAbsent": 14,
+    "ownedCueWavsPresent": 8,
+    "sameApprovedSigningProfileAndCertificate": true,
+    "syntheticFixturesAbsent": true,
+    "allFourReleaseFlagsOff": true,
+    "officialAppleValidationPassed": true,
+    "validationObservedAtUTC": "2026-11-12T19:27:12Z",
+    "officialAppleDirectUploadPassed": true,
+    "uploadObservedAtUTC": "2026-11-12T19:29:47.074Z",
+    "singleUploadOnly": true,
+    "easSubmitUsed": false,
+    "deliveryID": "336d87da-d55d-4c30-91bb-d1ee62cb5447",
+    "appleProcessingVALIDVerified": true,
+    "internalBetaReadyVerified": true,
+    "existingGroupTestingVerified": true,
+    "downloadableToOwnerEstablished": true,
+    "freshReviewerCredentialsReady": false,
+    "purchaseOrProLifecycleVerified": false,
+    "externalBetaOrAppReviewOrPublicRelease": false,
+    "candidateEvidenceFile": "artifacts/app-store/testflight-1.0.0-6/candidate-evidence.json",
+    "ipaVerificationFile": "artifacts/app-store/testflight-1.0.0-6/ipa-verification.json",
+    "rootIndependentReviewFile": "artifacts/app-store/testflight-1.0.0-6/root-upload-review.json",
+    "appleUploadSummaryFile": "/private/tmp/sync-testflight-build6/apple-upload-summary.json",
+    "candidateHoldIsHistoricalSupersededByRootReadyAndUpload": true,
+    "status": "DELIVERED_EXISTING_OWNER_INTERNAL_TESTFLIGHT",
+    "appleInternalState": "IN_BETA_TESTING",
+    "groupName": "Sync Internal QA",
+    "testerCount": 1,
+    "buildCount": 4,
+    "groupChecksPassed": 8,
+    "priorBuildsSettingsAndMembershipPreserved": true,
+    "onlyBuild6Added": true,
+    "deliveryVerifiedAtUTC": "2026-11-12T19:34:26.241Z",
+    "deliveryEvidenceFile": "artifacts/app-store/testflight-1.0.0-6/delivery-evidence.json",
+    "groupProofFile": "artifacts/app-store/testflight-1.0.0-6/group-delivery-proof.json",
+    "groupProofSHA256": "52953f14716a7b49d40ad21f453fb7efcfbbffbc02a65fb6284a7b5bb46577e6",
+    "ownerInstalledStore6Confirmed": false,
+    "freshSamePhoneBResetAndColdRestartPending": false,
+    "ownerReportedStore6UpdateAndRecoveryCompleted": true,
+    "ownerReportedColdRestartBAccountPassed": true,
+    "independentPhysicalRecoveryCaptureAvailable": false,
+    "physicalRecoveryCauseOrFixIndependentlyProven": false,
+    "initialMonthlySandboxPurchaseToServerProVerified": true,
+    "firstRealReviewWebhookAndBackupRowVerified": true,
+    "fullPaidLifecycleVerified": false,
+    "sameAccountRestoreOwnerReportedAndHostedRevalidated": true
+  },
+  "ownerReportedStore6Recovery": {
+    "reportedOn": "2026-11-12",
+    "buildNumber": "6",
+    "accountLabel": "B",
+    "evidenceType": "OWNER_REPORTED",
+    "ownerResponse": "test hesab\u0131na girdi\u015fm",
+    "rootQuestionSequence": "Update6 \u2192 request/open a fresh B reset on the same iPhone \u2192 choose new password \u2192 cold close/reopen \u2192 Your account check",
+    "physicalSameDeviceRecoveryReportedPassed": true,
+    "newPasswordAndColdRestartBAccountReportedPassed": true,
+    "independentDeviceCaptureOrTelemetry": false,
+    "appleReviewerCredentialsReady": false,
+    "purchaseOrProSuccessVerified": false
+  },
+  "hostedPrePurchaseBillingBaseline": {
+    "status": "VERIFIED_READ_ONLY_PREPURCHASE",
+    "evidenceFile": "artifacts/app-store/billing-validation-2026-11-12/prepurchase-baseline.json",
+    "evidenceSHA256": "4a915de646e4b4a5d4d9874ff40ad1c714c87e321ca9588504bf5bc34fa09f49",
+    "recordedAtUTC": "2026-11-12T19:43:48Z",
+    "BLastSignInUTC": "2026-11-12T19:39:12.034583Z",
+    "ABConfirmedImmutableReviewScopeEpoch1AndNamespaceValid": true,
+    "ABInactiveFree1970LeaseAndCanonicalExpiry": true,
+    "store": "app_store",
+    "environment": "SANDBOX",
+    "productAbsent": true,
+    "reviewWebhookEvents": 0,
+    "reviewBackups": 0,
+    "ABProductionRows": 0,
+    "AGeneration": 2,
+    "AGenerationUnchanged": true,
+    "BGeneration": 4,
+    "BLastStartedAtUTC": "2026-11-12T19:09:29.033892Z",
+    "BGenerationIsHistoricalNotProofOfFreshPhoneSync": true,
+    "productionRows": 2,
+    "allProductionEnvironment": "PRODUCTION",
+    "productionFingerprint": "127372f998045ce4eee14d16474f37c6",
+    "sqlReadOnlyNoGrantsOrMutation": true,
+    "ownerAskedRefreshThenOneMonthlySandboxTestPurchase": true,
+    "ownerPurchaseResultReceived": true,
+    "purchaseOrProSuccessEstablished": false,
+    "resultScope": "This earlier baseline remains pre-purchase; the later paid result is separately recorded in monthlySandboxPurchaseMilestone"
+  },
+  "monthlySandboxPurchaseMilestone": {
+    "status": "FIRST_MONTHLY_SANDBOX_PURCHASE_TO_SERVER_PRO_VERIFIED",
+    "sourceBuild": "1.0.0 (6)",
+    "observedAtUTC": "2026-11-12T19:47:23.131123Z",
+    "evidenceFile": "artifacts/app-store/billing-validation-2026-11-12/monthly-purchase-canonical-proof.json",
+    "evidenceSHA256": "733cee12ef526d160682c68b0dc230056b984cdbc721036012b0039ef51dbc82",
+    "ownerExplicitlyConfirmedMonthlySandboxPurchaseAndPro": true,
+    "ownerEarlierAnswerWasPricesOnlyNotPurchase": true,
+    "independentPhysicalScreenCapture": false,
+    "B": {
+      "activeReviewScopeEpoch": 1,
+      "namespaceValid": true,
+      "canonicalActive": true,
+      "store": "app_store",
+      "environment": "SANDBOX",
+      "productId": "com.feridun.syncapp.pro.monthly",
+      "canonicalExpiryUTC": "2026-11-13T19:46:47Z",
+      "serverLeaseExpiresUTC": "2026-11-12T19:51:54.265Z",
+      "generation": 12,
+      "lastStartedAtUTC": "2026-11-12T19:46:54.128247Z",
+      "realReviewWebhookEvents": 1,
+      "firstReviewWebhookAtUTC": "2026-11-12T19:46:53.405895Z",
+      "reviewBackupRows": 1,
+      "productionRows": 0
+    },
+    "A": {
+      "generation": 2,
+      "stillFree": true,
+      "reviewBackups": 0,
+      "reviewWebhookEvents": 0,
+      "productionRows": 0
+    },
+    "productionRows": 2,
+    "allProductionEnvironment": "PRODUCTION",
+    "productionFingerprintUnchanged": "127372f998045ce4eee14d16474f37c6",
+    "noManualGrantOrVerificationTimeServerMutation": true,
+    "rawUpstreamReceiptInspected": false,
+    "attribution": "Hosted active canonical review state is consistent with the deployed canonical validation path; no raw upstream response was inspected.",
+    "backupContentRestoreVerified": false,
+    "sameBRestoreVerified": true,
+    "transferRenewalCancellationRefundVerified": false,
+    "ownerAskedColdRestartThenSameBRestore": true,
+    "sameBRestoreAnswerReceived": true,
+    "sameBRestoreEvidenceScope": "Owner-reported cold restart/same-account Restore plus subsequent hosted revalidation; see sameAccountRestoreMilestone, not a distinct restore-event proof."
+  },
+  "postRefreshFreeBaselineHistory": {
+    "scope": "Post-Refresh pre-purchase historical Free snapshot; owner confirmed prices only, not purchase",
+    "evidenceFile": "artifacts/app-store/billing-validation-2026-11-12/post-refresh-free-baseline.json",
+    "observedAtUTC": "2026-11-12T19:45:12.022778Z",
+    "BGeneration": 8,
+    "BInactive1970Free": true,
+    "noProductEventBackupOrPro": true,
+    "distinctFromLaterPaidGeneration12": true
+  },
+  "sameAccountRestoreMilestone": {
+    "status": "OWNER_REPORTED_SAME_ACCOUNT_RESTORE_WITH_HOSTED_REVALIDATION_PASSED",
+    "sourceBuild": "1.0.0 (6)",
+    "observedAtUTC": "2026-11-12T19:50:38.124897Z",
+    "evidenceFile": "artifacts/app-store/billing-validation-2026-11-12/same-account-restore-proof.json",
+    "evidenceSHA256": "9d74b4cd210885e87e0470d49e43ca72c0c2787817f1d8bbe720a3c1b03d7b69",
+    "ownerReportedColdRestartAndSameAccountRestorePassed": true,
+    "independentPhysicalScreenCapture": false,
+    "B": {
+      "canonicalActive": true,
+      "serverLeaseActive": true,
+      "store": "app_store",
+      "environment": "SANDBOX",
+      "productId": "com.feridun.syncapp.pro.monthly",
+      "generation": 16,
+      "lastStartedAtUTC": "2026-11-12T19:49:57.422670Z",
+      "serverLeaseExpiresUTC": "2026-11-12T19:54:57.542Z",
+      "canonicalExpiryUTC": "2026-11-13T19:46:47Z",
+      "realReviewWebhookEvents": 1,
+      "reviewBackupRows": 1,
+      "productionRows": 0
+    },
+    "A": {
+      "generation": 2,
+      "stillFree": true,
+      "reviewWebhookEvents": 0,
+      "reviewBackupRows": 0,
+      "productionRows": 0
+    },
+    "productionRows": 2,
+    "allProductionEnvironment": true,
+    "productionFingerprintUnchanged": "127372f998045ce4eee14d16474f37c6",
+    "distinctRestoreEventProven": false,
+    "generationAttributionLimit": "Automatic lease renewal can also advance generation; hosted revalidation does not uniquely identify a restore request.",
+    "yearlyCheckoutVerified": false,
+    "crossAccountTransferVerified": false,
+    "renewalCancellationRefundVerified": false,
+    "backupContentRestorationVerified": false,
+    "appleReviewerCredentialsReady": false,
+    "noManualGrantOrVerificationTimeServerMutation": true,
+    "rawUpstreamReceiptInspected": false
+  }
+}

@@ -371,33 +371,48 @@ test('native NOT_REQUIRED privacy result is distinct from unknown and never open
   }
 });
 
-test('cold Pro and disabled-ads settings expose native privacy choices without initializing ads', async () => {
-  for (const mode of ['cold-pro', 'disabled-ads']) {
+test('cold Pro retains native privacy choices when ads are configured without initializing ads', async () => {
+  const { controller, calls, getLoadCount } = setup();
+  assert.equal(controller.getState().nativeAvailable, true);
+  controller.setGate({ ...free, eligible: false });
+  controller.acquirePlacement();
+  await settle();
+  assert.equal(getLoadCount(), 0);
+  assert.equal(await controller.requestPrivacyOptions(() => true), true);
+  assert.deepEqual(calls, ['info', 'privacy']);
+  assert.equal(controller.getState().privacyOptionsRequired, true);
+  assert.equal(controller.getState().initialized, false);
+  assert.equal(controller.getState().canRequestAds, false);
+});
+
+test('disabled ads never load consent or GMA across direct actions, placements and foreground changes', async () => {
+  for (const dev of [false, true]) {
     const { controller, calls, getLoadCount } = setup({
-      ...(mode === 'disabled-ads'
-        ? {
-            controller: {
-              config: createAdsConfig({
-                platform: 'ios',
-                dev: true,
-                env: { EXPO_PUBLIC_ADS_ENABLED: 'false' },
-              }),
-            },
-          }
-        : {}),
+      controller: {
+        config: createAdsConfig({
+          platform: 'ios',
+          dev,
+          env: { EXPO_PUBLIC_ADS_ENABLED: 'false' },
+        }),
+      },
     });
-    assert.equal(controller.getState().nativeAvailable, true, mode);
-    assert.equal(controller.getState().privacyOptionsRequired, false, mode);
-    assert.equal(getLoadCount(), 0, mode);
-    controller.setGate({ ...free, eligible: mode !== 'cold-pro' });
-    controller.acquirePlacement();
+    assert.equal(controller.getState().nativeAvailable, true);
+    for (const gate of [free, { ...free, appActive: false }, free]) {
+      controller.setGate(gate);
+      const release = controller.acquirePlacement();
+      const before = controller.getState();
+      assert.equal(await controller.requestPrivacyOptions(() => true), false);
+      assert.equal(controller.getState(), before, 'disabled manual actions do not mutate state');
+      release();
+    }
     await settle();
-    assert.equal(getLoadCount(), 0, mode);
-    assert.equal(await controller.requestPrivacyOptions(() => true), true, mode);
-    assert.deepEqual(calls, ['info', 'privacy'], mode);
-    assert.equal(controller.getState().privacyOptionsRequired, true, mode);
-    assert.equal(controller.getState().initialized, false, mode);
-    assert.equal(controller.getState().canRequestAds, false, mode);
+    assert.equal(getLoadCount(), 0);
+    assert.deepEqual(calls, []);
+    assert.equal(controller.getState().privacyOptionsRequirementStatus, 'UNKNOWN');
+    assert.equal(controller.getState().privacyOptionsBusy, false);
+    assert.equal(controller.getState().initialized, false);
+    assert.equal(controller.getState().canRequestAds, false);
+    assert.equal(controller.getState().error, null);
   }
 });
 
@@ -818,4 +833,122 @@ test('an already-open native form drains while held and unsafe release cannot st
   await settle();
   assert.equal(calls.filter((call) => call === 'form').length, 1);
   assert.equal(calls.includes('init'), false);
+});
+
+test('cached consent and completed SDK preparation restore readiness only under a hold and safe placement', async () => {
+  const { controller, calls, getLoadCount } = setup();
+  controller.setGate(free);
+  const releaseIdle = controller.acquirePlacement();
+  await settle();
+  assert.equal(controller.hasReusableConsentAndSdk(), true);
+  const releaseSession = controller.holdPreparation();
+  releaseIdle();
+  controller.setGate({ ...free, eligible: false, blocked: true });
+  assert.equal(controller.getState().ready, false);
+  assert.equal(
+    controller.hasReusableConsentAndSdk(),
+    true,
+    'Music owns a blocker, not device consent',
+  );
+  const before = JSON.stringify(calls);
+  assert.equal(controller.restoreReadyFromCache(), false);
+  controller.setGate({ ...free, blocked: false });
+  const releaseBoundary = controller.acquirePlacement();
+  assert.equal(
+    controller.restoreReadyFromCache(() => false),
+    false,
+  );
+  assert.equal(
+    controller.restoreReadyFromCache(() => {
+      throw new Error('retired caller');
+    }),
+    false,
+  );
+  assert.equal(
+    controller.restoreReadyFromCache(() => true),
+    true,
+  );
+  assert.equal(controller.getState().ready, true);
+  assert.equal(controller.getState().canRequestAds, true);
+  assert.equal(JSON.stringify(calls), before);
+  assert.equal(getLoadCount(), 1);
+  releaseBoundary();
+  assert.equal(controller.getState().ready, false);
+  assert.equal(
+    await controller.requestPrivacyOptions(),
+    false,
+    'Caller session hold survives boundary cleanup',
+  );
+  releaseBoundary();
+  releaseSession();
+  assert.equal(controller.restoreReadyFromCache(), false, 'No unheld cache restoration');
+});
+
+test('cache probes and restoration never load SDK for cold, denied, configuring or initializing states', async () => {
+  const cold = setup();
+  const releaseColdHold = cold.controller.holdPreparation();
+  cold.controller.setGate(free);
+  cold.controller.acquirePlacement();
+  assert.equal(cold.controller.hasReusableConsentAndSdk(), false);
+  assert.equal(cold.controller.restoreReadyFromCache(), false);
+  assert.equal(cold.getLoadCount(), 0);
+  assert.deepEqual(cold.calls, []);
+  cold.controller.dispose();
+  releaseColdHold();
+  const denied = setup({
+    consent: { loadAndShowConsentFormIfRequired: async () => ({ ...info, canRequestAds: false }) },
+  });
+  denied.controller.setGate(free);
+  denied.controller.acquirePlacement();
+  await settle();
+  assert.equal(denied.controller.hasReusableConsentAndSdk(), false);
+  for (const method of ['setRequestConfiguration', 'initialize']) {
+    const pending = deferred();
+    const app = setup({ mobileAds: { [method]: () => pending.promise } });
+    app.controller.setGate(free);
+    app.controller.acquirePlacement();
+    await settle();
+    assert.equal(app.controller.hasReusableConsentAndSdk(), false, method);
+    const release = app.controller.holdPreparation();
+    assert.equal(app.controller.restoreReadyFromCache(), false, method);
+    app.controller.dispose();
+    pending.resolve();
+    await settle();
+    release();
+  }
+});
+
+test('cache restore checks the latest identity, eligibility and foreground before publishing ready', async () => {
+  let latest = free;
+  const { controller, calls } = setup({ controller: { getCurrentGate: () => latest } });
+  controller.setGate(free);
+  controller.acquirePlacement();
+  await settle();
+  const release = controller.holdPreparation();
+  const before = calls.length;
+  for (const changed of [
+    { identity: 'account-b' },
+    { eligible: false },
+    { appActive: false },
+    { blocked: true },
+  ]) {
+    latest = { ...free, ...changed };
+    assert.equal(
+      controller.restoreReadyFromCache(() => true),
+      false,
+    );
+  }
+  assert.equal(calls.length, before);
+  latest = free;
+  assert.equal(
+    controller.restoreReadyFromCache(() => true),
+    true,
+  );
+  controller.dispose();
+  assert.equal(controller.hasReusableConsentAndSdk(), false);
+  assert.equal(
+    controller.restoreReadyFromCache(() => true),
+    false,
+  );
+  release();
 });

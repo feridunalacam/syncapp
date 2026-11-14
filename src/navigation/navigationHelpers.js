@@ -16,6 +16,6 @@ export const navigateToCreateRoutine = (navigation, templateRoutine = null) => {
   if (state?.routeNames?.includes('CreateRoutine')) {
     navigation.navigate('CreateRoutine', params);
   } else {
-    navigation.navigate('Routine', { screen: 'CreateRoutine', params });
+    navigation.navigate('Routine', { screen: 'CreateRoutine', params, initial: false });
   }
 };

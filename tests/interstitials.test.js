@@ -356,3 +356,213 @@ test('disposing retires loads but waits for a real native terminal event after s
   assert.deepEqual(await showing, { shown: true, reason: 'closed' });
   assert.equal(app.changes.length, before, 'Disposed state is not published to old React owners');
 });
+
+test('bounded Start readiness makes one load, then calls the synchronous presentation guard immediately before native show', async () => {
+  const app = setup();
+  const order = [];
+  let done = false;
+  const showing = app.controller
+    .showIfReady({
+      opportunityId: 'start:bounded',
+      readinessTimeoutMs: 1500,
+      beforePresent: () => {
+        order.push('guard');
+        return true;
+      },
+    })
+    .then((result) => {
+      done = true;
+      return result;
+    });
+  assert.equal(app.ads.length, 1);
+  assert.equal(app.ads[0].loads, 1);
+  assert.equal(app.ads[0].shows, 0);
+  assert.deepEqual(order, []);
+  app.advance(1499);
+  await settle();
+  assert.equal(done, false);
+  app.ads[0].emit('loaded');
+  await settle();
+  assert.deepEqual(order, ['guard']);
+  assert.equal(app.ads[0].shows, 1);
+  app.advance(1000000);
+  await settle();
+  assert.equal(done, false, 'Readiness deadline cannot release a presented native ad');
+  app.ads[0].emit('closed');
+  assert.deepEqual(await showing, { shown: true, reason: 'closed' });
+});
+
+test('bounded Start timeout consumes its opportunity, retires late load and retains the normal load-error backoff', async () => {
+  const app = setup();
+  let guardCalls = 0;
+  const showing = app.controller.showIfReady({
+    opportunityId: 'start:timeout',
+    readinessTimeoutMs: 1500,
+    beforePresent: () => {
+      guardCalls++;
+      return true;
+    },
+  });
+  const old = app.ads[0];
+  app.advance(1500);
+  assert.deepEqual(await showing, { shown: false, reason: 'not-ready' });
+  old.late('loaded');
+  assert.equal(old.shows, 0);
+  assert.equal(old.destroys, 1);
+  assert.equal(guardCalls, 0);
+  assert.equal(app.controller.getState().loaded, false);
+  assert.deepEqual(
+    await app.controller.showIfReady({ opportunityId: 'start:timeout', readinessTimeoutMs: 1500 }),
+    { shown: false, reason: 'duplicate' },
+  );
+  assert.equal(app.controller.preload(), false);
+  app.advance(30000);
+  assert.equal(app.controller.preload(), true);
+  assert.equal(app.ads.length, 2);
+});
+
+test('bounded readiness preserves action spacing and cooldown without creating unused native ads', async () => {
+  const app = setup({ seed: false });
+  assert.deepEqual(
+    await app.controller.showIfReady({ opportunityId: 'start:first', readinessTimeoutMs: 1500 }),
+    { shown: false, reason: 'spacing' },
+  );
+  assert.equal(app.ads.length, 0);
+  const first = app.controller.showIfReady({
+    opportunityId: 'start:second',
+    readinessTimeoutMs: 1500,
+  });
+  app.ads[0].emit('loaded');
+  await settle();
+  app.ads[0].emit('opened');
+  app.ads[0].emit('closed');
+  await first;
+  assert.deepEqual(
+    await app.controller.showIfReady({ opportunityId: 'start:third', readinessTimeoutMs: 1500 }),
+    { shown: false, reason: 'cooldown' },
+  );
+  assert.equal(app.ads.length, 1);
+});
+
+test('Start guard rejects false, missing, throwing and async approval without showing native UI', async () => {
+  for (const guard of [
+    () => false,
+    () => undefined,
+    () => {
+      throw new Error('retired');
+    },
+    () => Promise.resolve(true),
+    () => Promise.reject(new Error('unsupported async approval')),
+  ]) {
+    const app = setup();
+    const ad = app.load();
+    assert.deepEqual(
+      await app.controller.showIfReady({ opportunityId: 'start:guard', beforePresent: guard }),
+      { shown: false, reason: 'cancelled' },
+    );
+    assert.equal(ad.shows, 0);
+    assert.equal(ad.destroys, 1);
+  }
+});
+
+test('all normal gates and the captured account are rechecked after the synchronous Start guard', async () => {
+  for (const next of [
+    { eligible: false },
+    { appActive: false },
+    { blocked: true },
+    { identity: 'new-account' },
+    { ready: false },
+  ]) {
+    const app = setup();
+    const ad = app.load();
+    assert.deepEqual(
+      await app.controller.showIfReady({
+        opportunityId: 'start:changed',
+        beforePresent: () => {
+          app.gate(next, false);
+          return true;
+        },
+      }),
+      { shown: false, reason: 'ineligible' },
+    );
+    assert.equal(ad.shows, 0);
+  }
+});
+
+test('bounded waiting cancels on blocker or account changes and late LOADED cannot use the retired Start', async () => {
+  for (const next of [
+    { blocked: true },
+    { identity: 'new-account' },
+    { eligible: false },
+    { appActive: false },
+  ]) {
+    const app = setup();
+    const showing = app.controller.showIfReady({
+      opportunityId: 'start:cancelled',
+      readinessTimeoutMs: 1500,
+    });
+    const ad = app.ads[0];
+    app.gate(next);
+    assert.deepEqual(await showing, { shown: false, reason: 'not-ready' });
+    ad.late('loaded');
+    assert.equal(ad.shows, 0);
+    assert.equal(ad.destroys, 1);
+  }
+});
+
+test('simultaneous bounded Starts share one readiness and native terminal barrier', async () => {
+  const app = setup();
+  const first = app.controller.showIfReady({
+    opportunityId: 'start:one',
+    readinessTimeoutMs: 1500,
+  });
+  const second = app.controller.showIfReady({
+    opportunityId: 'start:two',
+    readinessTimeoutMs: 1500,
+  });
+  assert.equal(first, second);
+  assert.equal(app.ads.length, 1);
+  app.ads[0].emit('loaded');
+  await settle();
+  assert.equal(app.ads[0].shows, 1);
+  app.ads[0].emit('error');
+  assert.deepEqual(await first, { shown: false, reason: 'error' });
+});
+
+test('a LOADED result invalidated before its continuation cannot consume a replacement creative', async () => {
+  const app = setup();
+  const showing = app.controller.showIfReady({
+    opportunityId: 'start:old-generation',
+    readinessTimeoutMs: 1500,
+  });
+  const old = app.ads[0];
+  old.emit('loaded');
+  app.controller.invalidate();
+  const fresh = app.load();
+  assert.deepEqual(await showing, { shown: false, reason: 'not-ready' });
+  assert.equal(old.destroys, 1);
+  assert.equal(fresh.shows, 0);
+  assert.equal(
+    app.controller.getState().loaded,
+    true,
+    'The replacement remains its own cached creative',
+  );
+});
+
+test('the single readiness budget starts before native preload instead of granting another 1500ms afterward', async () => {
+  const app = setup({ load: () => app.advance(1000) });
+  let done = false;
+  const showing = app.controller
+    .showIfReady({ opportunityId: 'start:total-budget', readinessTimeoutMs: 1500 })
+    .then((result) => {
+      done = true;
+      return result;
+    });
+  app.advance(499);
+  await settle();
+  assert.equal(done, false);
+  app.advance(1);
+  assert.deepEqual(await showing, { shown: false, reason: 'not-ready' });
+  assert.equal(app.ads[0].shows, 0);
+  assert.equal(app.ads[0].destroys, 1);
+});

@@ -1,0 +1,242 @@
+{
+  "schemaVersion": 1,
+  "status": "VALID / IN_BETA_TESTING \u2014 existing owner-only TestFlight delivery",
+  "preparedAtUTC": "2026-11-14T12:00:32.685573+00:00",
+  "scope": "Exact iOS build 11 validation, upload and existing owner-only internal delivery; public review/release held",
+  "artifact": {
+    "bundleIdentifier": "com.feridun.syncapp",
+    "version": "1.0.0",
+    "buildNumber": "11",
+    "applicationRuntimeCommit": "b9130a720f7ce10df54e3e42dbb8d9ad9ece84ce",
+    "submittedDocumentationOnlyCommit": "72b362852e5ee8e943309316e6467dcee0fabf2d",
+    "easBuildID": "f24a7420-409d-4c96-b168-67ca072de77f",
+    "ipaSHA256": "8502b802b6f30575c549f6cfb3be996009f1524af64479f9495fbc37c1ba14f5",
+    "ipaBytes": 23110601,
+    "actualHBCSHA256": "a4ae247f457012ec6d9ba6c1b46700dbdc1a22fe1f361f1a9e94d0c7c7644aa3",
+    "approvedLocalHBCSHA256": "7a8d1dbc92b501ab6feccfb4215cccc17c79046aefd296c3690ec8bfb8c9f044"
+  },
+  "sourceAndCompiledPayload": {
+    "frozenRuntimeFiles": 164,
+    "submittedRuntimeFiles": 163,
+    "nativeInputs": 17,
+    "onlySubmittedRuntimeExclusion": "src/services/alerts/coachVoice.js",
+    "uploadedSourceNonGitFiles": 348,
+    "retainedEquivalentNonGitBytesMatchObservedOfficialUploadManifest": true,
+    "officialUploadedTarRetained": false,
+    "retainedPreviewRawTarEqualityClaimed": false,
+    "sourceProvenanceLimit": "The official CLI cleaned the actual upload tar; retained equivalent source is bound by the recorded identical 348-file non-Git manifest, with Git metadata accounted separately.",
+    "exactExportedAssets": 22,
+    "originalCueAssetsPresent": 8,
+    "historicalCoachAssetsAbsent": 14,
+    "completeLicenseTextsRetained": 62
+  },
+  "productionFlags": {
+    "EXPO_PUBLIC_BUILD_PROFILE": "production",
+    "EXPO_PUBLIC_ADS_ENABLED": "true",
+    "EXPO_PUBLIC_ADS_TEST_MODE": "false",
+    "EXPO_PUBLIC_APPLE_MUSIC_COMPANION_ENABLED": "true",
+    "EXPO_PUBLIC_APPLE_MUSIC_ENABLED": "false",
+    "EXPO_PUBLIC_SPOTIFY_ENABLED": "false",
+    "EXPO_PUBLIC_WEB_MEDIA_IMPORT_ENABLED": "false"
+  },
+  "originalNativeArtifactAudit": {
+    "passed": false,
+    "checksPassed": 43,
+    "checksTotal": 44,
+    "hermesMatchesApprovedProductionExport": false,
+    "rawHBCByteEquality": false,
+    "historicalUploadHeld": true,
+    "historicalAppleValidationOrUploadPerformed": false,
+    "note": "Preserved literal pre-upload audit. Its sole false check is raw HBC equality; subsequent bounded proofs and official upload results are recorded separately."
+  },
+  "strictHBCDifferenceAccounting": {
+    "classification": "Sole exact compiler filename and dependent metadata difference; raw equality remains false",
+    "actualHBCBytes": 7344375,
+    "approvedHBCBytes": 7344309,
+    "lengthDifferenceBytes": 66,
+    "exactRawJSSHA256": "5ef6309ef717eb1cc342f3e0a8dbac30462d8275a39795e9fa70b03f15fe3b4e",
+    "exactRawJSSHA1": "910fae89426a6d6e806dbb904ebbccafde5c2492",
+    "bothHeadersBindExactRawJS": true,
+    "actualCompilerFilenameBytes": 141,
+    "approvedCompilerFilenameBytes": 75,
+    "allowedDifferences": [
+      "one exact compiler debug filename",
+      "dependent file length and two filename length fields",
+      "dependent valid SHA1 footer"
+    ],
+    "twoIndependentProofsPassed": true,
+    "rootWholeFileReplayBothDirectionsExact": true,
+    "allActualBytesAccountedFor": true,
+    "runtimeStringsFunctionsAssetsAndFlagsExact": true,
+    "broadNormalizationPerformed": false,
+    "sourceOrCommentElisionPerformed": false,
+    "compilerInvocations": 0,
+    "signedIPAChanged": false
+  },
+  "cloudNativeObservation": {
+    "approvedPodEntries": 183,
+    "directVersionMatches": 116,
+    "directVersionMismatches": 0,
+    "notDirectlyObservedSubspecEntries": 67,
+    "all183VersionsDirectlyObserved": false,
+    "subspecVersionInferencePerformed": false,
+    "fourSwiftCompilerReferencesObserved": true,
+    "configuredImage": "macos-tahoe-26.5-xcode-26.6",
+    "imageLiteralObserved": true,
+    "xcode26_6Observed": true,
+    "iphoneOS26_5Observed": true,
+    "requestedResourceClass": "m-medium",
+    "resourceClassFromAPI": null,
+    "resourceClassInferred": false,
+    "observationLimit": "Later retained exact-job logs support the observations above; earlier unavailable-log and pre-upload hold fields remain historical snapshots."
+  },
+  "verification": {
+    "fullSuite": {
+      "passed": 1077,
+      "failed": 0,
+      "skipped": 0,
+      "node": "22.23.4",
+      "isolatedPinnedPGliteEnabled": true,
+      "logSHA256": "d5801ac0621c34d83e4d5409c93c8fd2c581ed4d2bc6a9181e58df589856da1c"
+    },
+    "focusedSubsets": {
+      "ads": 70,
+      "companion": 93,
+      "parentIntegration": 42,
+      "additiveToFullSuite": false
+    },
+    "finalLocalUI": {
+      "classification": "Actual final frozen JS overlay on fresh native17 Simulator host; not physical iPhone or Store11",
+      "receiptSHA256": "b8159721c627519211709f8240e85c63a5c029fa412b040c4964e90a5d523de4",
+      "ipadStartPauseResumeEndObserved": true,
+      "ipadPauseStayedAt0041": true,
+      "endedSummaryDuration": "0:40",
+      "completedRounds": 0,
+      "finishTestAdObservedAfterSessionEnd": true,
+      "adObservedDuringActiveOrPausedFrames": false,
+      "ownerReportedAdClosed": true,
+      "correctIPadAdWindowAbsentAndTimerReadyObserved": true,
+      "directNativeCLOSEDOrERRORTraceRecorded": false,
+      "appTerminatedToDismissAd": false,
+      "iphoneExistingGuestRoutinesPreserved": 3,
+      "advancedDraftChangesAndDiscardObserved": true,
+      "reopenPreservedOriginalAudioOffAndPreparationZero": true,
+      "draftSaved": false,
+      "activeMusicKitAccountOrQueueConnected": false,
+      "physicalStoreBuild11UIClaimed": false
+    }
+  },
+  "officialApple": {
+    "validationSucceeded": true,
+    "validationExitCode": 0,
+    "validationAtUTC": "2026-11-14T11:45:32.632Z",
+    "uploadSucceeded": true,
+    "uploadExitCode": 0,
+    "uploadAtUTC": "2026-11-14T11:48:22.475Z",
+    "deliveryID": "9dc03cde-3896-4d3a-9c09-c10f3d6f7a1e",
+    "automaticRetryUsed": false
+  },
+  "ownerOnlyDelivery": {
+    "ascBuildID": "9dc03cde-3896-4d3a-9c09-c10f3d6f7a1e",
+    "existingGroupOnly": true,
+    "testerCount": 1,
+    "buildCountAfterAssociation": 8,
+    "checksPassed": 10,
+    "checksTotal": 10,
+    "checks": {
+      "ownerOnlyConfirmed": true,
+      "groupSettingsUnchanged": true,
+      "testerMembershipUnchanged": true,
+      "allPriorBuildsPreserved": true,
+      "onlyExpectedBuildAdded": true,
+      "exactASCBuildPreserved": true,
+      "build11Associated": true,
+      "appleValid": true,
+      "notExpired": true,
+      "internalTestingReady": true
+    },
+    "passed": true,
+    "verifiedAtUTC": "2026-11-14T11:55:50.697Z",
+    "externalTestersModified": false,
+    "testerInstalledOrPhysicallyTestedBuild11Claimed": false,
+    "processingState": "VALID",
+    "internalState": "IN_BETA_TESTING",
+    "groupName": "Sync Internal QA"
+  },
+  "freeBuildQuota": {
+    "plan": "Free",
+    "iosUsed": 10,
+    "iosLimit": 15,
+    "iosRemaining": 5,
+    "overageBuilds": 0,
+    "overageCostCents": 0,
+    "readOnly": true
+  },
+  "remainingScope": {
+    "publicReviewSubmissionHeld": true,
+    "publicReleaseHeld": true,
+    "draftAppStoreBuildSelectionHeld": true,
+    "existingScreenshotCount": 8,
+    "existingScreenshotScope": "Six retained build10 frames and two new local runtime164/native17 editor frames bound to signed11 code/assets; next recovery candidate comparison pending",
+    "finalScreenshotComparisonComplete": false,
+    "necessaryScreenshotUpdatesIfAnyPending": true,
+    "physicalBuild11ProPurchaseVerified": false,
+    "physicalBuild11RestoreVerified": false,
+    "userMusicKitPlaybackOrLiveLibraryCoversVerified": false,
+    "physicalBuild11BackupVerified": false,
+    "freshAppleSignInVerified": false,
+    "twoNewNativeRoutineEditorScreenshotsPrepared": true,
+    "newScreenshotStoreSaveAwaitingOwnerAppleBrowserLogin": false,
+    "physicalBuild11RestoreTestCardPending": false,
+    "physicalBuild11ProActiveOwnerReported": true,
+    "physicalBuild11RestoreOwnerReportedPassed": true,
+    "hostedReviewProLeaseRenewalObserved": true,
+    "hostedReviewBackupRevisionAdvancedFrom2To3": true,
+    "olderCloudCopyReplacedNewLocalRoutineOwnerReported": true,
+    "blockingRecoveryFixRequiredBeforePublicReview": true,
+    "physicalRecoveryCopyPresenceVerified": false,
+    "newRoutineEditorStorePlacementsSavedAndReloadVerified": true,
+    "physicalBuild11RestoreVerificationScope": "Owner report; no direct phone instrumentation. Later hosted reads separately observed lease renewal and backup revision advance; recovery/content-preservation failed as scoped."
+  },
+  "evidenceSHA256": {
+    "group-delivery-proof.json": "8c2d476c2a402334ccf74407373ae2e55f94166c7f8f3273b83b240546dd24ce",
+    "apple-validation-summary.json": "158e28dce3f2b259b1ae52033c52ee637917f5815586b3b21f3fdf089535639b",
+    "apple-upload-summary.json": "a587d425352301a233ea9962a38dd79d59c1edbcfda708c164f3c7806144a110",
+    "ipa-verification.json": "6c4a211198d1f63c703c580debf8bc847255fa8df1dde1735553a68a9bbf1a61",
+    "root-build11-source-cloud-lineage.json": "f54f25ff891722a8f8d5ed62fade97052f8dabcb23455a41d1bfff33eda6c62d",
+    "independent-hbc-exact-review.json": "1b9b5f1f407a9c961e042d9ce4abd4cc71ebd6720ce26efb7c1400881f884399",
+    "independent-hbc-difference-proof.json": "e5f456d1a6ac50503e4bb19c4124106dd69290ce5a782853b072a9a461ddd540",
+    "root-direct-whole-hbc-replay.json": "d0d663cf419ed7f791d435e790a1a6f6a3aee7fa25283b473979f028d90479ca",
+    "cloud-native17-pods-swift-sdk-comparison-safe.json": "46d2714240278f1a63426d29cc3650ebf8106f3c34f85f2445e898fb2e22520b",
+    "post-build11-free-quota-safe.json": "e2e4bedbb73eed1964f7ff6e556e6c805006c5c712d83342f41dc855f1c0069a"
+  },
+  "finalLocalUIReceipt": {
+    "repositoryPath": "artifacts/app-store/final-runtime164-qa-2026-11-14/root-final-native-ui-safe.json",
+    "sha256": "b8159721c627519211709f8240e85c63a5c029fa412b040c4964e90a5d523de4"
+  },
+  "recordType": "Exact build11 delivery receipt; later public-review and physical-QA results are separate",
+  "verifiedAtUTC": "2026-11-14T11:55:50.697Z",
+  "newRoutineEditorCaptureReceipt": {
+    "repositoryPath": "artifacts/app-store/current-runtime164-2026-11-14/editor-native-capture-rgb-safe.json",
+    "sha256": "341d85630a303b4e333261b5a639939777092f489337de935503dd4ff0c74da6",
+    "actualLocalNativeCapture": true,
+    "physicalSigned11CaptureClaimed": false,
+    "storeDraftSavePerformed": true
+  },
+  "safeLocalReceiptDirectory": "../artifacts/app-store/testflight-1.0.0-11/",
+  "documentPreparation": {
+    "repoOrGitWrites": false,
+    "liveServiceCalls": false,
+    "keysContactValuesPrivateURLsOrRawLogsIncluded": false,
+    "rootReviewedAndSaved": true
+  },
+  "newRoutineEditorStoreSaveReceipt": {
+    "repositoryPath": "artifacts/app-store/current-runtime164-2026-11-14/asc-editor-placement-saved-safe.json",
+    "sha256": "a661830e56427925119fa2d62de9810c069d3882ea76a389b3ab4550e0fc934f"
+  },
+  "physicalOwnerFeedbackReceipt": {
+    "repositoryPath": "artifacts/app-store/testflight-1.0.0-11/physical-owner-feedback-safe.json",
+    "sha256": "f91aa56e0136fbdbe56f0472b1630de207e3aeac619a8ecda6245e8e10a66ee2"
+  },
+  "newBlockingIssueEvidence": "ios-backup-recovery-fix-evidence.json"
+}

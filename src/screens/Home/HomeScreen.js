@@ -12,6 +12,9 @@ import Animated, {
 import { useTheme } from '../../context/ThemeContext';
 import { useRoutineContext } from '../../context/RoutineContext';
 import { useWorkout } from '../../context/WorkoutContext';
+import { useAppleMusicConnection } from '../../context/AppleMusicConnectionContext';
+import AppleMusicWorkoutControl from '../../components/common/AppleMusicWorkoutControl';
+import RoutineSoundtrackControl from '../../components/common/RoutineSoundtrackControl';
 import { getRoutineDuration, buildTimeline } from '../../domain/routines';
 import { formatTime } from '../../utils/timeFormatters';
 import { navigateToCreateRoutine } from '../../navigation/navigationHelpers';
@@ -52,6 +55,7 @@ export default function HomeScreen({ navigation, route }) {
   const { theme } = useTheme();
   const { routines } = useRoutineContext();
   const workout = useWorkout();
+  const appleMusic = useAppleMusicConnection();
   const [picker, setPicker] = useState(false);
   const [dismissedSession, setDismissedSession] = useState(null);
   const finished = sessionToLog(workout.session);
@@ -144,7 +148,7 @@ export default function HomeScreen({ navigation, route }) {
             </Text>
             <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 5 }}>
               {selectedRoutine
-                ? `${selectedRoutine.rounds} rounds · ${formatTime(getRoutineDuration(selectedRoutine))}`
+                ? `${selectedRoutine.rounds} round${selectedRoutine.rounds === 1 ? '' : 's'} · ${formatTime(getRoutineDuration(selectedRoutine))}`
                 : 'Create or select a routine to start'}
             </Text>
           </View>
@@ -254,7 +258,7 @@ export default function HomeScreen({ navigation, route }) {
             </Text>
             <Text style={{ color: theme.textSecondary, marginTop: 7, lineHeight: 20 }}>
               {finished.name} · {formatTime(finished.actualDurationSec)} ·{' '}
-              {finished.roundsCompleted} rounds completed
+              {finished.roundsCompleted} round{finished.roundsCompleted === 1 ? '' : 's'} completed
             </Text>
             <Pressable
               accessibilityRole="button"
@@ -272,88 +276,103 @@ export default function HomeScreen({ navigation, route }) {
             <Text style={{ color: theme.textSecondary, fontSize: 12 }}>End session</Text>
           </Pressable>
         )}
-        <Surface
-          variant="card"
-          style={[styles.music, { backgroundColor: theme.card, borderColor: theme.border }]}
-        >
-          <View style={styles.musicTop}>
-            <MusicPlayerPreview
-              {...{
-                track,
-                musicProgress,
-                isMusicPlaying: isMusicPlaying && isWorkoutRunning && !isPaused,
-                isWorkoutRunning,
-                selectedRoutine,
-                currentRound,
-                currentPhase,
-              }}
-            />
-            <Pressable
-              onPress={edit}
-              disabled={!selectedRoutine || sessionAds.busy}
-              accessibilityLabel="Edit routine audio"
-              style={{ padding: 8 }}
-            >
-              <Ionicons name="ellipsis-horizontal" size={20} color={theme.textSecondary} />
-            </Pressable>
-          </View>
-          <SpotifyDevicePicker />
-          {track && (
-            <View style={[styles.musicControls, { borderColor: theme.border }]}>
-              {[
-                {
-                  icon: 'shuffle',
-                  label: 'Shuffle music',
-                  action: workout.toggleShuffle,
-                  selected: workout.isShuffled,
-                },
-                {
-                  icon: 'play-skip-back-outline',
-                  label: 'Previous track',
-                  action: workout.skipPrevious,
-                },
-                {
-                  icon: 'play-skip-forward-outline',
-                  label: 'Next track',
-                  action: workout.skipNext,
-                },
-                {
-                  icon: 'repeat',
-                  label: 'Repeat music',
-                  action: workout.toggleRepeat,
-                  selected: workout.isRepeating,
-                },
-              ].map((item) => (
-                <Pressable
-                  key={item.label}
-                  onPress={item.action}
-                  accessibilityLabel={item.label}
-                  style={{ padding: 8 }}
-                >
-                  <Ionicons
-                    name={item.icon}
-                    size={18}
-                    color={item.selected ? theme.accent : theme.textSecondary}
-                  />
-                </Pressable>
-              ))}
+        <RoutineSoundtrackControl
+          key={selectedRoutine?.id || 'no-routine'}
+          soundtrack={selectedRoutine?.soundtrack}
+          routineName={selectedRoutine?.name}
+          style={styles.appleMusic}
+        />
+        <AppleMusicWorkoutControl style={styles.appleMusic} />
+        {appleMusic.player?.isActive?.() && (
+          <Text style={{ color: theme.textSecondary, fontSize: 12, lineHeight: 18 }}>
+            Apple Music plays independently. Your chosen alerts pause music and play before it
+            continues. Clear the queue to use round music assignments.
+          </Text>
+        )}
+        {!appleMusic.player?.isActive?.() && (
+          <Surface
+            variant="card"
+            style={[styles.music, { backgroundColor: theme.card, borderColor: theme.border }]}
+          >
+            <View style={styles.musicTop}>
+              <MusicPlayerPreview
+                {...{
+                  track,
+                  musicProgress,
+                  isMusicPlaying: isMusicPlaying && isWorkoutRunning && !isPaused,
+                  isWorkoutRunning,
+                  selectedRoutine,
+                  currentRound,
+                  currentPhase,
+                }}
+              />
+              <Pressable
+                onPress={edit}
+                disabled={!selectedRoutine || sessionAds.busy}
+                accessibilityLabel="Edit routine audio"
+                style={{ padding: 8 }}
+              >
+                <Ionicons name="ellipsis-horizontal" size={20} color={theme.textSecondary} />
+              </Pressable>
             </View>
-          )}
-          {(workout.audioError || workout.alertError) && (
-            <Text
-              accessibilityLiveRegion="polite"
-              style={{ color: theme.error, fontSize: 12, lineHeight: 18, marginTop: 10 }}
-            >
-              {workout.audioError || workout.alertError}
-            </Text>
-          )}
-        </Surface>
+            <SpotifyDevicePicker />
+            {track && (
+              <View style={[styles.musicControls, { borderColor: theme.border }]}>
+                {[
+                  {
+                    icon: 'shuffle',
+                    label: 'Shuffle music',
+                    action: workout.toggleShuffle,
+                    selected: workout.isShuffled,
+                  },
+                  {
+                    icon: 'play-skip-back-outline',
+                    label: 'Previous track',
+                    action: workout.skipPrevious,
+                  },
+                  {
+                    icon: 'play-skip-forward-outline',
+                    label: 'Next track',
+                    action: workout.skipNext,
+                  },
+                  {
+                    icon: 'repeat',
+                    label: 'Repeat music',
+                    action: workout.toggleRepeat,
+                    selected: workout.isRepeating,
+                  },
+                ].map((item) => (
+                  <Pressable
+                    key={item.label}
+                    onPress={item.action}
+                    accessibilityLabel={item.label}
+                    style={{ padding: 8 }}
+                  >
+                    <Ionicons
+                      name={item.icon}
+                      size={18}
+                      color={item.selected ? theme.accent : theme.textSecondary}
+                    />
+                  </Pressable>
+                ))}
+              </View>
+            )}
+            {(workout.audioError || workout.alertError) && (
+              <Text
+                accessibilityLiveRegion="polite"
+                style={{ color: theme.error, fontSize: 12, lineHeight: 18, marginTop: 10 }}
+              >
+                {workout.audioError || workout.alertError}
+              </Text>
+            )}
+          </Surface>
+        )}
         {upcoming.length > 0 && (
           <Animated.View layout={intervalLayout} collapsable={false}>
             <View style={styles.sectionRow}>
               <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>Intervals</Text>
               <Text style={{ color: theme.textSecondary, fontSize: 11 }}>
-                {timeline.length} intervals
+                {timeline.length} interval{timeline.length === 1 ? '' : 's'}
               </Text>
             </View>
             {upcoming.map((item, n) => (
@@ -430,7 +449,7 @@ export default function HomeScreen({ navigation, route }) {
               <View style={{ flex: 1 }}>
                 <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>{r.name}</Text>
                 <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 5 }}>
-                  {r.rounds} rounds · {formatTime(getRoutineDuration(r))}
+                  {r.rounds} round{r.rounds === 1 ? '' : 's'} · {formatTime(getRoutineDuration(r))}
                 </Text>
               </View>
               <Ionicons
@@ -449,6 +468,7 @@ export default function HomeScreen({ navigation, route }) {
   );
 }
 const styles = StyleSheet.create({
+  appleMusic: { marginBottom: 14 },
   content: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 18 },
   header: {
     flexDirection: 'row',

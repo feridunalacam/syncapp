@@ -4,12 +4,17 @@ import Slider from '@react-native-community/slider';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Surface from '../../../components/common/Surface';
 import { useTheme } from '../../../context/ThemeContext';
-import { normalizeAlertConfig, createAlertPreset } from '../../../domain/alerts';
+import {
+  normalizeAlertConfig,
+  resolveAlertConfig,
+  createAlertPreset,
+} from '../../../domain/alerts';
+import { SPOTIFY_AVAILABLE } from '../../../services/spotify/config';
+import appleMusicService from '../../../services/appleMusic';
 import DurationField from './DurationField';
 import AlertSoundPicker from './AlertSoundPicker';
 
 const PRESETS = [
-  { id: 'hiit', name: 'Voice', icon: 'mic-outline' },
   { id: 'boxing', name: 'Boxing', icon: 'notifications-outline' },
   { id: 'beeps', name: 'Beeps', icon: 'pulse-outline' },
   { id: 'silent', name: 'Silent', icon: 'volume-mute-outline' },
@@ -86,6 +91,7 @@ export const AdvancedSettings = ({
   const [selectedSignal, setSelectedSignal] = useState(null);
   const legacy = audioAlerts == null;
   const config = normalizeAlertConfig(audioAlerts) || createAlertPreset('hiit');
+  const effectiveConfig = resolveAlertConfig(config);
   const enabled = !legacy && config.enabled;
   const legacySounds = [
     { id: 'beforeStart', title: 'Preparation alert', sound: countdownBeforeStartSound },
@@ -116,10 +122,10 @@ export const AdvancedSettings = ({
     if (!preset.enabled) return !config.enabled;
     return (
       config.enabled &&
-      config.countdown.mode === preset.countdown.mode &&
+      effectiveConfig.countdown.mode === preset.countdown.mode &&
       config.countdown.seconds === preset.countdown.seconds &&
       TARGETS.every(({ id: key }) => config.countdown[key] === preset.countdown[key]) &&
-      SIGNALS.every(({ id: key }) => config.signals[key]?.uri === preset.signals[key]?.uri)
+      SIGNALS.every(({ id: key }) => effectiveConfig.signals[key]?.uri === preset.signals[key]?.uri)
     );
   };
   const signal = SIGNALS.find((item) => item.id === selectedSignal);
@@ -197,6 +203,12 @@ export const AdvancedSettings = ({
             )}
             {volume('Work music volume', workVolume, onWorkVolumeChange)}
             {volume('Rest music volume', restVolume, onRestVolumeChange)}
+            <Text style={[styles.note, { color: theme.textSecondary }]}>
+              Alert sounds play with Device audio.
+              {appleMusicService.available &&
+                ' Apple Music intervals use the visual timer and device volume.'}
+              {SPOTIFY_AVAILABLE && ' Spotify intervals use the visual timer.'}
+            </Text>
             <View style={[styles.section, { borderColor: theme.border }]}>
               {title('Workout cues')}
               <View style={styles.presets}>
@@ -235,18 +247,18 @@ export const AdvancedSettings = ({
             </View>
             <View style={styles.switchRow}>
               <View style={{ flex: 1 }}>
-                {label('Audio coaching')}
+                {label('Audio cues')}
                 <Text style={[styles.detail, { color: theme.textSecondary }]}>
                   Countdowns and interval cues
                 </Text>
               </View>
               <Switch
-                accessibilityLabel="Audio coaching"
+                accessibilityLabel="Audio cues"
                 value={enabled}
                 trackColor={{ true: theme.accent }}
                 onValueChange={(value) => {
                   if (value && legacy) ensurePreparation();
-                  update({ ...(legacy ? createAlertPreset('hiit') : config), enabled: value });
+                  update({ ...(legacy ? createAlertPreset('beeps') : config), enabled: value });
                 }}
               />
             </View>
@@ -301,10 +313,9 @@ export const AdvancedSettings = ({
                   {title('Countdown')}
                   <Segments
                     label="Countdown mode"
-                    value={config.countdown.mode}
+                    value={effectiveConfig.countdown.mode}
                     onChange={(mode) => updateCountdown({ mode })}
                     options={[
-                      { value: 'voice', label: 'Voice' },
                       { value: 'beep', label: 'Beep' },
                       { value: 'off', label: 'Off' },
                     ]}
@@ -360,28 +371,6 @@ export const AdvancedSettings = ({
                       </Text>
                     </>
                   )}
-                  {(config.countdown.mode === 'voice' ||
-                    SIGNALS.some(({ id }) => config.signals[id]?.uri?.startsWith('speech://'))) && (
-                    <View style={styles.settingRow}>
-                      <View>
-                        {label('Voice language')}
-                        <Text style={[styles.detail, { color: theme.textSecondary }]}>
-                          {config.language === 'en-US' ? 'SyncApp Coach' : 'Device voice'}
-                        </Text>
-                      </View>
-                      <View style={styles.inlineSegments}>
-                        <Segments
-                          label="Voice language"
-                          value={config.language}
-                          onChange={(language) => update({ ...config, language })}
-                          options={[
-                            { value: 'en-US', label: 'EN' },
-                            { value: 'tr-TR', label: 'TR' },
-                          ]}
-                        />
-                      </View>
-                    </View>
-                  )}
                 </View>
                 <View style={{ paddingTop: 14 }}>{title('Transition sounds')}</View>
                 {SIGNALS.map(({ id, title: text }) => (
@@ -401,7 +390,7 @@ export const AdvancedSettings = ({
                           numberOfLines={1}
                           style={[styles.detail, { color: theme.textSecondary }]}
                         >
-                          {config.signals[id]?.name || 'None'}
+                          {effectiveConfig.signals[id]?.name || 'None'}
                         </Text>
                       </View>
                       <Ionicons name="chevron-down" size={13} color={theme.textTertiary} />
@@ -440,8 +429,7 @@ export const AdvancedSettings = ({
                   update({ ...config, volume: next }),
                 )}
                 <Text style={[styles.note, { color: theme.textSecondary }]}>
-                  Spoken cues use your device’s media volume. Alerts play on this device; Spotify
-                  music may play elsewhere.
+                  Alert sounds play on this device.
                 </Text>
               </>
             )}
@@ -451,7 +439,7 @@ export const AdvancedSettings = ({
       <AlertSoundPicker
         visible={Boolean(signal)}
         title={signal?.title || 'Choose sound'}
-        selected={signal ? config.signals[signal.id] : null}
+        selected={signal ? effectiveConfig.signals[signal.id] : null}
         onClose={closePicker}
         onSelect={(sound) => {
           if (signal) update({ ...config, signals: { ...config.signals, [signal.id]: sound } });

@@ -1,0 +1,610 @@
+{
+  "scope": {
+    "platform": "ios",
+    "basis": "Reviewed build 8 production source map; runtime package scope, plus installed native acknowledgements and shipped Ionicons artwork.",
+    "productionSourceMapSha256": "8528b1bef13f278c140b7a732e31dbad3228701c932057d7535399b4f2797d65",
+    "sourceCount": 1806
+  },
+  "packages": [
+    {
+      "path": "node_modules/@babel/runtime",
+      "name": "@babel/runtime",
+      "version": "7.28.4"
+    },
+    {
+      "path": "node_modules/@iabtcf/core",
+      "name": "@iabtcf/core",
+      "version": "1.5.6"
+    },
+    {
+      "path": "node_modules/@react-native-async-storage/async-storage",
+      "name": "@react-native-async-storage/async-storage",
+      "version": "2.2.0"
+    },
+    {
+      "path": "node_modules/@react-native-community/slider",
+      "name": "@react-native-community/slider",
+      "version": "5.0.1",
+      "licenseFiles": [
+        "scripts/notices/slider-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/@react-native/assets-registry",
+      "name": "@react-native/assets-registry",
+      "version": "0.81.5",
+      "licenseFiles": [
+        "node_modules/react-native/LICENSE"
+      ]
+    },
+    {
+      "path": "node_modules/@react-native/js-polyfills",
+      "name": "@react-native/js-polyfills",
+      "version": "0.81.5",
+      "licenseFiles": [
+        "node_modules/react-native/LICENSE"
+      ]
+    },
+    {
+      "path": "node_modules/@react-native/normalize-colors",
+      "name": "@react-native/normalize-colors",
+      "version": "0.81.5",
+      "licenseFiles": [
+        "node_modules/react-native/LICENSE"
+      ]
+    },
+    {
+      "path": "node_modules/@react-navigation/bottom-tabs",
+      "name": "@react-navigation/bottom-tabs",
+      "version": "7.18.18"
+    },
+    {
+      "path": "node_modules/@react-navigation/core",
+      "name": "@react-navigation/core",
+      "version": "7.22.1"
+    },
+    {
+      "path": "node_modules/@react-navigation/elements",
+      "name": "@react-navigation/elements",
+      "version": "2.9.40"
+    },
+    {
+      "path": "node_modules/@react-navigation/native",
+      "name": "@react-navigation/native",
+      "version": "7.3.18"
+    },
+    {
+      "path": "node_modules/@react-navigation/native-stack",
+      "name": "@react-navigation/native-stack",
+      "version": "7.18.10"
+    },
+    {
+      "path": "node_modules/@react-navigation/routers",
+      "name": "@react-navigation/routers",
+      "version": "7.6.4"
+    },
+    {
+      "path": "node_modules/@revenuecat/purchases-js-hybrid-mappings",
+      "name": "@revenuecat/purchases-js-hybrid-mappings",
+      "version": "20.4.0",
+      "licenseFiles": [
+        "scripts/notices/revenuecat-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/@revenuecat/purchases-typescript-internal",
+      "name": "@revenuecat/purchases-typescript-internal",
+      "version": "20.4.0",
+      "licenseFiles": [
+        "scripts/notices/revenuecat-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/@supabase/auth-js",
+      "name": "@supabase/auth-js",
+      "version": "2.119.0"
+    },
+    {
+      "path": "node_modules/@supabase/functions-js",
+      "name": "@supabase/functions-js",
+      "version": "2.119.0"
+    },
+    {
+      "path": "node_modules/@supabase/phoenix",
+      "name": "@supabase/phoenix",
+      "version": "0.4.5"
+    },
+    {
+      "path": "node_modules/@supabase/postgrest-js",
+      "name": "@supabase/postgrest-js",
+      "version": "2.119.0"
+    },
+    {
+      "path": "node_modules/@supabase/realtime-js",
+      "name": "@supabase/realtime-js",
+      "version": "2.119.0"
+    },
+    {
+      "path": "node_modules/@supabase/storage-js",
+      "name": "@supabase/storage-js",
+      "version": "2.119.0"
+    },
+    {
+      "path": "node_modules/@supabase/supabase-js",
+      "name": "@supabase/supabase-js",
+      "version": "2.119.0"
+    },
+    {
+      "path": "node_modules/@ungap/structured-clone",
+      "name": "@ungap/structured-clone",
+      "version": "1.3.0"
+    },
+    {
+      "path": "node_modules/abort-controller",
+      "name": "abort-controller",
+      "version": "3.0.0"
+    },
+    {
+      "path": "node_modules/base64-js",
+      "name": "base64-js",
+      "version": "1.5.1"
+    },
+    {
+      "path": "node_modules/buffer",
+      "name": "buffer",
+      "version": "5.7.1"
+    },
+    {
+      "path": "node_modules/color",
+      "name": "color",
+      "version": "4.2.3"
+    },
+    {
+      "path": "node_modules/color-convert",
+      "name": "color-convert",
+      "version": "2.0.1"
+    },
+    {
+      "path": "node_modules/color-name",
+      "name": "color-name",
+      "version": "1.1.4"
+    },
+    {
+      "path": "node_modules/color-string",
+      "name": "color-string",
+      "version": "1.9.1"
+    },
+    {
+      "path": "node_modules/dequal",
+      "name": "dequal",
+      "version": "2.0.3"
+    },
+    {
+      "path": "node_modules/escape-string-regexp",
+      "name": "escape-string-regexp",
+      "version": "4.0.0"
+    },
+    {
+      "path": "node_modules/event-target-shim",
+      "name": "event-target-shim",
+      "version": "5.0.1"
+    },
+    {
+      "path": "node_modules/expo",
+      "name": "expo",
+      "version": "54.0.37",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-apple-authentication",
+      "name": "expo-apple-authentication",
+      "version": "8.0.8",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-asset",
+      "name": "expo-asset",
+      "version": "12.0.13",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-auth-session",
+      "name": "expo-auth-session",
+      "version": "7.0.11",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-av",
+      "name": "expo-av",
+      "version": "16.0.8",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-blur",
+      "name": "expo-blur",
+      "version": "15.0.8",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-clipboard",
+      "name": "expo-clipboard",
+      "version": "8.0.8",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-constants",
+      "name": "expo-constants",
+      "version": "18.0.14",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-crypto",
+      "name": "expo-crypto",
+      "version": "15.0.9",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-document-picker",
+      "name": "expo-document-picker",
+      "version": "14.0.8",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-file-system",
+      "name": "expo-file-system",
+      "version": "19.0.24",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-glass-effect",
+      "name": "expo-glass-effect",
+      "version": "0.1.10",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-image-picker",
+      "name": "expo-image-picker",
+      "version": "17.0.11",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-linear-gradient",
+      "name": "expo-linear-gradient",
+      "version": "15.0.8",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-linking",
+      "name": "expo-linking",
+      "version": "8.0.12",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-media-library",
+      "name": "expo-media-library",
+      "version": "18.2.1",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-modules-core",
+      "name": "expo-modules-core",
+      "version": "3.0.30",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-secure-store",
+      "name": "expo-secure-store",
+      "version": "15.0.8",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-status-bar",
+      "name": "expo-status-bar",
+      "version": "3.0.9",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo-web-browser",
+      "name": "expo-web-browser",
+      "version": "15.0.11",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo/node_modules/@expo/cli",
+      "name": "@expo/cli",
+      "version": "54.0.27",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/expo/node_modules/@expo/vector-icons",
+      "name": "@expo/vector-icons",
+      "version": "15.0.3"
+    },
+    {
+      "path": "node_modules/expo/node_modules/expo-font",
+      "name": "expo-font",
+      "version": "14.0.12",
+      "licenseFiles": [
+        "scripts/notices/expo-LICENSE.txt"
+      ]
+    },
+    {
+      "path": "node_modules/fast-deep-equal",
+      "name": "fast-deep-equal",
+      "version": "3.1.3"
+    },
+    {
+      "path": "node_modules/hoist-non-react-statics",
+      "name": "hoist-non-react-statics",
+      "version": "3.3.2"
+    },
+    {
+      "path": "node_modules/hoist-non-react-statics/node_modules/react-is",
+      "name": "react-is",
+      "version": "16.13.1"
+    },
+    {
+      "path": "node_modules/iceberg-js",
+      "name": "iceberg-js",
+      "version": "0.8.1"
+    },
+    {
+      "path": "node_modules/ieee754",
+      "name": "ieee754",
+      "version": "1.2.1"
+    },
+    {
+      "path": "node_modules/invariant",
+      "name": "invariant",
+      "version": "2.2.4"
+    },
+    {
+      "path": "node_modules/is-arrayish",
+      "name": "is-arrayish",
+      "version": "0.3.4"
+    },
+    {
+      "path": "node_modules/memoize-one",
+      "name": "memoize-one",
+      "version": "5.2.1"
+    },
+    {
+      "path": "node_modules/nanoid",
+      "name": "nanoid",
+      "version": "3.3.19"
+    },
+    {
+      "path": "node_modules/nullthrows",
+      "name": "nullthrows",
+      "version": "1.1.1"
+    },
+    {
+      "path": "node_modules/promise",
+      "name": "promise",
+      "version": "8.3.0"
+    },
+    {
+      "path": "node_modules/punycode",
+      "name": "punycode",
+      "version": "2.3.1"
+    },
+    {
+      "path": "node_modules/react",
+      "name": "react",
+      "version": "19.1.0"
+    },
+    {
+      "path": "node_modules/react-freeze",
+      "name": "react-freeze",
+      "version": "1.0.4"
+    },
+    {
+      "path": "node_modules/react-is",
+      "name": "react-is",
+      "version": "19.3.0"
+    },
+    {
+      "path": "node_modules/react-native",
+      "name": "react-native",
+      "version": "0.81.5"
+    },
+    {
+      "path": "node_modules/react-native-gesture-handler",
+      "name": "react-native-gesture-handler",
+      "version": "2.28.0"
+    },
+    {
+      "path": "node_modules/react-native-google-mobile-ads",
+      "name": "react-native-google-mobile-ads",
+      "version": "17.0.0"
+    },
+    {
+      "path": "node_modules/react-native-is-edge-to-edge",
+      "name": "react-native-is-edge-to-edge",
+      "version": "1.2.1"
+    },
+    {
+      "path": "node_modules/react-native-purchases",
+      "name": "react-native-purchases",
+      "version": "11.0.1"
+    },
+    {
+      "path": "node_modules/react-native-reanimated",
+      "name": "react-native-reanimated",
+      "version": "4.1.5"
+    },
+    {
+      "path": "node_modules/react-native-reanimated/node_modules/semver",
+      "name": "semver",
+      "version": "7.7.2"
+    },
+    {
+      "path": "node_modules/react-native-safe-area-context",
+      "name": "react-native-safe-area-context",
+      "version": "5.6.2"
+    },
+    {
+      "path": "node_modules/react-native-screens",
+      "name": "react-native-screens",
+      "version": "4.16.0"
+    },
+    {
+      "path": "node_modules/react-native-svg",
+      "name": "react-native-svg",
+      "version": "15.12.1"
+    },
+    {
+      "path": "node_modules/react-native-url-polyfill",
+      "name": "react-native-url-polyfill",
+      "version": "4.0.0"
+    },
+    {
+      "path": "node_modules/react-native-view-shot",
+      "name": "react-native-view-shot",
+      "version": "4.0.3"
+    },
+    {
+      "path": "node_modules/react-native-webview",
+      "name": "react-native-webview",
+      "version": "13.15.0"
+    },
+    {
+      "path": "node_modules/react-native-worklets",
+      "name": "react-native-worklets",
+      "version": "0.5.1"
+    },
+    {
+      "path": "node_modules/react-native/node_modules/@react-native/virtualized-lists",
+      "name": "@react-native/virtualized-lists",
+      "version": "0.81.5",
+      "licenseFiles": [
+        "node_modules/react-native/LICENSE"
+      ]
+    },
+    {
+      "path": "node_modules/regenerator-runtime",
+      "name": "regenerator-runtime",
+      "version": "0.13.11"
+    },
+    {
+      "path": "node_modules/scheduler",
+      "name": "scheduler",
+      "version": "0.26.0"
+    },
+    {
+      "path": "node_modules/simple-swizzle",
+      "name": "simple-swizzle",
+      "version": "0.2.4"
+    },
+    {
+      "path": "node_modules/stacktrace-parser",
+      "name": "stacktrace-parser",
+      "version": "0.1.11"
+    },
+    {
+      "path": "node_modules/tslib",
+      "name": "tslib",
+      "version": "2.8.1"
+    },
+    {
+      "path": "node_modules/use-deep-compare-effect",
+      "name": "use-deep-compare-effect",
+      "version": "1.8.1"
+    },
+    {
+      "path": "node_modules/use-latest-callback",
+      "name": "use-latest-callback",
+      "version": "0.2.6"
+    },
+    {
+      "path": "node_modules/use-sync-external-store",
+      "name": "use-sync-external-store",
+      "version": "1.7.0"
+    },
+    {
+      "path": "node_modules/warn-once",
+      "name": "warn-once",
+      "version": "0.1.1"
+    },
+    {
+      "path": "node_modules/webidl-conversions",
+      "name": "webidl-conversions",
+      "version": "5.0.0"
+    },
+    {
+      "path": "node_modules/whatwg-fetch",
+      "name": "whatwg-fetch",
+      "version": "3.6.20"
+    },
+    {
+      "path": "node_modules/whatwg-url-without-unicode",
+      "name": "whatwg-url-without-unicode",
+      "version": "8.0.0-3"
+    }
+  ],
+  "primaryFallbackSources": {
+    "scripts/notices/expo-LICENSE.txt": "https://raw.githubusercontent.com/expo/expo/sdk-54/LICENSE",
+    "scripts/notices/slider-LICENSE.txt": "https://raw.githubusercontent.com/callstack/react-native-slider/v5.0.1/LICENSE.md",
+    "scripts/notices/revenuecat-LICENSE.txt": "https://raw.githubusercontent.com/RevenueCat/purchases-hybrid-common/20.4.0/LICENSE",
+    "scripts/notices/ionicons-LICENSE.txt": "https://raw.githubusercontent.com/ionic-team/ionicons/v7.1.0/LICENSE"
+  },
+  "additional": [
+    {
+      "component": "Ionicons artwork/font (vendored by @expo/vector-icons 15.0.3)",
+      "file": "scripts/notices/ionicons-LICENSE.txt",
+      "source": "https://raw.githubusercontent.com/ionic-team/ionicons/v7.1.0/LICENSE"
+    },
+    {
+      "component": "react-native-vector-icons (vendored by @expo/vector-icons 15.0.3)",
+      "file": "node_modules/expo/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/LICENSE",
+      "source": "node_modules/expo/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/LICENSE"
+    },
+    {
+      "component": "Google Mobile Ads SDK — Open Measurement license",
+      "file": "scripts/notices/google-mobile-ads-open-measurement-LICENSE.txt",
+      "source": "ios/Pods/Google-Mobile-Ads-SDK/LICENSE (installed snapshot)"
+    }
+  ]
+}

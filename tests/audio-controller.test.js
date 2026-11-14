@@ -14,6 +14,11 @@ const deferred = () => {
   return { promise, resolve };
 };
 
+const spotifyRoutine = {
+  rounds: 1,
+  roundsData: [{ workSong: { uri: 'spotify:track:synthetic', platform: 'spotify' } }],
+};
+
 async function mountAudio(t, overrides = {}, configuration = {}) {
   const calls = [];
   const service = {
@@ -39,6 +44,7 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
   };
   let audio;
   const routine = {
+    rounds: 2,
     roundsData: [
       {
         workSong: { uri: 'file:///one.mp3', name: 'One' },
@@ -50,10 +56,30 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
   function Harness() {
     audio = useAudioController({
       selectedRoutine: configuration.routine || routine,
-      services: { device: service, spotify: service },
-      connectedPlatforms: { spotify: { connected: true, accessToken: 'test-token' } },
-      countdownSoundPlayer: { stop: async () => {}, play: async () => {} },
+      services: {
+        device: service,
+        spotify: service,
+        appleMusic: {
+          ...service,
+          allowsLocalCues: false,
+          localPlaybackControl: true,
+          ...configuration.appleMusicService,
+        },
+      },
+      connectedPlatforms: {
+        spotify: { connected: true, accessToken: 'test-token' },
+        appleMusic: { connected: true, accessToken: 'native:appleMusic' },
+      },
+      countdownSoundPlayer: configuration.countdownSoundPlayer || {
+        stop: async () => {},
+        play: async () => {},
+      },
+      stopLocalCues: configuration.stopLocalCues,
       onPlaybackInterrupted: configuration.onPlaybackInterrupted,
+      getValidAccessToken: configuration.getValidAccessToken,
+      isExternalMusicActive: configuration.isExternalMusicActive,
+      registerCueSource: configuration.registerCueSource,
+      playCue: configuration.playCue,
     });
     return null;
   }
@@ -61,16 +87,201 @@ async function mountAudio(t, overrides = {}, configuration = {}) {
   await act(async () => {
     root = create(React.createElement(Harness));
   });
-  t.after(async () => {
-    await act(async () => root.unmount());
-  });
+  const unmount = async () => {
+    if (!root) return;
+    const previous = root;
+    root = null;
+    await act(async () => previous.unmount());
+  };
+  t.after(unmount);
   return {
     get audio() {
       return audio;
     },
     calls,
+    unmount,
   };
 }
+
+test('an independent music owner bypasses every timed phase without source playback or controls', async (t) => {
+  const sourceCalls = [];
+  const h = await mountAudio(
+    t,
+    {
+      getActiveDevice: async () => {
+        sourceCalls.push('device');
+        return 'device';
+      },
+      playTrack: async () => {
+        sourceCalls.push('track');
+        return success;
+      },
+      playPlaylist: async () => {
+        sourceCalls.push('playlist');
+        return success;
+      },
+      pause: async () => {
+        sourceCalls.push('pause');
+        return success;
+      },
+      cleanup: async () => {
+        sourceCalls.push('cleanup');
+      },
+      cancelPending: () => {
+        sourceCalls.push('cancel');
+      },
+    },
+    {
+      routine: spotifyRoutine,
+      isExternalMusicActive: () => true,
+      getValidAccessToken: async () => {
+        sourceCalls.push('token');
+        return 'token';
+      },
+      stopLocalCues: async () => {
+        sourceCalls.push('cues');
+      },
+    },
+  );
+  await act(async () => {
+    for (const [phase, round] of [
+      ['beforeStart', 0],
+      ['work', 1],
+      ['rest', 1],
+      ['work', 2],
+    ]) {
+      const result = await h.audio.handlePhaseChange(phase, round);
+      assert.equal(result.bypassed, true);
+    }
+  });
+  assert.deepEqual(sourceCalls, []);
+  assert.equal(h.audio.track, null);
+  assert.equal(h.audio.isMusicPlaying, false);
+});
+
+test('unmount without a timed source never stops or cleans up the independent Apple singleton', async (t) => {
+  const appleCalls = [];
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      isExternalMusicActive: () => true,
+      appleMusicService: {
+        pause: async () => {
+          appleCalls.push('pause');
+        },
+        cleanup: async () => {
+          appleCalls.push('cleanup');
+        },
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  await h.unmount();
+  await new Promise(setImmediate);
+  assert.deepEqual(appleCalls, []);
+  assert.deepEqual(h.calls, []);
+});
+
+test('unmount only cleans up its owned Device source while an Apple singleton exists', async (t) => {
+  const appleCalls = [];
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      appleMusicService: {
+        pause: async () => {
+          appleCalls.push('pause');
+        },
+        cleanup: async () => {
+          appleCalls.push('cleanup');
+        },
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  await h.unmount();
+  await new Promise(setImmediate);
+  assert.deepEqual(appleCalls, []);
+  assert.ok(h.calls.some((call) => call[0] === 'pause'));
+  assert.equal(h.calls.filter((call) => call[0] === 'cleanup').length, 1);
+});
+
+for (const boundary of ['start', 'preparation-to-work', 'resume']) {
+  test(`Spotify ${boundary} reports a diagnostic read failure before it can become a device ID`, async (t) => {
+    let denied = boundary === 'start';
+    let starts = 0;
+    const h = await mountAudio(
+      t,
+      {
+        getActiveDevice: async (_token, _refresh, options) => {
+          assert.equal(options?.reportErrors, true);
+          return denied
+            ? { success: false, code: 403, error: 'Playback permission was removed' }
+            : 'synthetic-device';
+        },
+        playTrack: async (_token, _uri, deviceId) => {
+          assert.equal(deviceId, 'synthetic-device');
+          starts++;
+          return success;
+        },
+      },
+      { routine: spotifyRoutine },
+    );
+    let result;
+    if (boundary === 'start') {
+      await act(async () => {
+        result = await h.audio.handlePhaseChange('work', 1);
+      });
+    } else if (boundary === 'preparation-to-work') {
+      await act(async () => h.audio.handlePhaseChange('beforeStart', 1));
+      denied = true;
+      await act(async () => {
+        result = await h.audio.handlePhaseChange('work', 1);
+      });
+    } else {
+      await act(async () => h.audio.handlePhaseChange('work', 1));
+      await act(async () => h.audio.pauseMusic());
+      denied = true;
+      await act(async () => {
+        result = await h.audio.resumeMusic();
+      });
+    }
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'Playback permission was removed');
+    assert.equal(h.audio.audioError, 'Playback permission was removed');
+    assert.equal(starts, boundary === 'start' ? 0 : 1);
+    assert.equal(
+      h.calls.some((call) => call[0] === 'resume'),
+      false,
+    );
+  });
+}
+
+test('Spotify playback polling requests diagnostic errors and reports the actual restriction immediately', async (t) => {
+  let denied = false;
+  const notices = [];
+  const h = await mountAudio(
+    t,
+    {
+      getCurrentPlayback: async (_token, _refresh, options) => {
+        assert.equal(options?.reportErrors, true);
+        return denied
+          ? { success: false, code: 403, error: 'Playback scope is missing' }
+          : { item: { uri: 'spotify:track:synthetic' }, is_playing: true };
+      },
+    },
+    {
+      routine: spotifyRoutine,
+      onPlaybackInterrupted: (reason) => notices.push(reason),
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  denied = true;
+  await act(async () => h.audio.fetchPlayback());
+  assert.deepEqual(notices, ['Playback scope is missing']);
+  assert.equal(h.audio.audioError, 'Playback scope is missing');
+});
 
 test('a phase selected while paused waits for resume before starting audio', async (t) => {
   const h = await mountAudio(t);
@@ -85,6 +296,280 @@ test('a phase selected while paused waits for resume before starting audio', asy
     h.calls.find((c) => c[0] === 'play'),
     ['play', 'file:///one.mp3'],
   );
+});
+
+test('a slow playback metadata read cannot hold an already-started interval or the next transition', async (t) => {
+  const read = deferred();
+  const prepared = [];
+  let reads = 0;
+  const h = await mountAudio(t, {
+    getCurrentPlayback: () =>
+      ++reads === 1 ? read.promise : Promise.resolve({ item: { name: 'Rest' }, is_playing: true }),
+    prepareTrack: async (_token, uri) => prepared.push(uri),
+  });
+  let firstReady = false;
+  await act(async () => {
+    h.audio.handlePhaseChange('work', 1).then(() => {
+      firstReady = true;
+    });
+  });
+  assert.equal(firstReady, true);
+  assert.deepEqual(prepared, ['file:///rest.mp3']);
+  let restReady = false;
+  await act(async () => {
+    h.audio.handlePhaseChange('rest', 1).then(() => {
+      restReady = true;
+    });
+  });
+  assert.equal(restReady, true);
+  assert.equal(h.audio.track.title, 'Rest');
+  await act(async () => {
+    read.resolve({ item: { name: 'Retired metadata' }, is_playing: true });
+  });
+  assert.equal(h.audio.track.title, 'Rest');
+});
+
+test('Apple Music work/rest transitions, pause/resume and local-cue ownership use the shared controller', async (t) => {
+  const cues = [];
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      routine: {
+        roundsData: [
+          {
+            workSong: { uri: 'apple-music:song:123', platform: 'appleMusic' },
+            restSong: { uri: 'file:///rest.mp3', platform: 'device' },
+          },
+        ],
+      },
+      stopLocalCues: async () => cues.push('stop'),
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  assert.equal(h.audio.localCuesAllowed, false);
+  assert.deepEqual(
+    h.calls.find((call) => call[0] === 'play'),
+    ['play', 'apple-music:song:123'],
+  );
+  await act(async () => h.audio.pauseMusic());
+  assert.equal(h.audio.isMusicPlaying, false);
+  await act(async () => h.audio.resumeMusic());
+  assert.equal(h.audio.isMusicPlaying, true);
+  await act(async () => h.audio.handlePhaseChange('rest', 1));
+  assert.equal(h.audio.localCuesAllowed, true);
+  assert.ok(h.calls.some((call) => call[0] === 'play' && call[1] === 'file:///rest.mp3'));
+  assert.deepEqual(cues, ['stop', 'stop', 'stop'], 'starts and resume drain the cue lane');
+  await act(async () => h.audio.stopMusic());
+  assert.equal(h.audio.isMusicPlaying, false);
+});
+
+test('Apple pause and stop remain local when subscription or permission verification fails', async (t) => {
+  let rejected = false,
+    checks = 0;
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      routine: {
+        rounds: 2,
+        roundsData: [{ workSong: { uri: 'apple-music:song:123', platform: 'appleMusic' } }],
+      },
+      getValidAccessToken: async () => {
+        checks++;
+        if (rejected) throw new Error('Subscription unavailable');
+        return 'native:appleMusic';
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  rejected = true;
+  const before = checks;
+  await act(async () => h.audio.pauseMusic());
+  assert.equal(h.audio.isMusicPlaying, false);
+  await act(async () => h.audio.stopMusic());
+  assert.equal(h.audio.audioError, null);
+  assert.equal(
+    checks,
+    before,
+    'local stop must not depend on subscription checks or a network response',
+  );
+  assert.ok(h.calls.some(([event]) => event === 'pause'));
+  assert.ok(h.calls.some(([event]) => event === 'cleanup'));
+});
+
+test('revoked Apple access cannot block switching to Device audio while new Apple starts still fail closed', async (t) => {
+  let rejected = false;
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      routine: {
+        rounds: 2,
+        roundsData: [
+          {
+            workSong: { uri: 'apple-music:song:123', platform: 'appleMusic' },
+            restSong: { uri: 'file:///rest.mp3', name: 'Local rest', platform: 'device' },
+          },
+          { workSong: { uri: 'apple-music:song:456', platform: 'appleMusic' } },
+        ],
+      },
+      getValidAccessToken: async () => {
+        if (rejected) throw new Error('Music permission denied');
+        return 'native:appleMusic';
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  rejected = true;
+  await act(async () => h.audio.handlePhaseChange('rest', 1));
+  assert.equal(h.audio.audioError, null);
+  assert.equal(h.audio.track.title, 'Local rest');
+  assert.ok(h.calls.some(([event, uri]) => event === 'play' && uri === 'file:///rest.mp3'));
+  await act(async () => h.audio.handlePhaseChange('work', 2));
+  assert.match(h.audio.audioError, /permission denied/);
+  assert.equal(
+    h.calls.some(([event, uri]) => event === 'play' && uri === 'apple-music:song:456'),
+    false,
+  );
+});
+
+test('Spotify preparation stops local cues before playback and blocks legacy overlay alerts', async (t) => {
+  const cuesStopped = deferred();
+  const calls = [];
+  const h = await mountAudio(
+    t,
+    {},
+    {
+      routine: {
+        countdownBeforeStartSound: { uri: 'voices://beep_short' },
+        roundsData: [{ workSong: { uri: 'spotify:track:one', platform: 'spotify' } }],
+      },
+      stopLocalCues: () => {
+        calls.push('stop-cues');
+        return cuesStopped.promise;
+      },
+      countdownSoundPlayer: {
+        stop: async () => calls.push('stop-legacy'),
+        play: async () => calls.push('play-legacy'),
+      },
+    },
+  );
+  let operation;
+  await act(async () => {
+    operation = h.audio.handlePhaseChange('beforeStart', 0);
+  });
+  assert.equal(h.audio.localCuesAllowed, false);
+  assert.equal(h.calls.filter((call) => call[0] === 'play').length, 0);
+  await act(async () => h.audio.playCountdownSound('beforeStart'));
+  assert.equal(calls.includes('play-legacy'), false);
+  await act(async () => {
+    cuesStopped.resolve();
+    await operation;
+  });
+  assert.equal(h.calls.filter((call) => call[0] === 'play').length, 1);
+  assert.equal(h.audio.localCuesAllowed, false);
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  assert.equal(h.audio.localCuesAllowed, false);
+});
+
+test('Device preparation keeps local cues available when the same song continues into Work', async (t) => {
+  const h = await mountAudio(t);
+  await act(async () => h.audio.handlePhaseChange('beforeStart', 0));
+  assert.equal(h.audio.localCuesAllowed, true);
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  assert.equal(h.audio.localCuesAllowed, true);
+  assert.equal(h.calls.filter((call) => call[0] === 'play').length, 1);
+});
+
+test('mixed routines wait for Spotify pause before local music and cues become eligible', async (t) => {
+  const paused = deferred();
+  let holdPause = false;
+  const h = await mountAudio(
+    t,
+    { pause: () => (holdPause ? paused.promise : Promise.resolve(success)) },
+    {
+      routine: {
+        roundsData: [
+          {
+            workSong: { uri: 'spotify:track:one', platform: 'spotify' },
+            restSong: { uri: 'file:///rest.mp3', platform: 'device' },
+          },
+        ],
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  holdPause = true;
+  let operation;
+  await act(async () => {
+    operation = h.audio.handlePhaseChange('rest', 1);
+  });
+  assert.equal(h.audio.localCuesAllowed, false);
+  assert.equal(h.calls.filter((call) => call[0] === 'play').length, 1);
+  await act(async () => {
+    paused.resolve(success);
+    await operation;
+  });
+  assert.equal(h.audio.localCuesAllowed, true);
+  assert.deepEqual(
+    h.calls.filter((call) => call[0] === 'play').map((call) => call[1]),
+    ['spotify:track:one', 'file:///rest.mp3'],
+  );
+});
+
+test('a failed Spotify pause retains ownership until a successful retry', async (t) => {
+  let failing = true;
+  let pauses = 0;
+  const h = await mountAudio(
+    t,
+    {
+      pause: async () => {
+        pauses++;
+        return failing ? { success: false, error: 'Offline' } : success;
+      },
+    },
+    { routine: { roundsData: [{ workSong: { uri: 'spotify:track:one', platform: 'spotify' } }] } },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  await act(async () => {
+    const result = await h.audio.handlePhaseChange('rest', 1);
+    assert.equal(result.success, false);
+  });
+  assert.equal(h.audio.localCuesAllowed, false);
+  failing = false;
+  await act(async () => h.audio.handlePhaseChange('rest', 1));
+  assert.equal(pauses, 2);
+  assert.equal(h.audio.localCuesAllowed, true);
+});
+
+test('an older stop cannot re-enable cues for a newer Spotify start', async (t) => {
+  const paused = deferred();
+  const h = await mountAudio(
+    t,
+    { pause: () => paused.promise },
+    {
+      routine: {
+        roundsData: [
+          { workSong: { uri: 'spotify:track:first', platform: 'spotify' } },
+          { workSong: { uri: 'spotify:track:second', platform: 'spotify' } },
+        ],
+      },
+    },
+  );
+  await act(async () => h.audio.handlePhaseChange('work', 1));
+  let stopped;
+  let started;
+  await act(async () => {
+    stopped = h.audio.stopMusic();
+    started = h.audio.handlePhaseChange('work', 2);
+  });
+  await act(async () => {
+    paused.resolve(success);
+    await Promise.all([stopped, started]);
+  });
+  assert.equal(h.audio.localCuesAllowed, false);
+  assert.equal(h.audio.track.id, 'spotify:track:second');
 });
 
 test('rapid phase changes only load the latest requested source', async (t) => {
@@ -483,3 +968,93 @@ test('an obsolete failed load cannot replace the next interval with an error', a
   assert.equal(h.audio.audioError, null);
   assert.equal(h.audio.track.title, 'Two');
 });
+
+for (const setting of [
+  { method: 'setShuffle', toggle: 'toggleShuffle', selected: 'isShuffled' },
+  { method: 'setRepeat', toggle: 'toggleRepeat', selected: 'isRepeating' },
+]) {
+  test(`a cancelled Spotify ${setting.method} cannot commit an unacknowledged selection`, async (t) => {
+    let cancelled = false;
+    const h = await mountAudio(
+      t,
+      {
+        [setting.method]: async () => (cancelled ? { success: true, cancelled: true } : success),
+      },
+      { routine: spotifyRoutine },
+    );
+    await act(async () => h.audio.handlePhaseChange('work', 1));
+    await act(async () => h.audio[setting.toggle]());
+    assert.equal(h.audio[setting.selected], true);
+    cancelled = true;
+    await act(async () => h.audio[setting.toggle]());
+    assert.equal(h.audio[setting.selected], true);
+    assert.equal(h.audio.audioError, null);
+  });
+
+  for (const boundary of ['pauseMusic', 'stopMusic']) {
+    test(`Spotify ${boundary} retires pending ${setting.method} without changing its last acknowledged state`, async (t) => {
+      const pending = deferred();
+      const started = deferred();
+      let hold = false;
+      let cancellations = 0;
+      const h = await mountAudio(
+        t,
+        {
+          [setting.method]: async () => {
+            if (!hold) return success;
+            started.resolve();
+            return pending.promise;
+          },
+          cancelPending: () => {
+            if (hold) {
+              cancellations++;
+              pending.resolve({ success: true, cancelled: true });
+            }
+          },
+        },
+        { routine: spotifyRoutine },
+      );
+      await act(async () => h.audio.handlePhaseChange('work', 1));
+      await act(async () => h.audio[setting.toggle]());
+      assert.equal(h.audio[setting.selected], true);
+      hold = true;
+      await act(async () => {
+        const toggle = h.audio[setting.toggle]();
+        await started.promise;
+        const stop = h.audio[boundary]();
+        await Promise.all([toggle, stop]);
+      });
+      assert.ok(cancellations > 0);
+      assert.equal(h.audio[setting.selected], true);
+      assert.equal(h.audio.audioError, null);
+    });
+  }
+
+  test(`a late successful ${setting.method} cannot commit after phase supersession`, async (t) => {
+    const pending = deferred();
+    const started = deferred();
+    let hold = false;
+    const h = await mountAudio(
+      t,
+      {
+        [setting.method]: async () => {
+          if (!hold) return success;
+          started.resolve();
+          return pending.promise;
+        },
+      },
+      { routine: spotifyRoutine },
+    );
+    await act(async () => h.audio.handlePhaseChange('work', 1));
+    hold = true;
+    await act(async () => {
+      const toggle = h.audio[setting.toggle]();
+      await started.promise;
+      const phase = h.audio.handlePhaseChange('rest', 1);
+      pending.resolve(success);
+      await Promise.all([toggle, phase]);
+    });
+    assert.equal(h.audio[setting.selected], false);
+    assert.equal(h.audio.audioError, null);
+  });
+}

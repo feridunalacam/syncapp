@@ -5,8 +5,11 @@ npm-debug.*
 *.jks
 *.p8
 *.p12
+*.pem
 *.key
 *.mobileprovision
+/credentials.json
+/credentials/
 *.orig.*
 web-build/
 dist/
@@ -22,6 +25,8 @@ dist/
 .env
 .env.local
 .env.*.local
+.env.*
+!.env.example
 
 
 # Supabase local CLI metadata
@@ -29,3 +34,6 @@ supabase/.temp/
 
 # Legal/support Site uses its own managed source repository.
 /sites/sync-legal/
+
+# Local store capture/export artifacts; scripts and release docs remain tracked.
+/artifacts/

@@ -5,6 +5,7 @@ export function createSessionAdActions({
   stopAudioPreview,
   waitForAdsIdle,
   showAd,
+  showStartAd,
   waitForForeground,
   startSession,
   finishSession,
@@ -38,16 +39,17 @@ export function createSessionAdActions({
       (operation.kind === 'finish' || latest?.routine === operation.routine)
     );
   };
-  const available = (operation, quiet = false) => {
+  const boundaryOwned = (operation, quiet = false) => {
     const latest = read();
     return (
       sameOwner(operation) &&
       latest?.focused === true &&
-      latest?.appActive === true &&
       latest?.blocked === false &&
       (!quiet || (latest?.musicPlaying === false && latest?.audioSyncing === false))
     );
   };
+  const available = (operation, quiet = false) =>
+    boundaryOwned(operation, quiet) && read()?.appActive === true;
   const begin = (kind, { opportunityId } = {}) => {
     // Coalesce all overlapping actions instead of queuing a second Start behind
     // the first action's full-screen presentation.
@@ -96,9 +98,11 @@ export function createSessionAdActions({
         let ad = { shown: false };
         if (previewReady && available(operation, true)) {
           try {
-            ad = (await showAd({
+            const show = kind === 'start' && showStartAd ? showStartAd : showAd;
+            ad = (await show({
               opportunityId,
               isEligible: () => available(operation, true),
+              isCurrent: () => boundaryOwned(operation, true),
             })) || { shown: false };
           } catch {
             // A wrapper may throw after requesting native presentation. Never
@@ -113,12 +117,16 @@ export function createSessionAdActions({
         }
         if (!sameOwner(operation)) return result(false, 'cancelled', ad.shown === true);
         if (kind === 'start') {
+          if (ad.cancelled || (typeof ad.isCurrent === 'function' && !ad.isCurrent()))
+            return result(false, 'cancelled', ad.shown === true);
           if (ad.shown === true && read()?.appActive === false) {
             try {
               await waitForForeground();
             } catch {}
           }
           if (!available(operation)) return result(false, 'cancelled', ad.shown === true);
+          if (typeof ad.isCurrent === 'function' && !ad.isCurrent())
+            return result(false, 'cancelled', ad.shown === true);
           if ((await startSession()) === false)
             return result(false, 'cancelled', ad.shown === true);
         } else {

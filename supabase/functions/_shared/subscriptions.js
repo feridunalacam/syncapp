@@ -15,21 +15,36 @@ export function secureEqual(left, right) {
 
 export function webhookUsers(event) {
   // TRANSFER events have no app_user_id. Refresh both former and new owners.
+  const ids = (value) => Array.isArray(value) ? value : [];
   const values = event?.type === 'TRANSFER'
-    ? [...(event.transferred_from || []), ...(event.transferred_to || [])]
-    : [event?.app_user_id];
+    ? [...ids(event.transferred_from), ...ids(event.transferred_to)]
+    // Renewal/refund events can use a last-seen anonymous ID after logout.
+    // Each UUID is independently re-fetched from RevenueCat, never granted
+    // access from the event payload or its alias relationship alone.
+    : [event?.app_user_id, event?.original_app_user_id, ...ids(event?.aliases)];
   return [...new Set(values.filter(isUserId))].slice(0, 50);
 }
 
 export function validateWebhook(payload) {
   const event = payload?.event;
+  const transfer = event?.type === 'TRANSFER';
+  const transferIdsValid = !transfer || [event.transferred_from, event.transferred_to]
+    .every((values) => Array.isArray(values) && values.every((value) => typeof value === 'string'));
   return !!(event && typeof event.id === 'string' && event.id.length > 0 && event.id.length <= 200 &&
-    typeof event.type === 'string' && ['SANDBOX', 'PRODUCTION'].includes(event.environment));
+    typeof event.type === 'string' && event.type.length > 0 && event.type.length <= 100 && transferIdsValid &&
+    (['SANDBOX', 'PRODUCTION'].includes(event.environment) || (transfer && event.environment == null)));
 }
 
-export function requireRecentSignIn(user, now = Date.now(), maxAgeMs = 15 * 60 * 1000) {
-  const signedInAt = Date.parse(user?.last_sign_in_at || '');
-  return Number.isFinite(signedInAt) && signedInAt <= now + 60000 && now - signedInAt <= maxAgeMs;
+// Only pass claims verified by Auth. User.last_sign_in_at is account-wide and
+// can be advanced by another device; JWT iat also advances on token refresh.
+export function requireRecentSignIn(claims, now = Date.now(), maxAgeMs = 15 * 60 * 1000) {
+  if (!isUserId(claims?.sub) || !isUserId(claims?.session_id) || claims.is_anonymous === true || !Array.isArray(claims.amr)) return false;
+  const methods = ['password', 'oauth', 'otp', 'totp', 'recovery', 'invite', 'sso/saml', 'magiclink', 'email/signup'];
+  return claims.amr.some((entry) => {
+    const signedInAt = typeof entry?.timestamp === 'number' ? entry.timestamp * 1000 : NaN;
+    return methods.includes(entry?.method) && Number.isFinite(signedInAt) &&
+      signedInAt <= now + 60000 && now - signedInAt <= maxAgeMs;
+  });
 }
 
 export function canonicalEntitlement(customerInfo, {

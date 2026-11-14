@@ -5,6 +5,10 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import {
+  WEB_MEDIA_IMPORT_AVAILABLE,
+  WEB_MEDIA_IMPORT_UNAVAILABLE_MESSAGE,
+} from '../../../../services/mediaImport/config';
+import {
   AUDIO_MIME_TYPES,
   VIDEO_MIME_TYPES,
   VIDEO_FILE_EXTENSIONS,
@@ -36,6 +40,10 @@ export const useDeviceMediaPicker = ({ onSongSelected, active = true }) => {
   /** Download a remote file to the cache dir and emit a song object. */
   const downloadFromUrl = useCallback(
     async (url, name) => {
+      if (!WEB_MEDIA_IMPORT_AVAILABLE) {
+        Alert.alert('Import from Files', WEB_MEDIA_IMPORT_UNAVAILABLE_MESSAGE);
+        return false;
+      }
       const ticket = requestVersion.current;
       try {
         setIsDownloading(true);
@@ -72,6 +80,10 @@ export const useDeviceMediaPicker = ({ onSongSelected, active = true }) => {
   /** Stream a remote file directly without copying it locally. */
   const addFromUrl = useCallback(
     (url, name) => {
+      if (!WEB_MEDIA_IMPORT_AVAILABLE) {
+        Alert.alert('Import from Files', WEB_MEDIA_IMPORT_UNAVAILABLE_MESSAGE);
+        return false;
+      }
       const filename = name || url.split('/').pop().split('?')[0] || 'Audio';
       onSongSelected(
         createSongObject({
@@ -88,6 +100,10 @@ export const useDeviceMediaPicker = ({ onSongSelected, active = true }) => {
   /** Choice prompt shown when the user taps a media row inside the WebView. */
   const handleMediaClick = useCallback(
     (media) => {
+      if (!WEB_MEDIA_IMPORT_AVAILABLE) {
+        Alert.alert('Import from Files', WEB_MEDIA_IMPORT_UNAVAILABLE_MESSAGE);
+        return false;
+      }
       Alert.alert(media.name, 'How would you like to add this file?', [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Play from URL', onPress: () => addFromUrl(media.url, media.name) },

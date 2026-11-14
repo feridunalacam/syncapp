@@ -27,6 +27,8 @@ module.exports = function nativeAdMobOptions(env = {}) {
     iosAppId,
     androidAppId,
     delayAppMeasurementInit: true,
+    userTrackingUsageDescription:
+      'Your device’s advertising identifier helps Google measure ad performance and limit repeated ads in Sync.',
     optimizeInitialization: true,
     optimizeAdLoading: true,
     skAdNetworkItems,

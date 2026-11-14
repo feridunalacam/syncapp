@@ -1,0 +1,46 @@
+# EAS uses this file instead of .gitignore. Preserve every exclusion below.
+# Exclude generated native projects from both workflow detection and upload;
+# keep local iOS/Android QA projects intact and generate them with CNG remotely.
+node_modules/
+.expo/
+.expo-shared/
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.pem
+*.key
+*.mobileprovision
+/credentials.json
+/credentials/
+*.orig.*
+web-build/
+dist/
+
+# Expo prebuild output; app.json and app.config.js configure native builds.
+/ios/
+/android/
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+.env.*
+!.env.example
+
+
+# Supabase local CLI metadata
+supabase/.temp/
+
+# Legal/support Site uses its own managed source repository.
+/sites/sync-legal/
+
+# Local store capture/export artifacts do not belong in app builds.
+/artifacts/
+
+# Historical coach recordings are preserved locally, but are not release assets.
+/assets/sounds/coach-en/
+/src/services/alerts/coachVoice.js

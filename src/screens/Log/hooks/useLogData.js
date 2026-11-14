@@ -1,10 +1,18 @@
-import { useMemo, useState, useRef, useCallback } from 'react';
+import { useMemo, useState, useRef, useCallback, useEffect } from 'react';
 import { Alert, Share, LayoutAnimation, Platform, UIManager } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useRoutineContext } from '../../../context/RoutineContext';
 import { usePostContext } from '../../../context/PostContext';
 import { getLogDuration, getLogRounds } from '../../../domain/routines';
 import useConfirm from '../../../hooks/useConfirm';
+
+const clipboardImage = (value) => {
+  const match =
+    typeof value === 'string' && /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(value);
+  if (!match || match[1].length % 4 !== 0)
+    throw new Error('Create the share image again before copying it.');
+  return match[1];
+};
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -27,6 +35,27 @@ export const useLogData = () => {
   const [isCapturing, setIsCapturing] = useState(false);
   const [generatedImages, setGeneratedImages] = useState({ full: null, transparent: null });
   const [isGenerating, setIsGenerating] = useState(false);
+  const shareRevision = useRef(0);
+  const selectedRef = useRef(selectedLog);
+  selectedRef.current = selectedLog;
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      shareRevision.current++;
+    };
+  }, []);
+  const retireSelection = useCallback(() => {
+    shareRevision.current++;
+    selectedRef.current = null;
+    setSelectedLog(null);
+    setIsGenerating(false);
+    setGeneratedImages({ full: null, transparent: null });
+    setShowShareModal(false);
+    setShowDetailModal(false);
+    setShowPublishModal(false);
+  }, []);
 
   const sortedCompleted = useMemo(() => {
     return [...completedRoutines].sort((a, b) => {
@@ -49,7 +78,12 @@ export const useLogData = () => {
     return {
       totalWorkouts,
       totalRounds,
-      totalTime: totalHours > 0 ? `${totalHours}h ${remainingMinutes}m` : `${totalMinutes}m`,
+      totalTime:
+        totalTime > 0 && totalMinutes === 0
+          ? '<1m'
+          : totalHours > 0
+            ? `${totalHours}h ${remainingMinutes}m`
+            : `${totalMinutes}m`,
     };
   }, [completedRoutines]);
 
@@ -97,11 +131,12 @@ export const useLogData = () => {
       destructive: true,
       onConfirm: () => {
         LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+        retireSelection();
         clearCompletedRoutines();
         setIsEditMode(false);
       },
     });
-  }, [completedRoutines.length, clearCompletedRoutines, confirm]);
+  }, [completedRoutines.length, clearCompletedRoutines, confirm, retireSelection]);
 
   const toggleEditMode = useCallback(() => {
     if (!hasLogs && !isEditMode) return;
@@ -117,14 +152,20 @@ export const useLogData = () => {
         destructive: true,
         onConfirm: () => {
           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-          removeCompletedRoutine(log.id, log.completedAt);
-          if (selectedLog && selectedLog.completedAt === log.completedAt) {
-            setSelectedLog(null);
+          removeCompletedRoutine(log.id, log.completedAt, log.sessionId);
+          const selected = selectedRef.current;
+          if (
+            selected &&
+            (log.sessionId
+              ? selected.sessionId === log.sessionId
+              : selected.id === log.id && selected.completedAt === log.completedAt)
+          ) {
+            retireSelection();
           }
         },
       });
     },
-    [confirm, removeCompletedRoutine, selectedLog],
+    [confirm, removeCompletedRoutine, retireSelection],
   );
 
   const formatTime = useCallback((completed) => {
@@ -137,6 +178,11 @@ export const useLogData = () => {
   }, []);
 
   const handleLogPress = useCallback((completed) => {
+    shareRevision.current++;
+    selectedRef.current = completed;
+    setIsGenerating(false);
+    setGeneratedImages({ full: null, transparent: null });
+    setShowShareModal(false);
     setSelectedLog(completed);
     setShowDetailModal(true);
   }, []);
@@ -148,7 +194,7 @@ export const useLogData = () => {
   }, [selectedLog]);
 
   const confirmPublish = useCallback(() => {
-    if (!selectedLog) return;
+    if (!selectedLog || selectedRef.current !== selectedLog) return;
 
     const newPost = {
       id: `post-${Date.now()}`,
@@ -167,15 +213,14 @@ export const useLogData = () => {
     };
 
     addPost(newPost);
-    setShowPublishModal(false);
-    setSelectedLog(null);
+    retireSelection();
     setPublishCaption('');
     setPublishCategory('sport');
     Alert.alert(
       'Saved on this device',
       'Your session is now in Discover. Online publishing is not connected yet.',
     );
-  }, [addPost, publishCaption, publishCategory, selectedLog]);
+  }, [addPost, publishCaption, publishCategory, selectedLog, retireSelection]);
 
   // Bounded poll for the off-screen ViewShot refs to mount. Previously this
   // recursed via setTimeout indefinitely with no cleanup, which could leak
@@ -183,10 +228,14 @@ export const useLogData = () => {
   const SHARE_REFS_MAX_WAIT_MS = 3000;
   const SHARE_REFS_POLL_INTERVAL_MS = 50;
 
-  const waitForShareRefs = useCallback(() => {
+  const waitForShareRefs = useCallback((isCurrent) => {
     return new Promise((resolve) => {
       const start = Date.now();
       const tick = () => {
+        if (!isCurrent()) {
+          resolve(false);
+          return;
+        }
         if (shareCardRef.current && shareCardTransparentRef.current) {
           resolve(true);
           return;
@@ -203,27 +252,24 @@ export const useLogData = () => {
 
   const generateShareImages = useCallback(async () => {
     if (!selectedLog) return;
+    const version = ++shareRevision.current;
+    const isCurrent = () =>
+      mounted.current && version === shareRevision.current && selectedRef.current === selectedLog;
 
     try {
       setIsGenerating(true);
 
-      const refsReady = await waitForShareRefs();
+      const refsReady = await waitForShareRefs(isCurrent);
+      if (!isCurrent()) return;
       if (!refsReady) {
         throw new Error('Share preview not ready');
       }
 
       const [fullImageUri, transparentImageUri] = await Promise.all([
-        shareCardRef.current.capture({
-          format: 'png',
-          quality: 1.0,
-          result: 'data-uri',
-        }),
-        shareCardTransparentRef.current.capture({
-          format: 'png',
-          quality: 1.0,
-          result: 'data-uri',
-        }),
+        shareCardRef.current.capture(),
+        shareCardTransparentRef.current.capture(),
       ]);
+      if (!isCurrent()) return;
 
       setGeneratedImages({
         full: fullImageUri,
@@ -231,10 +277,12 @@ export const useLogData = () => {
       });
       setShowShareModal(true);
     } catch (error) {
-      console.error('Error generating images:', error);
-      Alert.alert('Error', 'Failed to generate images. Please try again.');
+      if (isCurrent()) {
+        console.error('Error generating images:', error);
+        Alert.alert('Error', 'Failed to generate images. Please try again.');
+      }
     } finally {
-      setIsGenerating(false);
+      if (isCurrent()) setIsGenerating(false);
     }
   }, [selectedLog, waitForShareRefs]);
 
@@ -251,7 +299,7 @@ export const useLogData = () => {
 
       try {
         setIsCapturing(true);
-        const base64 = imageUri.replace(/^data:image\/\w+;base64,/, '');
+        const base64 = clipboardImage(imageUri);
         await Clipboard.setImageAsync(base64);
 
         setIsCapturing(false);
@@ -278,7 +326,7 @@ export const useLogData = () => {
 
         const useTransparent = platform === 'instagram-story' || platform === 'instagram-messages';
         const imageUri = useTransparent ? generatedImages.transparent : generatedImages.full;
-        const base64 = imageUri.replace(/^data:image\/\w+;base64,/, '');
+        const base64 = clipboardImage(imageUri);
 
         if (platform === 'native') {
           await Share.share({

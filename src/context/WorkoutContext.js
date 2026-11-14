@@ -17,12 +17,23 @@ import { normalizeRoutine, buildTimeline } from '../domain/routines';
 import { sessionToLog } from '../domain/workout';
 import { resolveRoundAudio } from '../domain/audio';
 import useWorkoutCues from '../hooks/useWorkoutCues';
-import { stopWorkoutCues, stopCuePreview, prepareWorkoutCues } from '../services/alerts/player';
+import {
+  stopWorkoutCues,
+  stopCuePreview,
+  prepareWorkoutCues,
+  playWorkoutCue,
+  registerCueMusicSource,
+} from '../services/alerts/player';
+import { useAppleMusicConnection } from './AppleMusicConnectionContext';
 
 const WorkoutContext = createContext(null);
 export const WorkoutProvider = ({ children }) => {
   const { routines, addCompletedRoutine } = useRoutineContext();
   const platform = usePlatformContext();
+  const appleMusic = useAppleMusicConnection();
+  const companion = useRef(appleMusic.player);
+  companion.current = appleMusic.player;
+  const companionActive = () => companion.current?.isActive?.() === true;
   const [selectedId, setSelectedId] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
   const selectedRoutine = useMemo(() => {
@@ -50,7 +61,12 @@ export const WorkoutProvider = ({ children }) => {
     ...platform,
     selectedRoutine: activeRoutine,
     countdownSoundPlayer,
+    stopLocalCues: () => Promise.all([stopWorkoutCues(), stopCuePreview()]),
+    isExternalMusicActive: companionActive,
+    registerCueSource: registerCueMusicSource,
+    playCue: playWorkoutCue,
     onPlaybackInterrupted: (reason) => {
+      if (companionActive()) return;
       if (timerRef.current?.session?.status !== 'running') return;
       setInterruptionReason(reason);
       timerRef.current.pause();
@@ -58,7 +74,28 @@ export const WorkoutProvider = ({ children }) => {
   });
   const audioRef = useRef(audio);
   audioRef.current = audio;
+  useEffect(
+    () =>
+      appleMusic.player?.registerBeforePlay?.(async () => {
+        const stopped = await audioRef.current.stopMusic();
+        if (stopped?.success === false) return stopped;
+        await Promise.all([stopWorkoutCues(), stopCuePreview()]);
+        return { success: true };
+      }),
+    [],
+  );
   const recorded = useRef(new Set());
+  // A user can hand over while an interval's old audio readiness is pending.
+  // That retired request must release its timer hold instead of pausing music.
+  const runTimedAudio = (operation) => {
+    const bypassed = { success: true, bypassed: true };
+    if (companionActive()) return bypassed;
+    const settle = (result) => (companionActive() ? bypassed : result);
+    return Promise.resolve(operation()).then(settle, (error) => {
+      if (companionActive()) return bypassed;
+      throw error;
+    });
+  };
   const finish = useCallback(
     (session) => {
       const log = sessionToLog(session);
@@ -71,31 +108,37 @@ export const WorkoutProvider = ({ children }) => {
   );
   const timer = useTimerLogic({
     routine: activeRoutine,
-    onPhaseChange: audio.handlePhaseChange,
+    onPhaseChange: (...args) => runTimedAudio(() => audioRef.current.handlePhaseChange(...args)),
     onComplete: finish,
     requiresAudio: (routine, phase) =>
+      !companionActive() &&
       !!resolveRoundAudio(routine, phase.phase, phase.round, platform.selectedPlatform),
-    onResumeAudio: (session) => {
-      if (audioRef.current.audioError) {
-        const phase = session.timeline[session.index];
-        return audioRef.current.handlePhaseChange(phase.phase, phase.round);
-      }
-      return audioRef.current.resumeMusic();
-    },
+    onResumeAudio: (session) =>
+      runTimedAudio(() => {
+        if (audioRef.current.audioError) {
+          const phase = session.timeline[session.index];
+          return audioRef.current.handlePhaseChange(phase.phase, phase.round);
+        }
+        return audioRef.current.resumeMusic();
+      }),
     onStateChange: (next, previous) => {
+      if (!next || next.status === 'paused' || next.status === 'aborted') {
+        audioRef.current.cancelCueResume?.();
+        companion.current?.cancelCueResume?.();
+      }
       if (next?.status === 'paused') {
         stopWorkoutCues().catch(() => {});
-        audioRef.current.pauseMusic();
+        if (!companionActive()) audioRef.current.pauseMusic();
       } else if ((!next || next.status === 'aborted') && previous) {
         stopWorkoutCues().catch(() => {});
-        audioRef.current.stopMusic();
+        if (!companionActive()) audioRef.current.stopMusic();
       } else if (next?.status === 'completed') {
-        audioRef.current.stopMusic();
+        if (!companionActive()) audioRef.current.stopMusic();
       }
     },
   });
   timerRef.current = timer;
-  const { alertError } = useWorkoutCues(timer.session);
+  const { alertError } = useWorkoutCues(timer.session, true);
   const running = timer.session?.status === 'running';
   const paused = timer.session?.status === 'paused';
   const active = running || paused;
@@ -113,7 +156,7 @@ export const WorkoutProvider = ({ children }) => {
     let cancelled = false;
     let timeout;
     const poll = async () => {
-      await audioRef.current.fetchPlayback();
+      if (!companionActive()) await audioRef.current.fetchPlayback();
       if (!cancelled) timeout = setTimeout(poll, 1000);
     };
     poll();
@@ -146,10 +189,12 @@ export const WorkoutProvider = ({ children }) => {
       alertKey.current !== unique
     ) {
       alertKey.current = unique;
-      audio.playCountdownSound(key);
+      Promise.resolve(audio.playCountdownSound(key)).catch(() => {});
     }
-  }, [timer.session, running, audio.playCountdownSound]);
+  }, [timer.session, running, audio.playCountdownSound, audio.localCuesAllowed]);
   const stop = useCallback(() => {
+    audioRef.current.cancelCueResume?.();
+    companion.current?.cancelCueResume?.();
     stopWorkoutCues().catch(() => {});
     const next = timer.stop();
     if (next?.status === 'aborted') finish(next);
@@ -163,19 +208,34 @@ export const WorkoutProvider = ({ children }) => {
     },
     [active, stop, timer.reset],
   );
-  const beginSession = useCallback((expectedRoutine) => {
-    if (
-      !mounted.current ||
-      !expectedRoutine ||
-      selectedRef.current !== expectedRoutine ||
-      ['running', 'paused'].includes(timerRef.current?.session?.status)
-    )
-      return false;
-    setInterruptionReason(null);
-    setSnapshot(JSON.parse(JSON.stringify(expectedRoutine)));
-    alertKey.current = null;
-    return !!timerRef.current.start();
-  }, []);
+  const beginSession = useCallback(
+    (expectedRoutine) => {
+      if (
+        !mounted.current ||
+        !expectedRoutine ||
+        selectedRef.current !== expectedRoutine ||
+        ['running', 'paused'].includes(timerRef.current?.session?.status)
+      )
+        return false;
+      // Cloud replacement checks this ref before committing. Reserve it in the
+      // Start action, before React's later render/effect can announce activity.
+      setSyncPaused(true);
+      let started;
+      try {
+        setInterruptionReason(null);
+        setSnapshot(JSON.parse(JSON.stringify(expectedRoutine)));
+        alertKey.current = null;
+        started = timerRef.current.start();
+        return !!started;
+      } finally {
+        if (!started) {
+          setSnapshot(null);
+          setSyncPaused(['running', 'paused'].includes(timerRef.current?.session?.status));
+        }
+      }
+    },
+    [setSyncPaused],
+  );
   const toggle = useCallback(async () => {
     setInterruptionReason(null);
     if (paused) {
@@ -209,7 +269,8 @@ export const WorkoutProvider = ({ children }) => {
     skipForward: () => timer.skip(1),
     skipBackward: () => timer.skip(-1),
     ...audio,
-    audioError: timer.syncError || audio.audioError || interruptionReason,
+    audioError: timer.syncError || (!companionActive() && audio.audioError) || interruptionReason,
+    companionAudioActive: companionActive(),
   };
   return <WorkoutContext.Provider value={value}>{children}</WorkoutContext.Provider>;
 };

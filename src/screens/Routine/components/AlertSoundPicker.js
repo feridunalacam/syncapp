@@ -3,15 +3,8 @@ import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Sheet from '../../../components/common/Sheet';
 import { useTheme } from '../../../context/ThemeContext';
+import { resolveAlertSound } from '../../../domain/alerts';
 
-const spoken = (id, name) => ({
-  id: `speech_${id}`,
-  name,
-  uri: `speech://${id}`,
-  type: 'voice',
-  platform: 'speech',
-  duration: 1,
-});
 const cue = (id, name, duration) => ({
   id,
   name,
@@ -22,18 +15,6 @@ const cue = (id, name, duration) => ({
 });
 const OPTIONS = [
   { id: 'none', name: 'None', sound: null, icon: 'volume-mute-outline' },
-  ...[
-    spoken('go', 'Go'),
-    spoken('rest', 'Rest'),
-    spoken('start', 'Start'),
-    spoken('complete', 'Complete'),
-  ].map((sound) => ({
-    id: sound.id,
-    name: sound.name,
-    detail: 'Spoken cue',
-    sound,
-    icon: 'mic-outline',
-  })),
   ...[
     cue('cue_gong', 'Gong', 1.85),
     cue('cue_boxing_bell', 'Boxing bell', 1),
@@ -56,7 +37,8 @@ export default function AlertSoundPicker({
   onCustom,
 }) {
   const { theme } = useTheme();
-  const custom = selected && !OPTIONS.some(({ sound }) => sound?.uri === selected.uri);
+  const currentSound = resolveAlertSound(selected);
+  const custom = currentSound && !OPTIONS.some(({ sound }) => sound?.uri === currentSound.uri);
   return (
     <Sheet visible={visible} title={title} onClose={onClose}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 8 }}>
@@ -68,7 +50,7 @@ export default function AlertSoundPicker({
                 numberOfLines={1}
                 style={{ color: theme.text, fontSize: 13, fontWeight: '500' }}
               >
-                {selected.name || 'Custom sound'}
+                {currentSound.name || 'Custom sound'}
               </Text>
               <Text style={{ color: theme.textSecondary, fontSize: 11, marginTop: 3 }}>
                 Current sound
@@ -78,13 +60,13 @@ export default function AlertSoundPicker({
           </View>
         )}
         {OPTIONS.map((option) => {
-          const active = option.sound ? selected?.uri === option.sound.uri : !selected;
+          const active = option.sound ? currentSound?.uri === option.sound.uri : !currentSound;
           return (
             <Pressable
               key={option.id}
               onPress={() => onSelect(option.sound)}
               accessibilityRole="button"
-              accessibilityLabel={`Use ${option.name.toLowerCase()}${option.detail ? ' spoken cue' : ''}`}
+              accessibilityLabel={`Use ${option.name.toLowerCase()}`}
               accessibilityState={{ selected: active }}
               style={[styles.option, { borderColor: theme.border }]}
             >

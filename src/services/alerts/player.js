@@ -1,63 +1,75 @@
 import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
-import * as Speech from 'expo-speech';
 import { CUE_ASSETS, LEGACY_CUE_ASSETS } from './assets';
-import { COACH_CUES } from './coachVoice';
 import { createCueController } from './controller';
-import { buildCuePreview } from '../../domain/alerts';
+import { createCueHandoff } from './cueHandoff';
+import { buildCuePreview, resolveAlertSound } from '../../domain/alerts';
 
-const words = {
-  'en-US': {
-    go: 'Go',
-    rest: 'Rest',
-    start: 'Start',
-    complete: 'Workout complete',
-    numbers: [
-      'Zero',
-      'One',
-      'Two',
-      'Three',
-      'Four',
-      'Five',
-      'Six',
-      'Seven',
-      'Eight',
-      'Nine',
-      'Ten',
-    ],
-  },
-  'tr-TR': {
-    go: 'Başla',
-    rest: 'Dinlen',
-    start: 'Başla',
-    complete: 'Antrenman tamamlandı',
-    numbers: ['Sıfır', 'Bir', 'İki', 'Üç', 'Dört', 'Beş', 'Altı', 'Yedi', 'Sekiz', 'Dokuz', 'On'],
-  },
-};
-let availableVoices;
-const prepareSpeech = () => {
-  if (!availableVoices) {
-    let timeout;
-    availableVoices = Promise.race([
-      Speech.getAvailableVoicesAsync(),
-      new Promise((_, reject) => {
-        timeout = setTimeout(
-          () => reject(new Error('The voice engine is not ready. Try again or use beeps.')),
-          6000,
-        );
-      }),
-    ])
-      .catch((error) => {
-        availableVoices = null;
-        throw error;
-      })
-      .finally(() => clearTimeout(timeout));
-  }
-  return availableVoices;
-};
-export const prepareWorkoutCues = () => prepareSpeech();
+// Kept for callers that prepare cues when selecting a routine. Effects need no voice engine.
+export const prepareWorkoutCues = () => Promise.resolve();
 let currentSound = null;
 let complete = null;
 let fallback = null;
+// Ownership can be retired before native unloading finishes. Keep the sound and
+// its acknowledgement available to every later handover stop, including failures.
+const retiringSounds = new Set();
+const unloadingSounds = new Map();
+const pendingLoads = new Set();
+const waitForCueLoad = (operation, deadline, discardLate = async () => {}) =>
+  new Promise((resolve, reject) => {
+    let terminal = false;
+    let timer;
+    const finish = (error, value) => {
+      if (terminal) return;
+      terminal = true;
+      clearTimeout(timer);
+      pendingLoads.delete(cancel);
+      if (error) reject(error);
+      else resolve(value);
+    };
+    const cancel = () => {
+      const error = new Error('Alert loading cancelled.');
+      error.cancelled = true;
+      finish(error);
+    };
+    const timeout = () =>
+      finish(new Error('The selected alert did not load in time. Try another sound.'));
+    pendingLoads.add(cancel);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) {
+      timeout();
+      return;
+    }
+    timer = setTimeout(timeout, remaining);
+    Promise.resolve()
+      .then(() => (terminal ? undefined : operation()))
+      .then(
+        (value) => {
+          if (!terminal && Date.now() >= deadline) timeout();
+          if (terminal) {
+            Promise.resolve()
+              .then(() => discardLate(value))
+              .catch(() => {});
+          } else finish(null, value);
+        },
+        (error) => {
+          if (!terminal) finish(error);
+        },
+      );
+  });
+const unloadSound = (sound) => {
+  if (unloadingSounds.has(sound)) return unloadingSounds.get(sound);
+  retiringSounds.add(sound);
+  const pending = (async () => {
+    const status = await sound.unloadAsync();
+    if (status === false || status?.success === false || status?.isLoaded === true)
+      throw new Error('Alert audio did not stop. Try again.');
+    retiringSounds.delete(sound);
+  })().finally(() => unloadingSounds.delete(sound));
+  unloadingSounds.set(sound, pending);
+  pending.catch(() => {});
+  return pending;
+};
+const waitForNativeStops = () => Promise.all([...retiringSounds].map(unloadSound));
 const settle = (result) => {
   clearTimeout(fallback);
   fallback = null;
@@ -67,101 +79,59 @@ const settle = (result) => {
 };
 const output = {
   async stop() {
+    [...pendingLoads].forEach((cancel) => cancel());
     settle({ cancelled: true });
     const previous = currentSound;
     currentSound = null;
-    await Promise.allSettled([Speech.stop(), previous?.unloadAsync()]);
+    if (previous) retiringSounds.add(previous);
+    await waitForNativeStops();
   },
   async play(cue, cancelled) {
-    const uri = cue.sound?.uri;
+    const soundConfig = resolveAlertSound(cue.sound);
+    const uri = soundConfig?.uri;
     if (!uri || cue.volume === 0) return { completed: true };
-    const coachCue = cue.language !== 'tr-TR' ? COACH_CUES[uri] : null;
     const volume = Math.max(0, Math.min(100, cue.volume ?? 80)) / 100;
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
-      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-      shouldDuckAndroid: true,
-    });
-    if (cancelled()) return { cancelled: true };
-    if (uri.startsWith('speech://') && !coachCue) {
-      const language = words[cue.language] ? cue.language : 'en-US';
-      const voices = await prepareSpeech();
-      if (cancelled()) return { cancelled: true };
-      const preferred =
-        voices.find((voice) => voice.language?.replace('_', '-') === language) ||
-        voices.find((voice) => voice.language?.slice(0, 2) === language.slice(0, 2));
-      if (!preferred)
-        throw new Error(
-          'This voice language is not installed. Choose another language or use beeps.',
-        );
-      const token = uri.slice('speech://'.length);
-      const text = token.startsWith('count/')
-        ? words[language].numbers[Number(token.slice(6))]
-        : words[language][token];
-      if (!text) throw new Error('This spoken cue is not available.');
-      return new Promise((resolve, reject) => {
-        complete = resolve;
-        let started = false;
-        const fail = (error) => {
-          if (complete !== resolve) return;
-          clearTimeout(fallback);
-          fallback = null;
-          complete = null;
-          reject(error);
-        };
-        // A missing native completion callback cannot leave Preview stuck indefinitely.
-        fallback = setTimeout(() => {
-          if (complete !== resolve) return;
-          fail(
-            new Error(
-              started
-                ? 'The spoken cue did not finish. Try again or use beeps.'
-                : 'The voice engine did not start. Try again or use beeps.',
-            ),
-          );
-          Speech.stop().catch(() => {});
-        }, 5000);
-        const options = {
-          language,
-          voice: preferred.identifier,
-          volume,
-          rate: 1.05,
-          pitch: 1,
-          useApplicationAudioSession: true,
-          onStart: () => {
-            // Native events from an old utterance must never stop the new one.
-            if (complete !== resolve) return;
-            if (cancelled()) {
-              settle({ cancelled: true });
-              Speech.stop().catch(() => {});
-            } else started = true;
-          },
-          onDone: () => {
-            if (complete === resolve) settle({ completed: true });
-          },
-          onStopped: () => {
-            if (complete === resolve) settle({ cancelled: true });
-          },
-          onError: fail,
-        };
-        try {
-          Speech.speak(text, options);
-        } catch (error) {
-          fail(error);
-        }
-      });
-    }
-    const asset = coachCue?.asset || CUE_ASSETS[uri] || LEGACY_CUE_ASSETS[uri];
+    // One pre-play budget covers both native awaits. Missing files can leave
+    // createAsync pending indefinitely even though no audible sound was created.
+    const deadline = Math.min(
+      Date.now() + 2000,
+      Number.isFinite(cue.expiresAt) ? cue.expiresAt : Infinity,
+    );
+    const asset = CUE_ASSETS[uri] || LEGACY_CUE_ASSETS[uri];
     if (!asset && !/^(file|https?|content|asset):\/\//i.test(uri))
       throw new Error('Choose a sound file or a built-in cue.');
-    const { sound } = await Audio.Sound.createAsync(asset || { uri }, {
-      shouldPlay: false,
-      volume,
-      progressUpdateIntervalMillis: 100,
-    });
+    let sound;
+    try {
+      await waitForCueLoad(
+        () =>
+          Audio.setAudioModeAsync({
+            playsInSilentModeIOS: true,
+            interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
+            interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+            shouldDuckAndroid: true,
+          }),
+        deadline,
+      );
+      if (cancelled()) return { cancelled: true };
+      const loaded = await waitForCueLoad(
+        () =>
+          Audio.Sound.createAsync(asset || { uri }, {
+            shouldPlay: false,
+            volume,
+            progressUpdateIntervalMillis: 100,
+          }),
+        deadline,
+        (late) => (late?.sound ? unloadSound(late.sound) : undefined),
+      );
+      sound = loaded?.sound;
+      if (!sound) throw new Error('The selected alert could not be loaded.');
+    } catch (error) {
+      if (error.cancelled || cancelled() || (cue.expiresAt != null && Date.now() >= cue.expiresAt))
+        return { cancelled: true };
+      throw error;
+    }
     if (cancelled()) {
-      await sound.unloadAsync();
+      await unloadSound(sound);
       return { cancelled: true };
     }
     currentSound = sound;
@@ -171,15 +141,12 @@ const output = {
         if (currentSound !== sound) return;
         currentSound = null;
         settle({ completed: true });
-        sound.unloadAsync().catch(() => {});
+        unloadSound(sound).catch(() => {});
       };
       // Custom cues are intentionally bounded; they cannot outlive an entire short workout.
       fallback = setTimeout(
         finish,
-        Math.min(
-          15000,
-          Math.max(2000, (coachCue?.duration || cue.sound.duration || 4) * 1000 + 1000),
-        ),
+        Math.min(15000, Math.max(2000, (soundConfig.duration || 4) * 1000 + 1000)),
       );
       sound.setOnPlaybackStatusUpdate((status) => {
         if (status.didJustFinish) finish();
@@ -187,7 +154,7 @@ const output = {
           currentSound = null;
           clearTimeout(fallback);
           complete = null;
-          sound.unloadAsync().catch(() => {});
+          unloadSound(sound).catch(() => {});
           reject(new Error('The selected alert could not be played.'));
         }
       });
@@ -196,14 +163,50 @@ const output = {
         currentSound = null;
         clearTimeout(fallback);
         complete = null;
-        sound.unloadAsync().catch(() => {});
+        unloadSound(sound).catch(() => {});
         reject(error);
       });
     });
   },
 };
 const controller = createCueController({ output });
-export const playWorkoutCue = (event) => controller.play(event);
-export const stopWorkoutCues = () => controller.stop('workout');
-export const previewWorkoutCue = (key, config) => controller.preview(buildCuePreview(config, key));
-export const stopCuePreview = () => controller.stop('preview');
+const stopOwner = (owner) => {
+  const stopped = controller.stop(owner);
+  // A prior suppression stop may already have cleared the controller's owner.
+  // Its native stop still belongs to this barrier and must acknowledge silence.
+  return Promise.all([stopped, waitForNativeStops()]).then(() => undefined);
+};
+const musicOwners = new Set();
+const handoff = createCueHandoff({
+  stopOutput: stopOwner,
+  needsMusicHandoff: () => musicOwners.size > 0,
+});
+export const registerCueMusicSource = (source) => handoff.register(source);
+export function acquireMusicCueSilence() {
+  const owner = {};
+  musicOwners.add(owner);
+  handoff.stop('workout').catch(() => {});
+  handoff.stop('preview').catch(() => {});
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    musicOwners.delete(owner);
+  };
+}
+const audibleCue = (event) => !!resolveAlertSound(event?.sound)?.uri && event?.volume !== 0;
+export const playWorkoutCue = (event) => {
+  if (!audibleCue(event)) return Promise.resolve({ completed: true });
+  return musicOwners.size && !handoff.hasSources()
+    ? Promise.resolve({ cancelled: true })
+    : handoff.run('workout', event, (cancelled) => controller.play(event, 'workout', cancelled));
+};
+export const stopWorkoutCues = () => handoff.stop('workout');
+export const previewWorkoutCue = (key, config) => {
+  const events = buildCuePreview(config, key).filter(audibleCue);
+  if (!events.length) return Promise.resolve({ completed: true });
+  return musicOwners.size && !handoff.hasSources()
+    ? Promise.resolve({ cancelled: true })
+    : handoff.run('preview', {}, (cancelled) => controller.preview(events, cancelled));
+};
+export const stopCuePreview = () => handoff.stop('preview');

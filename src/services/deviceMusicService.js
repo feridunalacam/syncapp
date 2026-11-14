@@ -51,8 +51,8 @@ class DeviceMusicPlayer {
   }
 
   // Resume playback
-  async play(accessToken, deviceId = null) {
-    return await this.player.play();
+  async play(accessToken, deviceId = null, options = {}) {
+    return await this.player.play(options);
   }
 
   // Get current playback status
@@ -77,7 +77,7 @@ class DeviceMusicPlayer {
 
   // Cleanup
   async cleanup() {
-    await this.player.cleanup();
+    return await this.player.cleanup();
   }
 }
 
@@ -85,15 +85,17 @@ class DeviceMusicPlayer {
 const deviceMusicPlayer = new DeviceMusicPlayer();
 
 const deviceMusicService = {
+  prepareTrack: (_token, uri) => deviceMusicPlayer.player.prepareTrack(uri),
+  releaseCurrent: () => deviceMusicPlayer.player.unload(),
   // Device doesn't need token refresh
   getAccessToken: () => Promise.resolve({ accessToken: 'device', expiresIn: 3600 }),
 
   // Playback Controls
   play: (accessToken, deviceId, uris, positionMs) => {
-    if (uris && uris.length > 0) {
+    if (Array.isArray(uris) && uris.length > 0) {
       return deviceMusicPlayer.playTrack(accessToken, uris[0], deviceId, { positionMs });
     }
-    return deviceMusicPlayer.play(accessToken, deviceId);
+    return deviceMusicPlayer.play(accessToken, deviceId, uris && !Array.isArray(uris) ? uris : {});
   },
 
   playTrack: (accessToken, trackUri, deviceId, options) =>

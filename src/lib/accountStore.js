@@ -12,6 +12,13 @@ export const ACCOUNT_KEYS = [
   'connectedPlatforms',
   'selectedPlatform',
 ];
+const JSON_KEYS = new Set([
+  'routines',
+  'completedRoutines',
+  'profileSocialLinks',
+  'posts',
+  'connectedPlatforms',
+]);
 const OWNER_KEY = '@syncapp_guest_import_owner';
 const IMPORT_CLAIM_KEY = '@syncapp_guest_import_claim';
 const IMPORT_CLEANUP_KEY = '@syncapp_guest_import_cleanup';
@@ -41,19 +48,71 @@ const decode = (raw, fallback = null) => {
     return fallback;
   }
 };
-const prefixFor = (userId) => (userId ? `@syncapp/account/${userId}/` : '');
-export const clearAccountStore = async (base, userId) => {
-  const prefix = prefixFor(userId);
+// Missing records are different from damaged records. Never turn a recoverable
+// raw value into first-install defaults that a consumer would persist over it.
+const parseSavedJSON = (raw, fallback = null) => {
+  if (raw == null) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error('Saved records could not be read. Retry to recover this device’s data.');
+  }
+};
+const namespaceFor = (userId, namespace = userId) => {
+  if (!userId) {
+    if (namespace != null && namespace !== '') throw new Error('Invalid account storage scope.');
+    return null;
+  }
+  if (
+    typeof userId !== 'string' ||
+    /[\/\\\u0000]/.test(userId) ||
+    ![userId, `review:1:${userId}`, `unresolved:${userId}`].includes(namespace)
+  )
+    throw new Error('Invalid account storage scope.');
+  return namespace;
+};
+const prefixFor = (namespace) => (namespace ? `@syncapp/account/${namespace}/` : '');
+export const invalidateAccountStores = (base, userId) => {
+  namespaceFor(userId);
   if (!userId) throw new Error('An account is required.');
+  const namespaces = [userId, `review:1:${userId}`, `unresolved:${userId}`].filter((namespace) =>
+    queueFor(base).has(prefixFor(namespace)),
+  );
+  for (const namespace of namespaces) closedFor(base).add(prefixFor(namespace));
+  return namespaces;
+};
+
+// Deletion-only discovery of existing key names and instantiated local adapters.
+// This never selects a billing lane or grants access. Include live adapters even
+// before a held first write has persisted any key on an older unregistered install.
+export const discoverAccountNamespaces = async (base, userId) => {
+  namespaceFor(userId);
+  if (!userId) throw new Error('An account is required.');
+  const candidates = [userId, `review:1:${userId}`, `unresolved:${userId}`];
+  const keys = await base.getAllKeys();
+  return candidates.filter(
+    (namespace) =>
+      queueFor(base).has(prefixFor(namespace)) ||
+      keys.some((key) => key.startsWith(prefixFor(namespace))),
+  );
+};
+
+export const clearAccountStore = async (base, userId, options = {}) => {
+  if (!userId) throw new Error('An account is required.');
+  const namespace = namespaceFor(userId, options.namespace);
+  const prefix = prefixFor(namespace);
   // Close synchronously before waiting: stale providers may still have a token
   // refresh or persistence callback in flight. A new adapter cannot reopen it.
   closedFor(base).add(prefix);
   const scopedQueues = queueFor(base);
   const result = (scopedQueues.get(prefix) || Promise.resolve()).then(async () => {
-    const importClaim = await base.getItem(IMPORT_CLAIM_KEY);
-    const pendingImport = decode(await base.getItem(IMPORT_CLEANUP_KEY));
     const keys = await base.getAllKeys();
     await base.multiRemove(keys.filter((key) => key.startsWith(prefix)));
+    // Review/unresolved adapters can never import guest data, so deleting them
+    // must not inspect or remove the production import claim/cleanup journal.
+    if (namespace !== userId) return;
+    const importClaim = await base.getItem(IMPORT_CLAIM_KEY);
+    const pendingImport = decode(await base.getItem(IMPORT_CLEANUP_KEY));
     if (importClaim === userId) {
       // An unfinished import must not reserve guest records for a deleted
       // account. Completed imports have already removed their temporary claim.
@@ -127,11 +186,107 @@ export function sanitizeBackup(value) {
   );
 }
 
-export function createAccountStore(base, userId, onWrite = () => {}) {
-  const prefix = prefixFor(userId);
+export function summarizeBackup(payload, updatedAt = null) {
+  const data = payload?.data || {};
+  const routines = Array.isArray(data.routines) ? data.routines : [];
+  return {
+    routineCount: routines.length,
+    sessionCount: Array.isArray(data.completedRoutines) ? data.completedRoutines.length : 0,
+    postCount: Array.isArray(data.posts) ? data.posts.length : 0,
+    routineNames: routines.map((row) => row?.name).filter((name) => typeof name === 'string'),
+    updatedAt,
+  };
+}
+
+const validateBackup = (payload) => {
+  if (
+    payload?.version !== 1 ||
+    !payload.data ||
+    typeof payload.data !== 'object' ||
+    Array.isArray(payload.data)
+  )
+    throw new Error('This backup format is not supported.');
+  for (const [key, label] of [
+    ['routines', 'routines'],
+    ['completedRoutines', 'activity'],
+    ['posts', 'posts'],
+  ]) {
+    if (payload.data[key] != null && !Array.isArray(payload.data[key]))
+      throw new Error(`This backup has invalid ${label}.`);
+  }
+};
+
+// A stable recovered identity makes repeated recovery idempotent, while keeping
+// a newer routine with the same ID alongside its saved version.
+const backupContent = (value) => {
+  const sort = (item) => {
+    if (Array.isArray(item)) return item.map(sort);
+    if (!item || typeof item !== 'object') return item;
+    return Object.fromEntries(
+      Object.keys(item)
+        .sort()
+        .map((key) => [key, sort(item[key])]),
+    );
+  };
+  return JSON.stringify(sort(sanitizeBackup(value)));
+};
+const recoveredIdentity = (row) => {
+  let hash = 2166136261;
+  for (const char of backupContent(row)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `recovered-${row.id}-${(hash >>> 0).toString(36)}`;
+};
+
+const mergeRecoveryData = (current, saved) => {
+  const merged = { ...current };
+  for (const key of BACKUP_KEYS) {
+    const recovered = saved[key];
+    if (['routines', 'completedRoutines', 'posts'].includes(key) && recovered != null) {
+      const rows = [...(current[key] || [])];
+      for (const row of recovered) {
+        const identity = (item) =>
+          key === 'completedRoutines'
+            ? item?.sessionId || `${item?.id}:${item?.completedAt}`
+            : item?.id;
+        const existing = rows.find((item) => identity(item) === identity(row));
+        if (!existing) rows.push(row);
+        else if (
+          key === 'routines' &&
+          row?.id != null &&
+          backupContent(existing) !== backupContent(row)
+        ) {
+          const recoveredId = recoveredIdentity(row);
+          let id = recoveredId;
+          let suffix = 1;
+          while (
+            rows.some(
+              (item) =>
+                item?.id === id && backupContent({ ...item, id: row.id }) !== backupContent(row),
+            )
+          )
+            id = `${recoveredId}-${suffix++}`;
+          if (!rows.some((item) => item?.id === id)) rows.push({ ...row, id });
+        } else rows[rows.indexOf(existing)] = retainDeviceReferences(existing, row);
+      }
+      merged[key] = rows;
+    } else if (!Object.hasOwn(current, key) && Object.hasOwn(saved, key)) merged[key] = recovered;
+  }
+  return merged;
+};
+
+export function createAccountStore(base, userId, onWrite = () => {}, options = {}) {
+  const namespace = namespaceFor(userId, options.namespace);
+  const allowGuestImport = !!userId && namespace === userId && options.allowGuestImport !== false;
+  const prefix = prefixFor(namespace);
   const metaKey = `${prefix}@syncmeta`;
   const restoreKey = `${prefix}@cloud-restore-pending`;
+  const recoveryKey = `${prefix}@before-cloud-restore`;
+  const latestRecoveryKey = `${prefix}@latest-before-cloud-restore`;
+  const recoveryIntents = new WeakMap();
   const scopedQueues = queueFor(base);
+  if (!scopedQueues.has(prefix)) scopedQueues.set(prefix, Promise.resolve());
   const ensureOpen = () => {
     if (closedFor(base).has(prefix))
       throw new Error('This account has been deleted from this device.');
@@ -145,7 +300,7 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
     const pending = decode(raw);
     const expected = [...BACKUP_KEYS.map((key) => `${prefix}${key}`), metaKey];
     if (
-      pending?.version !== 1 ||
+      ![1, 2].includes(pending?.version) ||
       !Array.isArray(pending.entries) ||
       pending.entries.length !== expected.length ||
       pending.entries.some(
@@ -154,10 +309,20 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
           entry.length !== 2 ||
           entry[0] !== expected[index] ||
           (entry[1] !== null && typeof entry[1] !== 'string'),
-      )
+      ) ||
+      (pending.version === 2 &&
+        (!Array.isArray(pending.latestRecovery) ||
+          pending.latestRecovery.length !== 2 ||
+          pending.latestRecovery[0] !== latestRecoveryKey ||
+          (pending.latestRecovery[1] !== null && typeof pending.latestRecovery[1] !== 'string')))
     )
       throw new Error('The interrupted backup could not be recovered. Please retry.');
     for (const [key, value] of pending.entries) {
+      if (value == null) await base.removeItem(key);
+      else await base.setItem(key, value);
+    }
+    if (pending.version === 2) {
+      const [key, value] = pending.latestRecovery;
       if (value == null) await base.removeItem(key);
       else await base.setItem(key, value);
     }
@@ -210,42 +375,23 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
       data.posts = data.posts.filter((p) => p.authorId === 'current-user');
     return { payload: { version: 1, data: sanitizeBackup(data) }, meta: await readMeta() };
   };
-  const replace = async (payload, revision, expectedCounter, canApply = () => true) => {
-    ensureOpen();
-    if (
-      payload?.version !== 1 ||
-      !payload.data ||
-      typeof payload.data !== 'object' ||
-      Array.isArray(payload.data)
-    )
-      throw new Error('This backup format is not supported.');
-    if (payload.data.routines != null && !Array.isArray(payload.data.routines))
-      throw new Error('This backup has invalid routines.');
-    if (payload.data.completedRoutines != null && !Array.isArray(payload.data.completedRoutines))
-      throw new Error('This backup has invalid activity.');
-    if (payload.data.posts != null && !Array.isArray(payload.data.posts))
-      throw new Error('This backup has invalid posts.');
-    const meta = await readMeta();
-    if (meta.counter !== expectedCounter || !canApply()) return false;
-    const before = await snapshot();
-    const entries = await Promise.all(
+  const readEntries = () =>
+    Promise.all(
       [...BACKUP_KEYS.map(keyFor), metaKey].map(async (key) => [key, await base.getItem(key)]),
     );
-    const replacements = BACKUP_KEYS.map((key, index) => {
-      const incoming = payload.data[key];
-      const current = decode(entries[index][1]);
-      const value = ['routines', 'completedRoutines', 'posts'].includes(key)
-        ? retainDeviceReferences(incoming, current)
-        : incoming;
-      const raw = value == null ? null : typeof value === 'string' ? value : JSON.stringify(value);
-      return [keyFor(key), raw];
-    });
+  const commitReplacement = async (entries, replacements, nextMeta, canApply, recoveryCopy) => {
     if (!canApply()) return false;
-    const journal = JSON.stringify({ version: 1, entries });
+    const journal = JSON.stringify(
+      recoveryCopy
+        ? {
+            version: 2,
+            entries,
+            latestRecovery: [latestRecoveryKey, await base.getItem(latestRecoveryKey)],
+          }
+        : { version: 1, entries },
+    );
     await base.setItem(restoreKey, journal);
     try {
-      // Preserve a recoverable device copy before replacing anything.
-      await base.setItem(`${prefix}@before-cloud-restore`, JSON.stringify(before));
       for (const [key, raw] of replacements) {
         if (!canApply()) {
           await recoverPendingRestore();
@@ -258,10 +404,12 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
         await recoverPendingRestore();
         return false;
       }
-      await base.setItem(
-        metaKey,
-        JSON.stringify({ revision, counter: meta.counter + 1, dirty: false }),
-      );
+      await base.setItem(metaKey, JSON.stringify(nextMeta));
+      if (!canApply()) {
+        await recoverPendingRestore();
+        return false;
+      }
+      if (recoveryCopy) await base.setItem(latestRecoveryKey, recoveryCopy);
       if (!canApply()) {
         await recoverPendingRestore();
         return false;
@@ -287,6 +435,155 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
     }
     return true;
   };
+  const replace = async (payload, revision, expectedCounter, canApply = () => true) => {
+    ensureOpen();
+    validateBackup(payload);
+    const meta = await readMeta();
+    if (meta.counter !== expectedCounter || !canApply()) return false;
+    const entries = await readEntries();
+    const replacements = BACKUP_KEYS.map((key, index) => {
+      const incoming = payload.data[key];
+      const current = decode(entries[index][1]);
+      const value = ['routines', 'completedRoutines', 'posts'].includes(key)
+        ? retainDeviceReferences(incoming, current)
+        : incoming;
+      const raw = value == null ? null : typeof value === 'string' ? value : JSON.stringify(value);
+      return [keyFor(key), raw];
+    });
+    if (!canApply()) return false;
+    // The first saved device copy may contain the only remaining user record.
+    // Never rotate it away on another restore or a failed/interrupted attempt.
+    const before = await snapshot();
+    if (!canApply()) return false;
+    const recoveryCopy = JSON.stringify({
+      ...before,
+      version: 2,
+      namespace,
+      userId: userId || null,
+      savedAt: new Date().toISOString(),
+      entries: entries
+        .slice(0, BACKUP_KEYS.length)
+        .map(([key, raw], index) => [BACKUP_KEYS[index], raw]),
+    });
+    if ((await base.getItem(recoveryKey)) == null) await base.setItem(recoveryKey, recoveryCopy);
+    return commitReplacement(
+      entries,
+      replacements,
+      { revision, counter: meta.counter + 1, dirty: false },
+      canApply,
+      // Repeating the same cloud restore must not rotate away the only copy
+      // containing a local-only routine that disappeared on the first restore.
+      backupContent(before.payload) === backupContent(payload) ? null : recoveryCopy,
+    );
+  };
+  const readRecovery = (raw) => {
+    const copy = parseSavedJSON(raw);
+    validateBackup(copy?.payload);
+    if (copy.version === 2) {
+      if (
+        copy.namespace !== namespace ||
+        copy.userId !== (userId || null) ||
+        !Array.isArray(copy.entries) ||
+        copy.entries.length !== BACKUP_KEYS.length ||
+        copy.entries.some(
+          (entry, index) =>
+            !Array.isArray(entry) ||
+            entry.length !== 2 ||
+            entry[0] !== BACKUP_KEYS[index] ||
+            (entry[1] !== null && typeof entry[1] !== 'string'),
+        )
+      )
+        throw new Error('This saved device copy belongs to a different account or cannot be read.');
+      const data = {};
+      for (const [key, value] of copy.entries) {
+        if (value != null) data[key] = key === 'profileBio' ? value : parseSavedJSON(value);
+      }
+      validateBackup({ version: 1, data });
+      return { payload: { version: 1, data }, savedAt: copy.savedAt || null };
+    }
+    if (copy.version != null) throw new Error('This saved device copy format is not supported.');
+    // TestFlight 11 and older wrote a sanitized snapshot without a timestamp.
+    return { payload: copy.payload, savedAt: null };
+  };
+  const readRecoveryCopies = async () => {
+    const raw = await base.getItem(recoveryKey);
+    const latestRaw = await base.getItem(latestRecoveryKey);
+    if (raw == null && latestRaw == null) return null;
+    const first = raw == null ? null : readRecovery(raw);
+    const latest = latestRaw == null ? null : readRecovery(latestRaw);
+    return {
+      raw,
+      latestRaw,
+      payload: {
+        version: 1,
+        data: mergeRecoveryData(latest?.payload.data || {}, first?.payload.data || {}),
+      },
+      savedAt: latest?.savedAt || first?.savedAt || null,
+      includesUndatedCopy: (!!first && !first.savedAt) || (!!latest && !latest.savedAt),
+      copyCount: new Set([raw, latestRaw].filter((value) => value != null)).size,
+    };
+  };
+  const previewRecovery = async () => {
+    ensureOpen();
+    if (!userId || namespace === `unresolved:${userId}`)
+      throw new Error('Open a verified account namespace before recovering device records.');
+    const copy = await readRecoveryCopies();
+    if (!copy) return null;
+    const intent = {};
+    recoveryIntents.set(intent, {
+      raw: copy.raw,
+      latestRaw: copy.latestRaw,
+      counter: (await readMeta()).counter,
+    });
+    return {
+      ...summarizeBackup(copy.payload, copy.savedAt),
+      includesUndatedCopy: copy.includesUndatedCopy,
+      copyCount: copy.copyCount,
+      intent,
+    };
+  };
+  const recoverDeviceCopy = async (intent, canApply = () => true) => {
+    ensureOpen();
+    if (!userId || namespace === `unresolved:${userId}`)
+      throw new Error('Open a verified account namespace before recovering device records.');
+    const expected = intent && recoveryIntents.get(intent);
+    const meta = await readMeta();
+    const copy = await readRecoveryCopies();
+    if (
+      !expected ||
+      !copy ||
+      expected.raw !== copy.raw ||
+      expected.latestRaw !== copy.latestRaw ||
+      expected.counter !== meta.counter ||
+      !canApply()
+    )
+      return false;
+    const entries = await readEntries();
+    const current = {};
+    for (let index = 0; index < BACKUP_KEYS.length; index++) {
+      const raw = entries[index][1];
+      if (raw != null)
+        current[BACKUP_KEYS[index]] =
+          BACKUP_KEYS[index] === 'profileBio' ? raw : parseSavedJSON(raw);
+    }
+    const merged = mergeRecoveryData(current, copy.payload.data);
+    const replacements = BACKUP_KEYS.map((key) => {
+      const recovered = merged[key];
+      const value =
+        recovered == null
+          ? null
+          : typeof recovered === 'string'
+            ? recovered
+            : JSON.stringify(recovered);
+      return [keyFor(key), value];
+    });
+    return commitReplacement(
+      entries,
+      replacements,
+      { ...meta, counter: meta.counter + 1, dirty: true, recoveryPending: true },
+      canApply,
+    );
+  };
   const withGuestRecords = (fn) => {
     const result = (scopedQueues.get('') || Promise.resolve()).then(fn);
     scopedQueues.set(
@@ -294,6 +591,11 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
       result.catch(() => {}),
     );
     return result;
+  };
+  const importSerial = (work) => {
+    if (userId && !allowGuestImport)
+      return Promise.reject(new Error('Device data cannot be imported into this account scope.'));
+    return serial(work);
   };
   const validateImportedGuestRecords = (pending) => {
     const allowed = [...BACKUP_KEYS, 'profilePictureUri'];
@@ -325,9 +627,22 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
   };
   return {
     userId,
+    namespace,
+    allowGuestImport,
+    // Resolve interrupted replacement before mounting consumers. Read every
+    // personal key without cloud sanitization, normalization or a size limit so
+    // guest/Free content remains available independently of backup eligibility.
+    prepare: () =>
+      serial(async () => {
+        ensureOpen();
+        for (const key of ACCOUNT_KEYS) {
+          const raw = await base.getItem(keyFor(key));
+          if (JSON_KEYS.has(key)) parseSavedJSON(raw);
+        }
+      }),
     getString: (key) => serial(() => base.getItem(keyFor(key))),
     getJSON: (key, fallback = null) =>
-      serial(async () => decode(await base.getItem(keyFor(key)), fallback)),
+      serial(async () => parseSavedJSON(await base.getItem(keyFor(key)), fallback)),
     setString: (key, value) =>
       serial(() => write(key, value == null ? null : String(value))).catch(() => false),
     setJSON: (key, value) =>
@@ -341,17 +656,25 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
     snapshot: () => serial(snapshot),
     replaceFromCloud: (payload, revision, expectedCounter, canApply) =>
       serial(() => replace(payload, revision, expectedCounter, canApply)),
+    getRecoveryPreview: () => serial(previewRecovery),
+    recoverDeviceCopy: (intent, canApply) => serial(() => recoverDeviceCopy(intent, canApply)),
     markSynced: (revision, counter) =>
       serial(async () => {
         ensureOpen();
         const meta = await readMeta();
         await base.setItem(
           metaKey,
-          JSON.stringify({ ...meta, revision, dirty: meta.counter !== counter }),
+          JSON.stringify({
+            ...meta,
+            revision,
+            dirty: meta.counter !== counter,
+            ...(meta.recoveryPending && meta.counter === counter ? { recoveryPending: false } : {}),
+          }),
         );
       }),
     guestImportState: () =>
       serial(async () => {
+        if (userId && !allowGuestImport) return { hasGuestData: false, importComplete: false };
         const owner = await base.getItem(OWNER_KEY);
         const claim = await base.getItem(IMPORT_CLAIM_KEY);
         const pending = decode(await base.getItem(IMPORT_CLEANUP_KEY));
@@ -366,7 +689,7 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
         return { hasGuestData, importComplete: !!userId && owner === userId && !needsCleanup };
       }),
     importGuestData: () =>
-      serial(() =>
+      importSerial(() =>
         claimImport(base, () => {
           if (!userId) throw new Error('Sign in before importing device data.');
           return withGuestRecords(async () => {
@@ -399,6 +722,12 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
               if (pending || claim === userId) await base.removeItem(IMPORT_CLAIM_KEY);
               return;
             }
+            // Reject damaged guest/account JSON before reserving, copying or
+            // cleaning up an import. Keep the original raw records recoverable.
+            for (const key of BACKUP_KEYS.filter((key) => JSON_KEYS.has(key))) {
+              parseSavedJSON(await base.getItem(key));
+              parseSavedJSON(await base.getItem(keyFor(key)));
+            }
             // Reserve before the first account copy. The separate cleanup
             // journal is written only after all copies have become durable.
             if (!claim) await base.setItem(IMPORT_CLAIM_KEY, userId);
@@ -414,8 +743,8 @@ export function createAccountStore(base, userId, onWrite = () => {}) {
               const current = await base.getItem(keyFor(key));
               let raw = current == null ? guest : current;
               if (['routines', 'completedRoutines', 'posts'].includes(key)) {
-                const localRows = decode(current, []);
-                const guestRows = decode(guest, []);
+                const localRows = parseSavedJSON(current, []);
+                const guestRows = parseSavedJSON(guest, []);
                 if (!Array.isArray(localRows) || !Array.isArray(guestRows))
                   throw new Error('Device data could not be imported.');
                 const rows = combine(localRows, guestRows, (r) =>

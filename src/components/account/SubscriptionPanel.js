@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Linking,
@@ -25,26 +25,54 @@ export default function SubscriptionPanel({ visible, onClose, onSignIn }) {
   const [selectedId, setSelectedId] = useState('$rc_annual');
   const [localMessage, setLocalMessage] = useState(null);
   const [working, setWorking] = useState(false);
+  const operationRef = useRef(0);
+  const userRef = useRef(user?.id);
+  userRef.current = user?.id;
   const packages = subscription.packages || [];
   const selected = packages.find((pkg) => pkg.identifier === selectedId) || packages[0];
   const legalReady = validLink(privacyUrl) && validLink(termsUrl);
   const busy = subscription.loading || working;
+  const localCopy =
+    localMessage?.kind === 'pro' && (!subscription.isPro || !subscription.accessVerified)
+      ? null
+      : localMessage?.text;
   useEffect(() => {
-    if (visible) setLocalMessage(null);
-  }, [visible]);
+    setLocalMessage(null);
+    setWorking(false);
+    return () => {
+      operationRef.current++;
+    };
+  }, [visible, user?.id]);
+  useEffect(() => {
+    setLocalMessage((message) => (message?.kind === 'pro' ? null : message));
+  }, [subscription.isPro, subscription.accessVerified]);
   const run = async (operation) => {
+    const request = ++operationRef.current;
+    const userId = user?.id;
+    const current = () => request === operationRef.current && userRef.current === userId;
     setLocalMessage(null);
     setWorking(true);
     try {
       const result = await operation();
-      if (result?.isPro) setLocalMessage('Pro is active. Cloud backup is ready in your account.');
+      if (!current()) return;
+      if (result?.isPro)
+        setLocalMessage({
+          kind: 'pro',
+          text: 'Pro membership found. Check the cloud backup status in Profile.',
+        });
       else if (result?.pending)
-        setLocalMessage('Purchase received. We are verifying your Pro access.');
+        setLocalMessage({
+          kind: 'pending',
+          text: 'Purchase received. We are verifying your Pro access.',
+        });
     } catch (error) {
-      if (!error?.userCancelled)
-        setLocalMessage(error?.message || 'Could not complete the request. Please try again.');
+      if (current() && !error?.userCancelled)
+        setLocalMessage({
+          kind: 'error',
+          text: error?.message || 'Could not complete the request. Please try again.',
+        });
     } finally {
-      setWorking(false);
+      if (current()) setWorking(false);
     }
   };
   const text = (copy, style) => (
@@ -83,7 +111,7 @@ export default function SubscriptionPanel({ visible, onClose, onSignIn }) {
           <Text style={{ color: theme.accent, fontSize: 22, fontWeight: '700' }}>Sync Pro</Text>
         </View>
         <Text style={[styles.title, { color: theme.text }]}>
-          {subscription.isPro ? 'Your routines, backed up.' : 'Keep your training with you.'}
+          {subscription.isPro ? 'Your Sync Pro membership.' : 'Keep your training with you.'}
         </Text>
         {text(
           'Back up your routines, activity and profile, sync them across your devices, and remove all ads.',
@@ -93,7 +121,9 @@ export default function SubscriptionPanel({ visible, onClose, onSignIn }) {
         )}
         {subscription.isPro &&
           text(
-            `Cloud access is active${subscription.entitlement?.expires_at ? ` until ${new Date(subscription.entitlement.expires_at).toLocaleDateString()}` : ''}.`,
+            subscription.accessVerified
+              ? `Pro access is verified${subscription.entitlement?.expires_at ? ` until ${new Date(subscription.entitlement.expires_at).toLocaleDateString()}` : ''}. Check Cloud backup in Profile for the latest sync status.`
+              : 'Your Pro membership is active, but cloud access has not been verified. Refresh access before syncing. Your records remain on this device.',
             { color: theme.accent, fontWeight: '600' },
           )}
         {subscription.pending &&
@@ -150,9 +180,11 @@ export default function SubscriptionPanel({ visible, onClose, onSignIn }) {
             {subscription.ready &&
               !subscription.configured &&
               text(
-                subscription.requiresNativeBuild
-                  ? 'Purchases will be available after updating this app build.'
-                  : 'Subscriptions are not available for purchase yet. Your free features are ready to use.',
+                subscription.requiresRestart
+                  ? 'Close Sync completely and reopen it to finish switching accounts before using purchases.'
+                  : subscription.requiresNativeBuild
+                    ? 'Purchases will be available after updating this app build.'
+                    : 'Subscriptions are not available for purchase yet. Your free features are ready to use.',
               )}
             {subscription.ready &&
               subscription.configured &&
@@ -198,12 +230,12 @@ export default function SubscriptionPanel({ visible, onClose, onSignIn }) {
           </>
         )}
         {busy && <ActivityIndicator color={theme.accent} style={{ marginTop: 14 }} />}
-        {(localMessage || subscription.error) && (
+        {(subscription.error || localCopy) && (
           <Text
             accessibilityRole="alert"
             style={[styles.body, { color: theme.text, marginTop: 16 }]}
           >
-            {localMessage || subscription.error}
+            {subscription.error || localCopy}
           </Text>
         )}
         <View style={styles.legal}>

@@ -1,0 +1,73 @@
+{
+  "recordType": "Root tested JS recovery source acceptance before native overlay or next distribution",
+  "clientDate": "2026-11-14",
+  "verifiedAtUTC": "2026-11-14T12:59:50.371693+00:00",
+  "baseCommit": "d21a7bdd6014b656ced1da75296138278f8309ad",
+  "sourceTestManifestSHA256": "87919ef3594776e9cb7df3c7e180b02decfa3cd471ef6be2d26dca7776f01e59",
+  "sourceTestFilesSHA256": {
+    "src/components/account/SubscriptionPanel.js": "03cfcb6e7122a9487002f94a9fda6986a9d8180e3ea11e676d382b1c1e3f178a",
+    "src/context/AccountDataContext.js": "92f67b81e79cf52d1cdaa203712565b96dca2c137cda006b9ceeb7ad18059da9",
+    "src/context/RoutineContext.js": "c4565c7743105095ebe0045107a08a72ef408d4f42f8d29d55e275a619626716",
+    "src/lib/accountStore.js": "01eb1061318ef7d48e2474f7d228ff3f318c5de6ee70c3847e4e1bf455cc1c38",
+    "src/lib/backupSync.js": "f7147a4a1be05b267f79b8d8dc3c53d47788d90ed0daecea64f5b9850f5baa85",
+    "src/screens/Explore/ExploreScreen.js": "cfe303068c1a878d2be79169365bb358340f3c97ab7a33403ea7bb80f94f3f2a",
+    "src/screens/Profile/ProfileScreen.js": "92d103ee67ccb29a4902e25fdc91d7a58f43ce13473ef61273cc2af8691e4477",
+    "src/screens/Routine/CreateRoutineScreen.js": "ab39dceecfc3d1150ac9d7218b06a62cffaa9d9087d0e031e9de70ac2c52119f",
+    "src/screens/Routine/hooks/useRoutineForm.js": "84dda1d8d3f93872d8bc16ada7d493c70f5b79db3ee97db4283dd9ff0cee3594",
+    "tests/account-data-provider.test.js": "682a7c67ce391e87c8bc7872b24836e17173e31d3dd6cb8e2c9b820095c31a23",
+    "tests/account-store.test.js": "535a49e43dcf46e0d1b3ced62012331714656d1f73b033712733d81282de666f",
+    "tests/backup-profile-ui.test.js": "157144e85a61e8aa6545205a529decc5aa9222b8d7c392780a18775109342f93",
+    "tests/backup-sync.test.js": "a19f7fb2cf0d3f14e517ad0018147f408e638605257ca1fbd9fc1c97471ebe67",
+    "tests/core-providers.test.js": "63bc1aca6aaaf9d83bb1e378cb30076ba590aa04046c052c2aab9120a9f5d902",
+    "tests/routine-save.test.js": "b5aecd596ec7d1000137f7e0048d94a12b66c3264ab228c4d3a83e7e114f6e4a"
+  },
+  "fullSuite": {
+    "tests": 1109,
+    "pass": 1109,
+    "fail": 0,
+    "skipped": 0,
+    "cancelled": 0,
+    "node": "22.23.4",
+    "isolatedPinnedPGliteVersion": "0.5.16",
+    "logSHA256": "7ceaa9e3656791c77502fa9fc86fcd19b1498c95dbeb73b89d689af6238b84f0"
+  },
+  "recoveryGuards": {
+    "startupRecoveryPinBeforeAutoSyncVerified": true,
+    "ownerDataPreservationVerified": true,
+    "claimScope": "Root source, in-memory fixture and independent review only; actual owner phone recovery copy not inspected",
+    "actualOwnerPhysicalRecoveryCopyObserved": false
+  },
+  "twoIndependentFinalReviewsClean": true,
+  "native17Unchanged": true,
+  "native17CanonicalSHA256": "7ded72fefa9daff1c56334711be88d628b91926f378e8e0514064f0aa25d018a",
+  "runtimeChangedFiles": [
+    "src/components/account/SubscriptionPanel.js",
+    "src/context/AccountDataContext.js",
+    "src/context/RoutineContext.js",
+    "src/lib/accountStore.js",
+    "src/lib/backupSync.js",
+    "src/screens/Explore/ExploreScreen.js",
+    "src/screens/Profile/ProfileScreen.js",
+    "src/screens/Routine/CreateRoutineScreen.js",
+    "src/screens/Routine/hooks/useRoutineForm.js"
+  ],
+  "runtimeFileCount": 164,
+  "newCloudBuildOrAppReviewPerformedForTheseChanges": false,
+  "physicalRecoveryVerified": false,
+  "behavior": [
+    "Preserve existing legacy device copy before startup sync and maintain one transactional latest copy; old journal format remains recoverable.",
+    "Preview same-account saved copies and recover missing/same-ID variant routines locally while retaining current profile/history/media references.",
+    "Recovery retains both copies and persists a manual-choice hold across restarts; recovered records cannot auto-upload.",
+    "Cloud/device conflict previews bind local counter/cloud revision/current account, scope, session, consumer generation and workout through async completion.",
+    "Routine Save waits same-owner durable acknowledgement; storage failure retains editor draft and blocks success navigation.",
+    "Cloud readiness requires admitted engine/verified current scope; expired Pro and older sync requests cannot show stale success."
+  ],
+  "limits": [
+    "Observed old cloud replacement mechanism is reproduced in-memory; actual legacy copy on the physical phone still needs the next in-place app update to inspect.",
+    "No new backend schema/RLS/grant/secret/dependency/native/flag changes; no manual Pro grant.",
+    "These source tests do not claim acoustic output, subscribed MusicKit, cross-device restore, new TestFlight delivery or public release."
+  ],
+  "safeEvidenceStatus": "Source verified; next native overlay, distribution and physical recovery pending",
+  "sourceStatus": "All15 tested source/test hashes frozen; private test log and source manifest retained",
+  "privateEvidenceSHA256": "941f5263a0b6958715bf32fe6e44ea3cd423fb3411f119f1738bd1f781242a34"
+}

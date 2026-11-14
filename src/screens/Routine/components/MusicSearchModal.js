@@ -11,6 +11,7 @@ import {
   StyleSheet,
 } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useIsFocused } from '@react-navigation/native';
 import { useTheme } from '../../../context/ThemeContext';
 import { usePlatformContext } from '../../../context/PlatformContext';
 import { useMusicSearch } from '../../../hooks/useMusicSearch';
@@ -18,7 +19,9 @@ import { loadDeviceMusic } from '../../../services/deviceMusicLibrary';
 import GlassSurface from '../../../components/common/GlassSurface';
 import { DEFAULT_VOICES } from './musicSearch/constants';
 import { useDeviceMediaPicker } from './musicSearch/useDeviceMediaPicker';
+import { WEB_MEDIA_IMPORT_AVAILABLE } from '../../../services/mediaImport/config';
 import useSpotifyConnection from '../../Profile/hooks/useSpotifyConnection';
+import { useAppleMusicConnection } from '../../../context/AppleMusicConnectionContext';
 import BrowserAudioPanel from './musicSearch/BrowserAudioPanel';
 import {
   Artwork,
@@ -41,40 +44,100 @@ export const MusicSearchModal = ({
   roundWorkPlaylists = {},
   roundRestPlaylists = {},
   isForCountdownSound = false,
+  routineName,
+  routineId,
+  routineSoundtrack,
+  onSelectRoutineSoundtrack,
 }) => {
   const { theme } = useTheme();
+  const screenFocused = useIsFocused();
   const spotify = useSpotifyConnection();
+  const apple = useAppleMusicConnection();
   const platforms = usePlatformContext();
-  const connected = !!platforms.connectedPlatforms.spotify?.connected;
+  const defaultSource =
+    platforms.selectedPlatform &&
+    platforms.connectedPlatforms[platforms.selectedPlatform]?.connected
+      ? platforms.selectedPlatform
+      : platforms.connectedPlatforms.appleMusic?.connected
+        ? 'appleMusic'
+        : platforms.connectedPlatforms.spotify?.connected
+          ? 'spotify'
+          : 'device';
   const music = useMusicSearch({ ...platforms, loadDeviceMusic });
-  const [source, setSource] = useState(
-    isForCountdownSound ? 'voices' : connected ? 'spotify' : 'device',
-  );
+  const [source, setSource] = useState(isForCountdownSound ? 'voices' : defaultSource);
+  const isApplePlayer =
+    !isForCountdownSound &&
+    source === 'appleMusic' &&
+    apple.companionAvailable &&
+    !apple.timedAvailable;
+  const isRemote = !isApplePlayer && (source === 'spotify' || source === 'appleMusic');
+  const connected = !!platforms.connectedPlatforms[source]?.connected;
+  const connection = source === 'appleMusic' ? apple : spotify;
+  const providerName = source === 'appleMusic' ? 'Apple Music' : 'Spotify';
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('track');
   const [playlist, setPlaylist] = useState(null);
   const [deviceLoaded, setDeviceLoaded] = useState(false);
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
+  const pendingApplePlayer = useRef(false);
+  const selectorCleanup = useRef(null);
+  const mounted = useRef(true);
+  const latestPlayer = useRef(null);
+  latestPlayer.current = {
+    apple,
+    isForCountdownSound,
+    screenFocused,
+    routineName,
+    routineSoundtrack,
+    onSelectRoutineSoundtrack,
+  };
+  useEffect(() => {
+    if (!screenFocused) {
+      pendingApplePlayer.current = false;
+      selectorCleanup.current?.();
+      selectorCleanup.current = null;
+    }
+  }, [screenFocused]);
+  useEffect(() => {
+    pendingApplePlayer.current = false;
+    selectorCleanup.current?.();
+    selectorCleanup.current = null;
+  }, [routineId]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      pendingApplePlayer.current = false;
+      selectorCleanup.current?.();
+      selectorCleanup.current = null;
+    };
+  }, []);
   const reset = music.reset;
   useEffect(() => {
     reset();
     setQuery('');
     setPlaylist(null);
     setDeviceLoaded(false);
-    if (visible) setSource(isForCountdownSound ? 'voices' : connected ? 'spotify' : 'device');
+    setCategory('track');
+    if (visible) {
+      selectorCleanup.current?.();
+      selectorCleanup.current = null;
+      pendingApplePlayer.current = false;
+      setSource(isForCountdownSound ? 'voices' : defaultSource);
+    }
   }, [visible, isForCountdownSound, selectedRoundForSong, reset]);
   useEffect(() => {
-    if (visible && source === 'spotify' && connected) music.loadPlaylists('spotify');
+    if (visible && isRemote && connected) music.loadPlaylists(source);
   }, [visible, source, connected, music.loadPlaylists]);
   useEffect(() => {
-    if (!visible || source !== 'spotify' || !connected) return;
+    if (!visible || !isRemote || !connected) return;
     music.clearSearch();
     const timer = setTimeout(
       () =>
         music.searchMusic(
           query,
-          'spotify',
+          source,
           category === 'all' ? ['track', 'playlist', 'episode'] : [category],
         ),
       300,
@@ -87,10 +150,50 @@ export const MusicSearchModal = ({
     setQuery('');
     setPlaylist(null);
     setDeviceLoaded(false);
+    setCategory('track');
   };
   const close = () => {
+    pendingApplePlayer.current = false;
     music.reset();
     onClose();
+  };
+  const openApplePlayer = () => {
+    const current = latestPlayer.current;
+    if (
+      !mounted.current ||
+      !visibleRef.current ||
+      !current.screenFocused ||
+      current.isForCountdownSound ||
+      !current.apple.companionAvailable ||
+      !current.apple.ready ||
+      typeof current.apple.player?.open !== 'function'
+    )
+      return;
+    pendingApplePlayer.current = true;
+    music.reset();
+    onClose();
+  };
+  const finishPlayerHandoff = () => {
+    const requested = pendingApplePlayer.current;
+    pendingApplePlayer.current = false;
+    const current = latestPlayer.current;
+    if (
+      requested &&
+      mounted.current &&
+      !visibleRef.current &&
+      current.screenFocused &&
+      !current.isForCountdownSound &&
+      current.apple.companionAvailable &&
+      current.apple.ready
+    ) {
+      if (typeof current.onSelectRoutineSoundtrack === 'function') {
+        selectorCleanup.current = current.apple.openSoundtrackPicker?.({
+          routineName: current.routineName,
+          selection: current.routineSoundtrack,
+          onSelect: current.onSelectRoutineSoundtrack,
+        });
+      } else current.apple.player?.open?.();
+    }
   };
   const choose = useCallback(
     (item) => {
@@ -110,14 +213,17 @@ export const MusicSearchModal = ({
   ];
   const openPlaylist = (item) => {
     setPlaylist(item);
-    music.loadPlaylistTracks(item.id, 'spotify');
+    music.loadPlaylistTracks(item.id, source);
   };
   const renderTrack = (item, index) => (
     <MusicRow
       key={`${item.id || item.uri}-${index}`}
       item={item}
       selected={
-        item.type === 'playlist' ? selectedPlaylist?.id === item.id : selectedSong?.id === item.id
+        item.type === 'playlist'
+          ? selectedPlaylist?.id === item.id &&
+            (!selectedPlaylist.platform || selectedPlaylist.platform === item.platform)
+          : selectedSong?.uri === item.uri
       }
       actionIcon={item.type === 'playlist' ? 'chevron-forward' : 'add'}
       onPress={() => (item.type === 'playlist' ? openPlaylist(item) : choose(item))}
@@ -130,8 +236,17 @@ export const MusicSearchModal = ({
       ]
     : [
         { id: 'device', label: 'Device', icon: 'phone-portrait-outline' },
-        { id: 'spotify', label: 'Spotify', icon: 'musical-notes-outline' },
-        { id: 'browser', label: 'Browser', icon: 'globe-outline' },
+        ...(spotify.available
+          ? [{ id: 'spotify', label: 'Spotify', icon: 'musical-notes-outline' }]
+          : []),
+        ...(apple.timedAvailable || apple.companionAvailable
+          ? [{ id: 'appleMusic', label: 'Apple Music', icon: 'logo-apple' }]
+          : []),
+        {
+          id: 'browser',
+          label: WEB_MEDIA_IMPORT_AVAILABLE ? 'Browser' : 'Find audio',
+          icon: 'globe-outline',
+        },
       ];
   const deviceTracks = music.popularSongs.filter((item) =>
     [item.name, item.artist].some((text) =>
@@ -139,7 +254,13 @@ export const MusicSearchModal = ({
     ),
   );
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={close}
+      onDismiss={finishPlayerHandoff}
+    >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={[styles.overlay, { backgroundColor: theme.modalOverlay }]}
@@ -156,13 +277,19 @@ export const MusicSearchModal = ({
               <Text
                 style={{ color: theme.text, fontSize: 25, fontWeight: '600', letterSpacing: -0.6 }}
               >
-                {isForCountdownSound
-                  ? 'Choose a sound'
-                  : `${songType === 'rest' ? 'Rest' : 'Work'} music`}
+                {isApplePlayer
+                  ? 'Apple Music'
+                  : isForCountdownSound
+                    ? 'Choose a sound'
+                    : `${songType === 'rest' ? 'Rest' : 'Work'} music`}
               </Text>
               {!isForCountdownSound && (
                 <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 5 }}>
-                  Round {String(selectedRoundForSong || 1).padStart(2, '0')}
+                  {isApplePlayer
+                    ? onSelectRoutineSoundtrack
+                      ? 'Routine music · all rounds'
+                      : 'Songs and playlists for your workout'
+                    : `Round ${String(selectedRoundForSong || 1).padStart(2, '0')}`}
                 </Text>
               )}
             </View>
@@ -177,7 +304,23 @@ export const MusicSearchModal = ({
             </Pressable>
           </View>
           <PickerTabs items={sources} value={source} onChange={changeSource} />
-          {source === 'browser' ? (
+          {isApplePlayer ? (
+            <View style={{ paddingTop: 12, paddingBottom: 16, gap: 14 }}>
+              <Text style={{ color: theme.textSecondary, fontSize: 13, lineHeight: 20 }}>
+                {onSelectRoutineSoundtrack
+                  ? 'Save a song or playlist for this routine, then press Play to listen. Music plays continuously across rounds; your chosen alerts briefly pause it.'
+                  : 'Choose songs or a playlist in the Apple Music player, then press Play. Your selected alerts briefly pause music. This player does not assign songs to rounds.'}
+              </Text>
+              <PrimaryAction
+                label={
+                  onSelectRoutineSoundtrack ? 'Choose routine music' : 'Open Apple Music player'
+                }
+                icon="logo-apple"
+                disabled={!apple.ready}
+                onPress={openApplePlayer}
+              />
+            </View>
+          ) : source === 'browser' ? (
             visible && <BrowserAudioPanel picker={picker} />
           ) : (
             <ScrollView
@@ -277,12 +420,15 @@ export const MusicSearchModal = ({
                   )}
                 </>
               )}
-              {source === 'spotify' &&
+              {isRemote &&
                 (!connected ? (
                   <PickerState
-                    title="Connect Spotify to choose songs and playlists."
-                    onRetry={spotify.connect}
-                    actionLabel={spotify.connecting ? 'Connecting…' : 'Connect Spotify'}
+                    title={`Connect ${providerName} to choose songs and playlists.`}
+                    error={connection.error}
+                    onRetry={
+                      connection.connecting || !connection.ready ? undefined : connection.connect
+                    }
+                    actionLabel={connection.connecting ? 'Connecting…' : `Connect ${providerName}`}
                   />
                 ) : playlist ? (
                   <>
@@ -294,7 +440,7 @@ export const MusicSearchModal = ({
                         alignItems: 'center',
                         paddingVertical: 15,
                       }}
-                      accessibilityLabel="Back to Spotify library"
+                      accessibilityLabel={`Back to ${providerName} library`}
                     >
                       <Ionicons name="chevron-back" size={18} color={theme.accent} />
                       <Text style={{ color: theme.accent, fontSize: 13 }}>Library</Text>
@@ -323,7 +469,7 @@ export const MusicSearchModal = ({
                       }
                       icon="albums-outline"
                       disabled={selectedPlaylist?.id === playlist.id}
-                      onPress={() => choose({ ...playlist, type: 'playlist', platform: 'spotify' })}
+                      onPress={() => choose({ ...playlist, type: 'playlist', platform: source })}
                     />
                     <View style={{ height: 10 }} />
                     {music.loadingPlaylistTracks ||
@@ -335,7 +481,7 @@ export const MusicSearchModal = ({
                         title="No playable tracks in this playlist."
                         onRetry={
                           music.tracksError
-                            ? () => music.loadPlaylistTracks(playlist.id, 'spotify')
+                            ? () => music.loadPlaylistTracks(playlist.id, source)
                             : undefined
                         }
                       />
@@ -354,7 +500,7 @@ export const MusicSearchModal = ({
                       items={[
                         { id: 'track', label: 'Songs' },
                         { id: 'playlist', label: 'Playlists' },
-                        { id: 'episode', label: 'Episodes' },
+                        ...(source === 'spotify' ? [{ id: 'episode', label: 'Episodes' }] : []),
                       ]}
                       value={category}
                       onChange={setCategory}
@@ -367,7 +513,7 @@ export const MusicSearchModal = ({
                           title="No results. Try another search."
                           onRetry={
                             music.searchError
-                              ? () => music.searchMusic(query, 'spotify', [category])
+                              ? () => music.searchMusic(query, source, [category])
                               : undefined
                           }
                         />
@@ -395,7 +541,7 @@ export const MusicSearchModal = ({
                             error={music.playlistError}
                             title="No saved playlists. Search for music above."
                             onRetry={
-                              music.playlistError ? () => music.loadPlaylists('spotify') : undefined
+                              music.playlistError ? () => music.loadPlaylists(source) : undefined
                             }
                           />
                         ) : (

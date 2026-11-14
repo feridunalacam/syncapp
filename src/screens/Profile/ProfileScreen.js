@@ -1,5 +1,7 @@
 import Surface from '../../components/common/Surface';
 import SpotifyDevicePicker from '../../components/common/SpotifyDevicePicker';
+import MusicServicesPanel from '../../components/common/MusicServicesPanel';
+import { useAppleMusicConnection } from '../../context/AppleMusicConnectionContext';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -30,6 +32,7 @@ import ScreenWrapper from '../../components/common/ScreenWrapper';
 import ScreenHeader from '../../components/common/ScreenHeader';
 import GlassSurface from '../../components/common/GlassSurface';
 import Sheet from '../../components/common/Sheet';
+import OpenSourceNotices from '../../components/common/OpenSourceNotices';
 import useProfileData from './hooks/useProfileData';
 import SpotifyLogo from './components/SpotifyLogo';
 import useSpotifyConnection from './hooks/useSpotifyConnection';
@@ -46,15 +49,35 @@ export default function ProfileScreen() {
   const { posts, addPost, deletePost } = usePostContext();
   const profile = useProfileData();
   const spotify = useSpotifyConnection();
+  const apple = useAppleMusicConnection();
   const [sheet, setSheet] = useState(null);
   const [caption, setCaption] = useState('');
   const [routineId, setRoutineId] = useState(null);
   const [category, setCategory] = useState('sport');
   const [cloudBusy, setCloudBusy] = useState(false);
+  const [backupReview, setBackupReview] = useState({ preview: null, error: null });
+  const [recoveryReview, setRecoveryReview] = useState({ preview: null, error: null });
   const [privacyBusy, setPrivacyBusy] = useState(false);
+  const accountKey = `${auth.user?.id || ''}:${subscription.scope?.lane || ''}:${subscription.scope?.namespace || ''}:${subscription.scope?.epoch ?? ''}`;
+  const backupSafetyRef = useRef(null);
+  backupSafetyRef.current = {
+    accountKey,
+    active: !!(workout?.isWorkoutRunning || workout?.isMusicPlaying || workout?.isAudioSyncing),
+  };
+  useEffect(() => {
+    setBackupReview({ preview: null, error: null });
+    setRecoveryReview({ preview: null, error: null });
+    setCloudBusy(false);
+    setSheet((current) =>
+      current === 'cloud-conflict' || current === 'device-recovery' ? null : current,
+    );
+  }, [accountKey]);
   const adPrivacyBusy = privacyBusy || ads.privacyOptionsBusy;
+  const adPrivacyEnabledRef = useRef(false);
+  adPrivacyEnabledRef.current = ads.adsEnabled === true;
   const privacySafeRef = useRef(false);
   privacySafeRef.current =
+    adPrivacyEnabledRef.current &&
     focused &&
     ads.appActive === true &&
     sheet === null &&
@@ -62,6 +85,7 @@ export default function ProfileScreen() {
     !auth.recoveryMode &&
     !auth.error &&
     !spotify.connecting &&
+    !apple.connecting &&
     workout?.isWorkoutRunning === false &&
     workout?.isMusicPlaying === false &&
     workout?.isAudioSyncing === false;
@@ -72,7 +96,7 @@ export default function ProfileScreen() {
     [],
   );
   const openAdPrivacy = async () => {
-    if (adPrivacyBusy) return;
+    if (!adPrivacyEnabledRef.current || adPrivacyBusy) return;
     if (workout.isWorkoutRunning || workout.isMusicPlaying || workout.isAudioSyncing) {
       Alert.alert(
         'Ad privacy choices',
@@ -103,15 +127,18 @@ export default function ProfileScreen() {
     }
   };
   const accountAction = async (action, success) => {
-    if (cloudBusy) return;
+    if (cloudBusy || backupSafetyRef.current.accountKey !== accountKey) return;
+    const startedFor = accountKey;
     setCloudBusy(true);
     try {
-      await action();
-      if (success) Alert.alert(success);
+      const result = await action();
+      if (success && result !== false && backupSafetyRef.current.accountKey === startedFor)
+        Alert.alert(success);
     } catch (error) {
-      Alert.alert('Could not complete this action', error?.message || 'Please try again.');
+      if (backupSafetyRef.current.accountKey === startedFor)
+        Alert.alert('Could not complete this action', error?.message || 'Please try again.');
     } finally {
-      setCloudBusy(false);
+      if (backupSafetyRef.current.accountKey === startedFor) setCloudBusy(false);
     }
   };
   const importDeviceData = () =>
@@ -130,77 +157,211 @@ export default function ProfileScreen() {
     ? 'Sign in to keep your data with your account.'
     : !subscription.isPro
       ? 'Sync Pro backs up your routines and activity across devices.'
-      : cloud.status === 'syncing'
-        ? 'Syncing your private backup…'
-        : cloud.status === 'paused'
-          ? 'Cloud sync will continue after your workout.'
-          : cloud.status === 'conflict'
-            ? 'Your backup changed on another device. Choose which version to keep.'
-            : cloud.status === 'error' || cloud.status === 'offline'
-              ? (typeof cloud.error === 'string' ? cloud.error : cloud.error?.message) ||
-                'Could not sync. Your data is saved on this device.'
-              : cloud.lastSyncedAt && Number.isFinite(new Date(cloud.lastSyncedAt).getTime())
-                ? `Last synced ${new Date(cloud.lastSyncedAt).toLocaleString()}`
-                : 'Your private cloud backup is ready.';
-  const resolveConflict = (choice) =>
+      : !subscription.accessVerified || !subscription.scopeConfirmed
+        ? subscription.error ||
+          'Cloud access has not been verified. Refresh Pro access before syncing. Your data is saved on this device.'
+        : cloud.status === 'syncing'
+          ? 'Syncing your private backup…'
+          : cloud.status === 'paused'
+            ? 'Cloud sync will continue after your workout.'
+            : cloud.status === 'conflict'
+              ? 'Your backup changed on another device. Choose which version to keep.'
+              : cloud.status === 'error' || cloud.status === 'offline'
+                ? (typeof cloud.error === 'string' ? cloud.error : cloud.error?.message) ||
+                  'Could not sync. Your data is saved on this device.'
+                : cloud.status === 'synced' &&
+                    cloud.lastSyncedAt &&
+                    Number.isFinite(new Date(cloud.lastSyncedAt).getTime())
+                  ? `Last synced ${new Date(cloud.lastSyncedAt).toLocaleString()}`
+                  : 'Cloud backup has not synced yet. Your data is saved on this device.';
+  const reviewBackups = () =>
+    accountAction(async () => {
+      const startedFor = accountKey;
+      setBackupReview({ preview: null, error: null });
+      setSheet('cloud-conflict');
+      try {
+        const preview = await cloud.getBackupPreview();
+        if (backupSafetyRef.current.accountKey === startedFor)
+          setBackupReview({ preview, error: null });
+      } catch (error) {
+        if (backupSafetyRef.current.accountKey === startedFor)
+          setBackupReview({
+            preview: null,
+            error: error?.message || 'Could not load the backup comparison. Try again.',
+          });
+      }
+    });
+  const reviewRecovery = () =>
+    accountAction(async () => {
+      const startedFor = accountKey;
+      setRecoveryReview({ preview: null, error: null });
+      setSheet('device-recovery');
+      try {
+        const preview = await cloud.getRecoveryPreview();
+        if (backupSafetyRef.current.accountKey === startedFor)
+          setRecoveryReview({ preview, error: null });
+      } catch (error) {
+        if (backupSafetyRef.current.accountKey === startedFor)
+          setRecoveryReview({
+            preview: null,
+            error: error?.message || 'Could not read the previous device copy. Try again.',
+          });
+      }
+    });
+  const canChangeBackup = (expectedAccount) => {
+    if (backupSafetyRef.current.accountKey !== expectedAccount) return false;
+    if (backupSafetyRef.current.active) {
+      Alert.alert(
+        'Finish your session first',
+        'Finish your workout or stop playback before changing saved records.',
+      );
+      return false;
+    }
+    return true;
+  };
+  const counts = (copy) =>
+    copy
+      ? [
+          [copy.routineCount, 'routine'],
+          [copy.sessionCount, 'session'],
+          [copy.postCount, 'post'],
+        ]
+          .map(([count, label]) => `${count} ${label}${count === 1 ? '' : 's'}`)
+          .join(' · ')
+      : 'No saved cloud backup';
+  const resolveConflict = (choice) => {
+    const preview = backupReview.preview;
+    const startedFor = accountKey;
+    if (!preview || !canChangeBackup(startedFor)) return;
     Alert.alert(
-      choice === 'cloud' ? 'Use your cloud backup?' : 'Use this device’s data?',
       choice === 'cloud'
-        ? 'Replace the account data on this device with your latest cloud backup. A local recovery copy of this device’s data will be kept.'
-        : 'Replace your cloud backup with the account data on this device. Other devices will receive this version when they next sync.',
+        ? 'Replace this device with the cloud copy?'
+        : 'Replace the cloud with this device’s copy?',
+      choice === 'cloud'
+        ? `Cloud: ${counts(preview.cloud)}. This device: ${counts(preview.local)}. Routines saved only on this device will stop appearing. Saved device records are kept under Review previous device copies.`
+        : `This device: ${counts(preview.local)}. Cloud: ${counts(preview.cloud)}. This replaces the cloud backup. Other devices will receive this device’s version when they next sync.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: choice === 'cloud' ? 'Use cloud backup' : 'Use this device',
-          onPress: () =>
-            accountAction(async () => {
-              await cloud.resolveConflict(choice);
-              setSheet(null);
-            }, 'Backup updated'),
+          text: choice === 'cloud' ? 'Replace device data' : 'Replace cloud backup',
+          style: 'destructive',
+          onPress: () => {
+            if (!canChangeBackup(startedFor)) return;
+            return accountAction(async () => {
+              const result = await cloud.resolveConflict(choice, preview.intent);
+              if (backupSafetyRef.current.accountKey !== startedFor) return false;
+              if (result?.status === 'synced') setSheet(null);
+              else
+                setBackupReview({
+                  preview: null,
+                  error:
+                    'The backup was not updated. Reload the comparison after your session ends or the saved copies change.',
+                });
+            });
+          },
         },
       ],
     );
+  };
+  const recoverDeviceCopy = () => {
+    const preview = recoveryReview.preview;
+    const startedFor = accountKey;
+    if (!preview || !canChangeBackup(startedFor)) return;
+    Alert.alert(
+      'Recover and keep both copies?',
+      `Reviewing ${counts(preview)}. Missing saved records will be added to this device. Different routines with the same ID are kept as separate copies, so the same name may appear twice. Current records are kept and exact duplicates are skipped. Local audio and photos are available only if their files still exist. Review the cloud backup before uploading recovered records.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Recover and keep both',
+          onPress: () => {
+            if (!canChangeBackup(startedFor)) return;
+            return accountAction(async () => {
+              const result = await cloud.recoverDeviceCopy(preview.intent);
+              if (backupSafetyRef.current.accountKey !== startedFor) return false;
+              if (result?.status !== 'recovered') {
+                setRecoveryReview({
+                  preview: null,
+                  error: 'Recovery paused. Finish your session, then read the saved copy again.',
+                });
+                return false;
+              }
+              setSheet(null);
+            }, 'Device records recovered. Review Cloud backup to choose what to sync.');
+          },
+        },
+      ],
+    );
+  };
   const ownPosts = posts.filter((p) => p.authorId === 'current-user');
   const section = (title) => (
     <Text style={[styles.section, { color: theme.textSecondary }]}>{title}</Text>
   );
-  const row = (icon, label, detail, onPress, right, divided = false) => (
+  const row = (icon, label, detail, onPress, right, divided = false) => {
+    const Container = onPress ? Pressable : View;
+    return (
+      <Container
+        {...(onPress ? { onPress, accessibilityRole: 'button' } : { accessible: false })}
+        style={[
+          styles.row,
+          divided && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
+        ]}
+      >
+        <View style={[styles.rowIcon, { backgroundColor: theme.cardSecondary }]}>
+          {icon === 'logo-spotify' ? (
+            <SpotifyLogo iconSize={20} showText={false} />
+          ) : (
+            <Ionicons name={icon} size={19} color={theme.textSecondary} />
+          )}
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>{label}</Text>
+          {detail && (
+            <Text
+              style={{ color: theme.textSecondary, fontSize: 11, lineHeight: 17, marginTop: 4 }}
+            >
+              {detail}
+            </Text>
+          )}
+        </View>
+        {right ||
+          (onPress && <Ionicons name="chevron-forward" size={16} color={theme.textTertiary} />)}
+      </Container>
+    );
+  };
+  const button = (label, onPress, { disabled = false } = {}) => (
     <Pressable
       onPress={onPress}
-      disabled={!onPress}
-      style={[
-        styles.row,
-        divided && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.border },
-      ]}
-      accessibilityRole={onPress ? 'button' : undefined}
-    >
-      <View style={[styles.rowIcon, { backgroundColor: theme.cardSecondary }]}>
-        {icon === 'logo-spotify' ? (
-          <SpotifyLogo iconSize={20} showText={false} />
-        ) : (
-          <Ionicons name={icon} size={19} color={theme.textSecondary} />
-        )}
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={{ color: theme.text, fontSize: 15, fontWeight: '500' }}>{label}</Text>
-        {detail && (
-          <Text style={{ color: theme.textSecondary, fontSize: 11, lineHeight: 17, marginTop: 4 }}>
-            {detail}
-          </Text>
-        )}
-      </View>
-      {right ||
-        (onPress && <Ionicons name="chevron-forward" size={16} color={theme.textTertiary} />)}
-    </Pressable>
-  );
-  const button = (label, onPress) => (
-    <Pressable
-      onPress={onPress}
-      style={[styles.button, { backgroundColor: theme.accent }]}
+      disabled={disabled}
+      accessibilityState={{ disabled }}
+      style={[styles.button, { backgroundColor: theme.accent, opacity: disabled ? 0.45 : 1 }]}
       accessibilityRole="button"
     >
       <Text style={{ color: theme.accentText, fontSize: 15, fontWeight: '600' }}>{label}</Text>
     </Pressable>
+  );
+  const copySummary = (title, copy, savedLabel = 'Saved') => (
+    <View style={[styles.backupCopy, { backgroundColor: theme.cardSecondary }]}>
+      <Text style={{ color: theme.text, fontSize: 16, fontWeight: '600' }}>{title}</Text>
+      <Text style={[styles.prose, { color: theme.textSecondary, paddingTop: 8 }]}>
+        {counts(copy)}
+      </Text>
+      {copy && (
+        <>
+          <Text style={[styles.prose, { color: theme.textSecondary }]}>
+            {copy.updatedAt && Number.isFinite(new Date(copy.updatedAt).getTime())
+              ? `${savedLabel} ${new Date(copy.updatedAt).toLocaleString()}`
+              : 'Save time unavailable for this copy.'}
+          </Text>
+          {!!copy.routineNames?.length && (
+            <Text style={[styles.prose, { color: theme.text }]}>
+              {copy.routineNames.slice(0, 5).join(' · ')}
+              {copy.routineNames.length > 5 ? ` · +${copy.routineNames.length - 5} more` : ''}
+            </Text>
+          )}
+        </>
+      )}
+    </View>
   );
   const publish = () => {
     const routine = routines.find((r) => r.id === routineId);
@@ -356,19 +517,32 @@ export default function ProfileScreen() {
                 : !subscription.isPro
                   ? () => setSheet('subscription')
                   : cloud.status === 'conflict'
-                    ? () => setSheet('cloud-conflict')
-                    : () => accountAction(cloud.syncNow),
+                    ? reviewBackups
+                    : !subscription.accessVerified || !subscription.scopeConfirmed
+                      ? () => setSheet('subscription')
+                      : () => accountAction(cloud.syncNow),
             <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>
               {cloud.status === 'syncing' || cloudBusy
                 ? '…'
                 : cloud.status === 'conflict'
                   ? 'Review'
                   : subscription.isPro
-                    ? 'Sync now'
+                    ? !subscription.accessVerified || !subscription.scopeConfirmed
+                      ? 'Check access'
+                      : 'Sync now'
                     : 'Pro'}
             </Text>,
             true,
           )}
+          {!!auth.user &&
+            row(
+              'archive-outline',
+              'Review previous device copies',
+              'Find records kept on this device before cloud restores.',
+              cloud.status === 'syncing' || cloudBusy ? undefined : reviewRecovery,
+              null,
+              true,
+            )}
           {!!auth.user &&
             !!cloud.hasGuestData &&
             !cloud.importComplete &&
@@ -387,24 +561,26 @@ export default function ProfileScreen() {
         </Surface>
         {section('Music')}
         <Surface variant="card" style={[styles.group, { backgroundColor: theme.card }]}>
-          {row(
-            'logo-spotify',
-            'Spotify',
-            spotify.connected
-              ? 'Connected · controls playback on your Spotify device'
-              : spotify.connecting
-                ? 'Connecting…'
-                : 'Connect your music account',
-            spotify.connected
-              ? spotify.disconnect
-              : spotify.ready && !spotify.connecting
-                ? spotify.connect
-                : undefined,
-            <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>
-              {spotify.connected ? 'Disconnect' : spotify.connecting ? '…' : 'Connect'}
-            </Text>,
-          )}
-          <SpotifyDevicePicker />
+          {spotify.available &&
+            row(
+              'logo-spotify',
+              'Spotify',
+              spotify.connected
+                ? 'Connected · controls playback on your Spotify device'
+                : spotify.connecting
+                  ? 'Connecting…'
+                  : 'Connect your music account',
+              spotify.connected
+                ? spotify.disconnect
+                : spotify.ready && !spotify.connecting
+                  ? spotify.connect
+                  : undefined,
+              <Text style={{ color: theme.accent, fontSize: 12, fontWeight: '600' }}>
+                {spotify.connected ? 'Disconnect' : spotify.connecting ? '…' : 'Connect'}
+              </Text>,
+            )}
+          {spotify.available && <SpotifyDevicePicker />}
+          <MusicServicesPanel />
           {row(
             'musical-notes-outline',
             'Device audio',
@@ -438,7 +614,8 @@ export default function ProfileScreen() {
             null,
             true,
           )}
-          {(ads.nativeAvailable || ads.privacyOptionsRequired) &&
+          {ads.adsEnabled === true &&
+            (ads.nativeAvailable || ads.privacyOptionsRequired) &&
             row(
               'options-outline',
               'Ad privacy choices',
@@ -463,6 +640,14 @@ export default function ProfileScreen() {
             'About this version',
             'Routines, music and your Sync account.',
             () => setSheet('about'),
+            null,
+            true,
+          )}
+          {row(
+            'document-text-outline',
+            'Open-source notices',
+            'Software and icon licenses, available offline.',
+            () => setSheet('notices'),
             null,
             true,
           )}
@@ -520,6 +705,7 @@ export default function ProfileScreen() {
         onClose={() => setSheet(null)}
         onManageSubscription={() => setSheet('subscription')}
       />
+      <OpenSourceNotices visible={sheet === 'notices'} onClose={() => setSheet(null)} />
       <SubscriptionPanel
         visible={sheet === 'subscription'}
         onClose={() => setSheet(null)}
@@ -527,26 +713,101 @@ export default function ProfileScreen() {
       />
       <Sheet
         visible={sheet === 'cloud-conflict'}
-        title="Choose your backup"
-        onClose={cloudBusy ? () => {} : () => setSheet(null)}
+        title="Compare your backup copies"
+        onClose={cloudBusy && backupReview.preview ? () => {} : () => setSheet(null)}
       >
-        <Text style={[styles.prose, { color: theme.textSecondary }]}>
-          Your account data changed on another device. Review which version to keep before syncing
-          again.
-        </Text>
-        <Text style={[styles.prose, { color: theme.textSecondary }]}>
-          Use the cloud version to update this device, or keep this device’s version and replace the
-          cloud backup.
-        </Text>
-        {!cloudBusy && (
-          <>
-            {button('Use cloud backup', () => resolveConflict('cloud'))}
-            {button('Use this device', () => resolveConflict('local'))}
-          </>
-        )}
-        {cloudBusy && (
-          <Text style={[styles.prose, { color: theme.textSecondary }]}>Updating your backup…</Text>
-        )}
+        <ScrollView>
+          <Text style={[styles.prose, { color: theme.textSecondary }]}>
+            These copies contain different saved records. Compare routines and save times before
+            choosing which copy replaces the other. Closing this review keeps both unchanged.
+          </Text>
+          {backupReview.preview && (
+            <>
+              {copySummary('On this device', backupReview.preview.local)}
+              {copySummary('In your cloud backup', backupReview.preview.cloud)}
+              <Text style={[styles.prose, { color: theme.textSecondary }]}>
+                Cloud → device replaces the records shown on this device. Device → cloud uploads
+                this device’s records for your other devices.
+              </Text>
+              {backupSafetyRef.current.active && (
+                <Text style={[styles.prose, { color: theme.textSecondary }]}>
+                  Finish your workout or stop playback before changing either copy.
+                </Text>
+              )}
+              {button('Device → cloud: keep this device', () => resolveConflict('local'), {
+                disabled: cloudBusy || backupSafetyRef.current.active,
+              })}
+              {button('Cloud → device: replace device data', () => resolveConflict('cloud'), {
+                disabled:
+                  cloudBusy || backupSafetyRef.current.active || !backupReview.preview.cloud,
+              })}
+            </>
+          )}
+          {backupReview.error && (
+            <Text accessibilityRole="alert" style={[styles.prose, { color: theme.text }]}>
+              {backupReview.error}
+            </Text>
+          )}
+          {!cloudBusy && !backupReview.preview && button('Reload backup comparison', reviewBackups)}
+          {cloudBusy && (
+            <Text style={[styles.prose, { color: theme.textSecondary }]}>
+              {backupReview.preview ? 'Updating your backup…' : 'Loading saved copies…'}
+            </Text>
+          )}
+        </ScrollView>
+      </Sheet>
+      <Sheet
+        visible={sheet === 'device-recovery'}
+        title="Saved device copies"
+        onClose={cloudBusy && recoveryReview.preview ? () => {} : () => setSheet(null)}
+      >
+        <ScrollView>
+          <Text style={[styles.prose, { color: theme.textSecondary }]}>
+            Review records saved on this device before cloud restores. Reviewing or closing this
+            screen keeps the saved copies unchanged.
+          </Text>
+          {recoveryReview.preview && (
+            <>
+              {copySummary('Saved device records', recoveryReview.preview, 'Latest saved copy:')}
+              {recoveryReview.preview.updatedAt && recoveryReview.preview.includesUndatedCopy && (
+                <Text style={[styles.prose, { color: theme.textSecondary }]}>
+                  Includes an earlier device copy whose save time is unavailable.
+                </Text>
+              )}
+              <Text style={[styles.prose, { color: theme.textSecondary }]}>
+                Recover missing records and keep your current records. Different versions of the
+                same routine will both be kept, even if their names match. Exact duplicates are
+                skipped. Nothing is uploaded until you review your cloud backup.
+              </Text>
+              {backupSafetyRef.current.active && (
+                <Text style={[styles.prose, { color: theme.textSecondary }]}>
+                  Finish your workout or stop playback before recovering records.
+                </Text>
+              )}
+              {button('Recover and keep both', recoverDeviceCopy, {
+                disabled: cloudBusy || backupSafetyRef.current.active,
+              })}
+            </>
+          )}
+          {!cloudBusy && !recoveryReview.preview && !recoveryReview.error && (
+            <Text style={[styles.prose, { color: theme.textSecondary }]}>
+              No previous device records are available for this account on this device.
+            </Text>
+          )}
+          {recoveryReview.error && (
+            <>
+              <Text accessibilityRole="alert" style={[styles.prose, { color: theme.text }]}>
+                {recoveryReview.error}
+              </Text>
+              {!cloudBusy && button('Read saved copy again', reviewRecovery)}
+            </>
+          )}
+          {cloudBusy && (
+            <Text style={[styles.prose, { color: theme.textSecondary }]}>
+              {recoveryReview.preview ? 'Recovering device records…' : 'Reading saved device copy…'}
+            </Text>
+          )}
+        </ScrollView>
       </Sheet>
       <Sheet visible={sheet === 'profile'} title="Edit profile" onClose={() => setSheet(null)}>
         <ScrollView keyboardShouldPersistTaps="handled">
@@ -679,8 +940,8 @@ export default function ProfileScreen() {
           a local alert sound.{'\n\n'}2. Choose it in Timer and press Start. You can pause, resume
           or skip intervals. Switching tabs keeps the session running.{'\n\n'}3. Open Activity
           inside Training to review actual session time, then create an image to share.{'\n\n'}
-          Spotify needs an eligible account and an active playback device. Local files play directly
-          in Sync.
+          {spotify.available && 'Spotify needs an eligible account and an active playback device. '}
+          Local files play directly in Sync.
         </Text>
       </Sheet>
       <Sheet visible={sheet === 'about'} title="About Sync" onClose={() => setSheet(null)}>
@@ -688,7 +949,7 @@ export default function ProfileScreen() {
           Sync brings intervals and music together for movement, study and focus.{'\n\n'}Use Sync on
           this device for free, or sign in to keep separate account data. Sync Pro adds private
           cloud backups for routines, activity and profile details across devices, plus no ads.
-          Local audio files and Spotify credentials stay on this device.{'\n\n'}Discover posts are
+          Local audio files and music connections stay on this device.{'\n\n'}Discover posts are
           private saved content, not public online publishing. Manage your membership and account in
           the Account section above.
         </Text>
@@ -762,4 +1023,5 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   prose: { fontSize: 14, lineHeight: 23, paddingBottom: 8 },
+  backupCopy: { padding: 16, borderRadius: 17, marginVertical: 8 },
 });
