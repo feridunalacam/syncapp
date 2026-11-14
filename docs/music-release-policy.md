@@ -1,6 +1,14 @@
 # Apple Music release policy
 
-Decision recorded 12 November 2026: **native Apple Music connection, library access and timer-controlled playback are off in production/preview source**, behind a hard development-only guard. External **Open Apple Music** and owner development remain. The source guard passed independent automated review; a fresh local Simulator Release compiled and passed signature checks with synthetic fixtures. No new installed/UI/public-release result or timed-use permission is established. Historical Store4 and simulator evidence retain their original scope.
+The current reviewed production/preview source enables the **standalone Apple Music companion**. Guests and Free users can browse and explicitly start full-song playback without a Sync account or Pro. Standard playback controls remain available. A saved routine soundtrack is an optional reference with a remembered shuffle choice; selecting or saving it does not start playback, and timer phases do not select songs.
+
+**Automatic timer-controlled Apple Music assignments remain behind the development-only guard.** Public Spotify control and new browser media acquisition also remain off. The companion does not restore the old automatic Work/Rest song-assignment behavior. The precise timed-use permission assessment below remains separate from this manual player.
+
+The later selected-alert implementation pauses owned music, plays the chosen local alert, and resumes only a still-current owner after native cleanup. Off, None and zero-volume alerts do not pause music. The before-Start ad change applies only to an explicit idle-timer action with verified Free access and reusable consent/SDK state; it does not gate music browsing, selection, saving or Play. Pro sells general cloud backup/sync and ad removal. Music metadata and artwork are not passed to ad targeting or creative options. These are source boundaries, not an Apple approval specific to Sync.
+
+TestFlight 1.0.0 (10) contains the earlier basic companion. The subsequent cue, routine-soundtrack, library-artwork and before-Start ad changes are later source checkpoints and must not be inferred to be in that delivered build. Fresh local native17 compilation and unconnected Simulator UI checks are documented separately; subscribed physical-device MusicKit and live library-cover recovery remain unverified.
+
+Historical decision recorded 12 November 2026: the older native connection/library/timed-playback path was disabled in production/preview, with owner development and external Open Apple Music retained. The newer manual companion supersedes that restriction for its own browsing/playback path; it does not re-enable the automatic timed path. Historical Store4 and Simulator evidence retain their original scope.
 
 ## Primary-source basis
 
@@ -12,9 +20,9 @@ This is **not a blanket fitness-app ban**. Apple itself describes fitness soundt
 
 ## Sync's actual monetization and source boundary
 
-Before the guard, guests/Free users could access native Apple Music without Pro. Pro sells cloud backup/sync and ad removal; production ads are off. MusicKit queues full songs, owns authorization and exports no audio; local cues are suppressed. These safeguards do not establish timed-use rights. A separate cloud subscription has neither an express blanket ban nor a safe harbor; access monetization remains use-specific. No current standalone clause literally prohibits mixing with other audio; a code comment is not contract wording.
+In the historical pre-guard snapshot, guests/Free users could access native Apple Music without Pro, production ads were off and local cues were suppressed. Those facts describe that earlier source, not the current selected-alert/ad implementation above. MusicKit still queues full songs, owns authorization and exports no audio. These safeguards do not establish timed-use rights. A separate cloud subscription has neither an express blanket ban nor a safe harbor; access monetization remains use-specific. No current standalone clause literally prohibits mixing with other audio; a code comment is not contract wording.
 
-Before public re-enablement, obtain documented permission/clarification covering the exact scheduled playback and monetization model, review metadata/artwork contexts, and complete subscribed physical-device authorization, revocation, standard-control and interval-transition QA. App ID activation, a working subscriber account, simulator success or a MusicKit API capability alone is insufficient evidence. Re-enablement requires a separately reviewed release change; no terms were accepted or permissions obtained by this research.
+Before re-enabling the automatic timed path, obtain documented permission/clarification covering that exact scheduled playback and monetization model, review metadata/artwork contexts, and complete subscribed physical-device authorization, revocation, standard-control and interval-transition QA. App ID activation, a working subscriber account, Simulator success or a MusicKit API capability alone is insufficient evidence. Re-enabling that path requires a separately reviewed release change; no terms were accepted or permissions obtained by this research.
 
 ## Browser media acquisition decision
 
